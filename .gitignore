@@ -1,0 +1,32 @@
+# Build directories
+build/
+cmake-build-*/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# macOS
+.DS_Store
+
+# IDEs / editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Compiled files
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Toro-generated artifacts
+*.out
