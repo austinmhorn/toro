@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.25)
 
 project(
-    Toro
+    toro
     VERSION 0.1.0
-    DESCRIPTION "The Toro programming language"
+    DESCRIPTION "The toro programming language"
     LANGUAGES CXX
 )
 
@@ -13,6 +13,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_executable(toro
     src/main.cpp
+    src/SourceFile.cpp
 )
 
 target_include_directories(toro

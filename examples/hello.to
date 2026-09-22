@@ -1,0 +1,4 @@
+function main() {
+    message := "Hello, toro!"
+    print(message)
+}

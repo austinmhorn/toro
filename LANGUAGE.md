@@ -4,17 +4,17 @@
 We don't need the full language specification yet. Start with this:
 
 ```markdown
-# Toro Language Design
+# toro Language Design
 
-> This document tracks the evolving design of the Toro programming language.
+> This document tracks the evolving design of the toro programming language.
 
-Toro is currently pre-1.0. Language rules described here may change as the compiler develops.
+toro is currently pre-1.0. Language rules described here may change as the compiler develops.
 
 ---
 
 ## Philosophy
 
-Toro aims to make normal programming simple while allowing explicit control when performance matters.
+toro aims to make normal programming simple while allowing explicit control when performance matters.
 
 Core principles:
 
@@ -29,7 +29,7 @@ Core principles:
 
 ## Basic Syntax
 
-Toro uses brace-delimited blocks.
+toro uses brace-delimited blocks.
 
 Semicolons are not required.
 
@@ -38,6 +38,6 @@ function main() {
     value := 10
 
     if value > 5 {
-        print("Hello, Toro!")
+        print("Hello, toro!")
     }
 }

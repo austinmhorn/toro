@@ -1,4 +1,4 @@
-# Toro Roadmap
+# toro Roadmap
 
 > **Status:** Initial language roadmap  
 > **Scope:** v0.1 → v1.0  
@@ -6,20 +6,20 @@
 
 ---
 
-## 1. Toro's Design Principles
+## 1. toro's Design Principles
 
-Toro should remain guided by a small set of rules throughout development:
+toro should remain guided by a small set of rules throughout development:
 
-1. **Readable over terse.** Toro prefers `function`, `public`, `private`, `handle`, and `stop` when the longer word makes intent clearer.
+1. **Readable over terse.** toro prefers `function`, `public`, `private`, `handle`, and `stop` when the longer word makes intent clearer.
 2. **Simple by default.** Common code should require as little ceremony as possible.
-3. **Explicit when ambiguity matters.** Toro infers obvious types and behavior, but provides explicit syntax such as `x as int` when the programmer needs control.
-4. **Native by default.** Toro compiles to standalone native executables.
+3. **Explicit when ambiguity matters.** toro infers obvious types and behavior, but provides explicit syntax such as `x as int` when the programmer needs control.
+4. **Native by default.** toro compiles to standalone native executables.
 5. **Safe defaults, controlled escape hatches.** Bounds checking, non-nullable types, deterministic ownership, and explicit casts should be the normal path; lower-level control can be added where needed.
-6. **Abstraction is allowed. Hidden cost must be explainable.** Classes, virtual dispatch, generics, and closures are useful; Toro should make their runtime cost observable.
+6. **Abstraction is allowed. Hidden cost must be explainable.** Classes, virtual dispatch, generics, and closures are useful; toro should make their runtime cost observable.
 7. **Performance is a contract, not a wish.** `performance function` must change what code is allowed to do and enable stronger compiler/runtime guarantees.
 8. **Stable project structure.** Imports should remain stable when files move inside a project.
 9. **Private by default.** Public API is deliberate and uses the `public` keyword.
-10. **Grow the language deliberately.** A feature should solve a real problem before becoming part of Toro.
+10. **Grow the language deliberately.** A feature should solve a real problem before becoming part of toro.
 
 ---
 
@@ -38,7 +38,7 @@ function main() {
     explicit_price: dec = 24.50
 
     if x > 10 {
-        print("Toro works!")
+        print("toro works!")
     }
 }
 ```
@@ -174,7 +174,7 @@ handle message {
 }
 ```
 
-`handle` is Toro's general pattern-handling construct, not only an error-handling keyword.
+`handle` is toro's general pattern-handling construct, not only an error-handling keyword.
 
 ---
 
@@ -182,18 +182,18 @@ handle message {
 
 ---
 
-## v0.1 — Toro Exists
+## v0.1 — toro Exists
 
 ### Theme
 
-**Build the smallest complete compiler that can turn useful Toro source into a native executable.**
+**Build the smallest complete compiler that can turn useful toro source into a native executable.**
 
 The goal of v0.1 is not feature completeness. The goal is proving the complete compilation pipeline.
 
 ### Compiler pipeline
 
 ```text
-Toro source
+toro source
     ↓
 Lexer
     ↓
@@ -324,7 +324,7 @@ function main() {
     x := add(10, 20)
 
     if x > 20 {
-        print("Toro works!")
+        print("toro works!")
     }
 }
 ```
@@ -338,16 +338,16 @@ toro run main.to
 prints:
 
 ```text
-Toro works!
+toro works!
 ```
 
 ---
 
-## v0.2 — Functions Feel Like Toro
+## v0.2 — Functions Feel Like toro
 
 ### Theme
 
-**Complete Toro's function model and make APIs pleasant to call.**
+**Complete toro's function model and make APIs pleasant to call.**
 
 ### Features
 
@@ -400,7 +400,7 @@ connect("localhost", secure: true)
 
 ### Theme
 
-**Deliver Toro's full everyday object model with deterministic automatic lifetime management.**
+**Deliver toro's full everyday object model with deterministic automatic lifetime management.**
 
 ### Struct model
 
@@ -427,7 +427,7 @@ When the target of a weak reference is destroyed, the weak reference becomes `nu
 
 ### Lifecycle
 
-Toro's deterministic cleanup method is:
+toro's deterministic cleanup method is:
 
 ```toro
 function destroy() {
@@ -476,7 +476,7 @@ Structs receive a generated field initializer unless overridden later by languag
 
 ### Exit criteria
 
-- Normal Toro class code requires no manual free/delete.
+- Normal toro class code requires no manual free/delete.
 - Deterministic `destroy()` behavior works reliably.
 - Common parent/child graphs can use weak backreferences safely.
 
@@ -536,7 +536,7 @@ class Dog : Animal implements Drawable {
 
 ### Exit criteria
 
-Toro can express traditional OO designs while keeping class inheritance trees structurally simple.
+toro can express traditional OO designs while keeping class inheritance trees structurally simple.
 
 ---
 
@@ -544,7 +544,7 @@ Toro can express traditional OO designs while keeping class inheritance trees st
 
 ### Theme
 
-**Bring C++-class reusable abstraction to Toro without template metaprogramming complexity.**
+**Bring C++-class reusable abstraction to toro without template metaprogramming complexity.**
 
 ### Generic features
 
@@ -600,7 +600,7 @@ Define and document:
 
 ### Exit criteria
 
-Toro has efficient reusable containers and generic algorithms with concrete native specialization.
+toro has efficient reusable containers and generic algorithms with concrete native specialization.
 
 ---
 
@@ -637,7 +637,7 @@ Potential shorthand may be explored later, but should not be added merely for te
 
 ### Compiler/runtime goals
 
-Toro should be able to explain whether a closure:
+toro should be able to explain whether a closure:
 
 - Captures nothing
 - Captures by value/reference
@@ -655,7 +655,7 @@ Closures are practical for everyday APIs while their allocation/lifetime costs r
 
 ### Theme
 
-**Make Toro feel like one coherent toolchain rather than only a compiler.**
+**Make toro feel like one coherent toolchain rather than only a compiler.**
 
 ### Project structure
 
@@ -687,7 +687,7 @@ toro fmt
 - Official formatter
 - Deterministic output
 - Minimal configuration initially
-- Formatting should reflect Toro's readability philosophy
+- Formatting should reflect toro's readability philosophy
 
 ### Testing
 
@@ -726,7 +726,7 @@ help: specify the intended type:
 
 ### Exit criteria
 
-A new developer can create, format, test, build, and run a Toro project using only the `toro` CLI.
+A new developer can create, format, test, build, and run a toro project using only the `toro` CLI.
 
 ---
 
@@ -734,7 +734,7 @@ A new developer can create, format, test, build, and run a Toro project using on
 
 ### Theme
 
-**Introduce Toro's defining performance contract.**
+**Introduce toro's defining performance contract.**
 
 `performance function` is not an optimization hint. It is a restricted execution model whose guarantees are enforced by the compiler.
 
@@ -775,7 +775,7 @@ Because the compiler knows more about execution behavior, it may safely apply st
 
 ### Temporary storage
 
-Explore a Toro-native temporary allocation model for performance functions, such as frame/arena storage that can be discarded as a unit when execution exits the performance scope.
+Explore a toro-native temporary allocation model for performance functions, such as frame/arena storage that can be discarded as a unit when execution exits the performance scope.
 
 Exact syntax should be chosen from implementation experience rather than guessed now.
 
@@ -809,11 +809,11 @@ toro build --explain-performance
 
 `performance function` does **not** promise good algorithmic complexity.
 
-Toro can guarantee execution characteristics; it cannot make an O(n³) algorithm inherently fast.
+toro can guarantee execution characteristics; it cannot make an O(n³) algorithm inherently fast.
 
 ### Exit criteria
 
-Performance-sensitive Toro code can receive useful compiler-enforced guarantees that ordinary functions do not provide.
+Performance-sensitive toro code can receive useful compiler-enforced guarantees that ordinary functions do not provide.
 
 ---
 
@@ -821,7 +821,7 @@ Performance-sensitive Toro code can receive useful compiler-enforced guarantees 
 
 ### Theme
 
-**Make Toro practical outside toy programs and stabilize everything needed for a public ecosystem.**
+**Make toro practical outside toy programs and stabilize everything needed for a public ecosystem.**
 
 ### C interoperability
 
@@ -829,7 +829,7 @@ Design a clear C ABI bridge for:
 
 - Calling C functions
 - Linking C libraries
-- Exposing Toro functions to C where practical
+- Exposing toro functions to C where practical
 - Mapping primitive layouts
 - Explicit raw-pointer boundaries
 
@@ -837,7 +837,7 @@ Low-level/unsafe syntax should only be added if implementation experience proves
 
 ### Explicit-width numeric control
 
-Normal Toro remains intuitive:
+Normal toro remains intuitive:
 
 ```toro
 count := 10
@@ -850,7 +850,7 @@ The exact naming of low-level decimal/floating representations should be finaliz
 
 ### Package management
 
-Introduce dependency resolution through the Toro CLI.
+Introduce dependency resolution through the toro CLI.
 
 Possible workflow:
 
@@ -876,7 +876,7 @@ Do not build registry infrastructure before the package format and dependency re
 - Identify accidental inconsistencies
 - Deprecate experimental syntax
 - Improve error compatibility/migration messages
-- Establish semantic-versioning expectations for Toro packages
+- Establish semantic-versioning expectations for toro packages
 
 ### Performance validation
 
@@ -897,7 +897,7 @@ v0.9 is the **1.0 release candidate line**. New language features should largely
 
 ---
 
-## v1.0 — Toro Stable
+## v1.0 — toro Stable
 
 ### Theme
 
@@ -905,7 +905,7 @@ v0.9 is the **1.0 release candidate line**. New language features should largely
 
 ### v1.0 guarantees
 
-Toro 1.0 should provide:
+toro 1.0 should provide:
 
 - A documented stable grammar
 - A documented type system
@@ -954,22 +954,22 @@ Before v1.0, publish:
 - C interop guide
 - Performance-function guide
 - Memory-management/ARC guide
-- Migration guide from pre-1.0 Toro
+- Migration guide from pre-1.0 toro
 - Examples repository
 
 ### Platform goal
 
-The exact support matrix should be based on real implementation bandwidth, but Toro 1.0 should avoid claiming platforms that are not continuously tested.
+The exact support matrix should be based on real implementation bandwidth, but toro 1.0 should avoid claiming platforms that are not continuously tested.
 
 A reasonable initial target is desktop/server native compilation on major 64-bit platforms, expanding only when CI and runtime support are reliable.
 
 ### Performance goal
 
-Do not define Toro 1.0 success as "beats C++ in every benchmark."
+Do not define toro 1.0 success as "beats C++ in every benchmark."
 
 The goal is:
 
-> Toro should produce predictable native code, offer low-overhead abstractions, and give programmers a clear path from simple application code to tightly controlled performance-sensitive code without changing languages.
+> toro should produce predictable native code, offer low-overhead abstractions, and give programmers a clear path from simple application code to tightly controlled performance-sensitive code without changing languages.
 
 ### Stability promise
 
@@ -985,7 +985,7 @@ After 1.0:
 
 # Features Intentionally Deferred Beyond v1.0
 
-These may be excellent Toro features, but they should not delay 1.0 unless implementation experience demonstrates that one is essential:
+These may be excellent toro features, but they should not delay 1.0 unless implementation experience demonstrates that one is essential:
 
 - `async` / `await`
 - Native coroutine model
@@ -1000,11 +1000,11 @@ These may be excellent Toro features, but they should not delay 1.0 unless imple
 - Built-in actor model
 - Hot reload
 - JIT compiler
-- Self-hosting Toro compiler
+- Self-hosting toro compiler
 - Dedicated LLVM backend if the C backend remains adequate through early development
 - Full IDE/debugger implementation
 
-These should be evaluated from real Toro programs rather than speculative design.
+These should be evaluated from real toro programs rather than speculative design.
 
 ---
 
@@ -1012,7 +1012,7 @@ These should be evaluated from real Toro programs rather than speculative design
 
 ## Initial compiler language
 
-Implement the first Toro compiler in **C++23**.
+Implement the first toro compiler in **C++23**.
 
 Reasons:
 
@@ -1020,16 +1020,16 @@ Reasons:
 - Fine control over memory and data representation
 - Easy integration with Clang/toolchains
 - Suitable for building lexer/parser/AST/compiler infrastructure
-- Lets Toro's implementation eventually serve as a direct comparison point against the complexity Toro intends to simplify
+- Lets toro's implementation eventually serve as a direct comparison point against the complexity toro intends to simplify
 
 ## Initial backend
 
 Use a C backend first:
 
 ```text
-Toro AST
+toro AST
    ↓
-Typed Toro IR / semantic representation
+Typed toro IR / semantic representation
    ↓
 Generated C
    ↓
@@ -1038,23 +1038,23 @@ clang
 Native executable
 ```
 
-This keeps early compiler engineering focused on **Toro** rather than register allocation, instruction selection, object-file formats, and platform ABIs.
+This keeps early compiler engineering focused on **toro** rather than register allocation, instruction selection, object-file formats, and platform ABIs.
 
 The frontend should avoid depending on C-specific semantics so that another backend can be introduced later.
 
 Potential future backend:
 
 ```text
-Toro frontend
+toro frontend
    ↓
-Toro IR
+toro IR
    ↓
 LLVM backend
    ↓
 x86-64 / ARM64 / ...
 ```
 
-Do not switch merely because LLVM is more impressive. Switch when the existing backend materially limits Toro's goals.
+Do not switch merely because LLVM is more impressive. Switch when the existing backend materially limits toro's goals.
 
 ---
 
@@ -1100,7 +1100,7 @@ Do not add syntax solely because another language has it.
 
 If a basic feature requires a long explanation before ordinary use makes sense, simplify it.
 
-### 3. Can Toro explain its cost?
+### 3. Can toro explain its cost?
 
 Especially for:
 
@@ -1112,7 +1112,7 @@ Especially for:
 - Generic specialization
 - Performance boundaries
 
-Toro should eventually make these costs inspectable rather than mysterious.
+toro should eventually make these costs inspectable rather than mysterious.
 
 ---
 
@@ -1120,7 +1120,7 @@ Toro should eventually make these costs inspectable rather than mysterious.
 
 | Version | Primary milestone |
 |---|---|
-| **v0.1** | End-to-end native compiler; basic Toro programs run |
+| **v0.1** | End-to-end native compiler; basic toro programs run |
 | **v0.2** | Full function-call ergonomics and first-class functions |
 | **v0.3** | ARC, weak references, construction, `destroy()` |
 | **v0.4** | Inheritance, interfaces, virtual dispatch |
@@ -1135,12 +1135,12 @@ Toro should eventually make these costs inspectable rather than mysterious.
 
 # The First Goal
 
-Before worrying about v0.2 through v1.0, Toro has one job:
+Before worrying about v0.2 through v1.0, toro has one job:
 
 ```bash
 toro run main.to
 ```
 
-must successfully compile and execute a real Toro program.
+must successfully compile and execute a real toro program.
 
 Everything else builds from there.
