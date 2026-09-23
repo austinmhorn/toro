@@ -118,6 +118,26 @@ Generate C after parsing and checking a source file:
 ./build/toro emit-c examples/hello.toro
 ```
 
+Build a native executable with the host C compiler:
+
+```bash
+./build/toro build examples/hello.toro
+./build/toro build examples/hello.toro -o /tmp/toro-hello
+```
+
+Without `-o`, the executable is written to the current directory using the
+source filename stem, such as `./hello`. The native toolchain prefers `clang`
+and falls back to `cc`, compiling the generated source as C11.
+
+Build and run through temporary artifacts:
+
+```bash
+./build/toro run examples/hello.toro
+```
+
+`run` forwards program output and returns its exit status. Its temporary C source
+and executable are removed after the program finishes or compilation fails.
+
 The `check` command reports name-resolution errors, type mismatches, invalid
 conditions and returns, bad construction fields, invalid member access, method
 argument errors, and visibility violations. Construction supplies zero values

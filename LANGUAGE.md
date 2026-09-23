@@ -318,6 +318,14 @@ overloads, conversions, interfaces, inheritance, collections, and ARC are not
 lowered yet. Encountering one of these otherwise valid features produces a
 backend diagnostic.
 
+The native toolchain can compile this generated source as C11. `toro build`
+writes a persistent executable, defaulting to the source filename stem in the
+current directory, while `toro run` compiles and executes from an isolated
+temporary directory. The latter forwards standard output and error, preserves a
+normal program exit status, reports compiler and process failures separately,
+and removes its generated source and executable afterward. Compiler discovery
+prefers `clang` and otherwise uses `cc` from `PATH`.
+
 ### Function and method overloads
 
 Functions and methods may share a name when their ordered parameter types or
