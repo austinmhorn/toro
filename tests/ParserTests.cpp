@@ -824,6 +824,127 @@ void test_struct_field_defaults()
         "struct field default expression was not retained");
 }
 
+void test_empty_class()
+{
+    expect_program_dump(
+        "class Empty {\n}\n",
+        "ClassDeclaration(Empty)\n");
+
+    const auto program = parse_program("\n  class Empty {\n  }\n");
+    const auto& declaration = static_cast<const toro::ClassDeclarationStmt&>(
+        *program.statements.front());
+    expect(declaration.location.line == 2 && declaration.location.column == 3,
+        "class source location was not retained");
+    expect(declaration.members.empty(), "empty class unexpectedly has members");
+}
+
+void test_class_fields_and_visibility()
+{
+    expect_program_dump(
+        "class Player {\n"
+        "    public name: string\n"
+        "    private health: int = 100\n"
+        "    score: int\n"
+        "}\n",
+        "ClassDeclaration(Player)\n"
+        "  public Field(name: string)\n"
+        "  private Field(health: int)\n"
+        "    Default\n"
+        "      Integer(100)\n"
+        "  private Field(score: int)\n");
+
+    const auto program = parse_program(
+        "class Player {\n public name: string\n health: int\n}\n");
+    const auto& declaration = static_cast<const toro::ClassDeclarationStmt&>(
+        *program.statements.front());
+    expect(declaration.members.size() == 2, "class member order was not retained");
+    expect(declaration.members[0]->visibility == toro::Visibility::Public,
+        "public field visibility was not retained");
+    expect(declaration.members[1]->visibility == toro::Visibility::Private,
+        "default class visibility was not private");
+    expect(declaration.members[0]->location.line == 2,
+        "class member source location was not retained");
+}
+
+void test_class_methods_init_and_destroy()
+{
+    expect_program_dump(
+        "class Player {\n"
+        "    function init(name: string) {\n"
+        "        self.name = name\n"
+        "    }\n"
+        "\n"
+        "    public function get_health() -> int {\n"
+        "        return self.health\n"
+        "    }\n"
+        "\n"
+        "    function destroy() {\n"
+        "        print(\"player destroyed\")\n"
+        "    }\n"
+        "}\n",
+        "ClassDeclaration(Player)\n"
+        "  private Method(init)\n"
+        "    Parameters\n"
+        "      Parameter(name: string)\n"
+        "    Block\n"
+        "      MemberAssignment\n"
+        "        MemberAccess\n"
+        "          Identifier(self)\n"
+        "          name\n"
+        "        Identifier(name)\n"
+        "  public Method(get_health)\n"
+        "    Parameters\n"
+        "    return type: int\n"
+        "    Block\n"
+        "      Return\n"
+        "        MemberAccess\n"
+        "          Identifier(self)\n"
+        "          health\n"
+        "  private Method(destroy)\n"
+        "    Parameters\n"
+        "    Block\n"
+        "      ExpressionStatement\n"
+        "        Call\n"
+        "          Identifier(print)\n"
+        "          String(player destroyed)\n");
+
+    const auto program = parse_program(
+        "class Worker {\n public function run(value: int) -> int { return value }\n}\n");
+    const auto& declaration = static_cast<const toro::ClassDeclarationStmt&>(
+        *program.statements.front());
+    const auto& method = static_cast<const toro::MethodDeclaration&>(
+        *declaration.members.front());
+    expect(method.parameters.size() == 1 && method.return_type == "int",
+        "method parameters or return type were not retained");
+    expect(method.location.line == 2, "method source location was not retained");
+}
+
+void test_self_member_and_method_calls()
+{
+    expect_dump(
+        "self.health",
+        "MemberAccess\n"
+        "  Identifier(self)\n"
+        "  health\n");
+    expect_program_dump(
+        "player.damage(25)\n"
+        "print(player.get_health())\n",
+        "ExpressionStatement\n"
+        "  Call\n"
+        "    MemberAccess\n"
+        "      Identifier(player)\n"
+        "      damage\n"
+        "    Integer(25)\n"
+        "\n"
+        "ExpressionStatement\n"
+        "  Call\n"
+        "    Identifier(print)\n"
+        "    Call\n"
+        "      MemberAccess\n"
+        "        Identifier(player)\n"
+        "        get_health\n");
+}
+
 void expect_parse_error(std::string_view source, std::string_view expected_message)
 {
     try {
@@ -1023,6 +1144,43 @@ void test_named_argument_failures()
     expect_program_error("create(name:)", "expected value after named argument");
 }
 
+void test_class_failures()
+{
+    expect_program_error("class {\n}\n", "expected class name");
+    expect_program_error("class Broken\n", "expected '{' before class body");
+    expect_program_error(
+        "class Broken {\n public\n}\n",
+        "expected class field or method");
+    expect_program_error(
+        "class Broken {\n value int\n}\n",
+        "expected ':' after class field name");
+    expect_program_error(
+        "class Broken {\n value:\n}\n",
+        "expected class field type after ':'");
+    expect_program_error(
+        "class Broken {\n function run(value) {}\n}\n",
+        "expected ':' after parameter name");
+    expect_program_error(
+        "class Broken {\n function run()\n}\n",
+        "expected '{' before method body");
+    expect_program_error(
+        "class Broken {\n value: int\n",
+        "expected '}' after class body");
+}
+
+void test_destroy_failures()
+{
+    expect_program_error(
+        "class Broken {\n function destroy(reason: string) {}\n}\n",
+        "destroy method cannot declare parameters");
+    expect_program_error(
+        "class Broken {\n function destroy() -> int {}\n}\n",
+        "destroy method cannot declare a return type");
+    expect_program_error(
+        "class Broken {\n function destroy() {}\n function destroy() {}\n}\n",
+        "class may declare at most one destroy method");
+}
+
 } // namespace
 
 int main()
@@ -1071,6 +1229,10 @@ int main()
         test_handle_preserves_loop_context();
         test_struct_declarations();
         test_struct_field_defaults();
+        test_empty_class();
+        test_class_fields_and_visibility();
+        test_class_methods_init_and_destroy();
+        test_self_member_and_method_calls();
         test_failures();
         test_statement_failures();
         test_function_failures();
@@ -1080,6 +1242,8 @@ int main()
         test_handle_failures();
         test_struct_and_member_failures();
         test_named_argument_failures();
+        test_class_failures();
+        test_destroy_failures();
     } catch (const std::exception& error) {
         std::cerr << "parser test failure: " << error.what() << '\n';
         return 1;

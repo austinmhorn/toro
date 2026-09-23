@@ -15,6 +15,11 @@ namespace {
         + std::to_string(token.column) + ": " + message);
 }
 
+const char* visibility_name(Visibility visibility)
+{
+    return visibility == Visibility::Public ? "public" : "private";
+}
+
 void append_dump(const Expr& expression, std::size_t depth, std::string& output)
 {
     output.append(depth * 2, ' ');
@@ -226,6 +231,38 @@ void append_statement_dump(const Stmt& statement, std::size_t depth, std::string
         }
         return;
     }
+    case StmtKind::ClassDeclaration: {
+        const auto& declaration = static_cast<const ClassDeclarationStmt&>(statement);
+        output += indentation + "ClassDeclaration(" + declaration.name + ")\n";
+        for (const auto& member : declaration.members) {
+            const std::string member_indentation((depth + 1) * 2, ' ');
+            if (member->kind == ClassMemberKind::Field) {
+                const auto& field = static_cast<const ClassField&>(*member);
+                output += member_indentation + visibility_name(field.visibility)
+                    + " Field(" + field.name + ": " + field.type + ")\n";
+                if (field.default_value) {
+                    output += std::string((depth + 2) * 2, ' ') + "Default\n";
+                    append_dump(*field.default_value, depth + 3, output);
+                }
+                continue;
+            }
+
+            const auto& method = static_cast<const MethodDeclaration&>(*member);
+            output += member_indentation + visibility_name(method.visibility)
+                + " Method(" + method.name + ")\n";
+            output += std::string((depth + 2) * 2, ' ') + "Parameters\n";
+            for (const auto& parameter : method.parameters) {
+                output += std::string((depth + 3) * 2, ' ')
+                    + "Parameter(" + parameter.name + ": " + parameter.type + ")\n";
+            }
+            if (method.return_type) {
+                output += std::string((depth + 2) * 2, ' ')
+                    + "return type: " + *method.return_type + "\n";
+            }
+            append_statement_dump(*method.body, depth + 2, output);
+        }
+        return;
+    }
     }
 }
 
@@ -270,6 +307,9 @@ std::unique_ptr<Stmt> Parser::parse_statement()
     }
     if (check(TokenType::Struct)) {
         return parse_struct_declaration();
+    }
+    if (check(TokenType::Class)) {
+        return parse_class_declaration();
     }
     if (check(TokenType::Return)) {
         return parse_return_statement();
@@ -678,6 +718,135 @@ std::unique_ptr<Stmt> Parser::parse_struct_declaration()
         std::move(fields));
 }
 
+std::unique_ptr<Stmt> Parser::parse_class_declaration()
+{
+    Token class_token = advance();
+    const Token& name = consume(TokenType::Identifier, "expected class name");
+    const std::string class_name = name.lexeme;
+    consume(TokenType::LeftBrace, "expected '{' before class body");
+
+    std::vector<std::unique_ptr<ClassMember>> members;
+    bool saw_destroy = false;
+    while (!at_end() && peek().type != TokenType::RightBrace) {
+        statement_line_ = peek().line;
+        Visibility visibility = Visibility::Private;
+        if (match({TokenType::Public})) {
+            visibility = Visibility::Public;
+        } else if (match({TokenType::Private})) {
+            visibility = Visibility::Private;
+        }
+
+        if (check(TokenType::Function)) {
+            members.push_back(parse_method_declaration(visibility, saw_destroy));
+        } else if (check(TokenType::Identifier)) {
+            members.push_back(parse_class_field(visibility));
+        } else {
+            throw_parse_error(peek(), "expected class field or method");
+        }
+    }
+
+    if (at_end()) {
+        throw_parse_error(peek(), "expected '}' after class body");
+    }
+
+    Token right_brace = advance();
+    statement_line_ = right_brace.line;
+    require_statement_end();
+    return std::make_unique<ClassDeclarationStmt>(
+        SourceLocation{class_token.line, class_token.column},
+        class_name,
+        std::move(members));
+}
+
+std::unique_ptr<ClassMember> Parser::parse_class_field(Visibility visibility)
+{
+    Token name = advance();
+    consume(TokenType::Colon, "expected ':' after class field name");
+    const Token& type = consume(
+        TokenType::Identifier, "expected class field type after ':'");
+    const std::string type_name = type.lexeme;
+    std::unique_ptr<Expr> default_value;
+
+    if (match({TokenType::Assign})) {
+        require_expression("expected default value after '='");
+        default_value = parse_or();
+    }
+
+    require_statement_end();
+    return std::make_unique<ClassField>(
+        visibility,
+        SourceLocation{name.line, name.column},
+        std::move(name.lexeme),
+        type_name,
+        std::move(default_value));
+}
+
+std::unique_ptr<ClassMember> Parser::parse_method_declaration(
+    Visibility visibility,
+    bool& saw_destroy)
+{
+    Token function_token = advance();
+    const Token& name = consume(TokenType::Identifier, "expected method name");
+    const std::string method_name = name.lexeme;
+    const bool is_destroy = method_name == "destroy";
+    if (is_destroy) {
+        if (saw_destroy) {
+            throw_parse_error(name, "class may declare at most one destroy method");
+        }
+        saw_destroy = true;
+    }
+
+    consume(TokenType::LeftParen, "expected '(' after method name");
+    if (is_destroy && !check(TokenType::RightParen)) {
+        throw_parse_error(peek(), "destroy method cannot declare parameters");
+    }
+
+    std::vector<Parameter> parameters;
+    if (!check(TokenType::RightParen)) {
+        do {
+            const Token& parameter_name = consume(
+                TokenType::Identifier, "expected parameter name");
+            Parameter parameter{
+                parameter_name.lexeme,
+                {},
+                SourceLocation{parameter_name.line, parameter_name.column},
+            };
+            consume(TokenType::Colon, "expected ':' after parameter name");
+            const Token& parameter_type = consume(
+                TokenType::Identifier, "expected parameter type after ':'");
+            parameter.type = parameter_type.lexeme;
+            parameters.push_back(std::move(parameter));
+        } while (match({TokenType::Comma}));
+    }
+    consume(TokenType::RightParen, "expected ')' after parameters");
+
+    std::optional<std::string> return_type;
+    if (match({TokenType::Arrow})) {
+        if (is_destroy) {
+            throw_parse_error(previous(), "destroy method cannot declare a return type");
+        }
+        const Token& type = consume(TokenType::Identifier, "expected return type after '->'");
+        return_type = type.lexeme;
+    }
+
+    if (!check(TokenType::LeftBrace)) {
+        throw_parse_error(peek(), "expected '{' before method body");
+    }
+    const auto enclosing_loop_depth = loop_depth_;
+    loop_depth_ = 0;
+    auto body = parse_block_statement();
+    loop_depth_ = enclosing_loop_depth;
+    require_statement_end();
+
+    return std::make_unique<MethodDeclaration>(
+        visibility,
+        SourceLocation{function_token.line, function_token.column},
+        method_name,
+        std::move(parameters),
+        std::move(return_type),
+        std::move(body));
+}
+
 std::unique_ptr<BlockStmt> Parser::parse_block_statement()
 {
     Token left_brace = advance();
@@ -838,7 +1007,7 @@ std::unique_ptr<Expr> Parser::parse_primary()
     if (match({TokenType::Null})) {
         return std::make_unique<NullExpr>();
     }
-    if (match({TokenType::Identifier})) {
+    if (match({TokenType::Identifier, TokenType::Self})) {
         return std::make_unique<IdentifierExpr>(previous().lexeme);
     }
     if (match({TokenType::LeftParen})) {

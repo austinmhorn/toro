@@ -109,3 +109,31 @@ player := Player(name: "Austin")
 player.health = 75
 print(player.name)
 ```
+
+### Classes
+
+Classes contain ordered fields and methods. Members are private by default and
+may be marked `public` or `private`. Methods use normal `function` syntax, and
+`self` refers syntactically to the current instance.
+
+```toro
+class Player {
+    public name: string
+    private health: int = 100
+
+    function init(name: string) {
+        self.name = name
+    }
+
+    public function get_health() -> int {
+        return self.health
+    }
+
+    function destroy() {
+        print("player destroyed")
+    }
+}
+```
+
+`init` and `destroy` have no runtime semantics yet. A class may declare one
+parameterless `destroy()` method, and it cannot declare a return type.

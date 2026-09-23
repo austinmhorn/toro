@@ -182,6 +182,7 @@ enum class StmtKind {
     EnumDeclaration,
     Handle,
     StructDeclaration,
+    ClassDeclaration,
 };
 
 struct Stmt {
@@ -430,6 +431,87 @@ struct StructDeclarationStmt final : Stmt {
 
     std::string name;
     std::vector<StructField> fields;
+};
+
+enum class Visibility {
+    Private,
+    Public,
+};
+
+enum class ClassMemberKind {
+    Field,
+    Method,
+};
+
+struct ClassMember {
+    ClassMember(ClassMemberKind kind, Visibility visibility, SourceLocation location)
+        : kind(kind)
+        , visibility(visibility)
+        , location(location)
+    {
+    }
+
+    virtual ~ClassMember() = default;
+
+    ClassMemberKind kind;
+    Visibility visibility;
+    SourceLocation location;
+};
+
+struct ClassField final : ClassMember {
+    ClassField(
+        Visibility visibility,
+        SourceLocation location,
+        std::string name,
+        std::string type,
+        std::unique_ptr<Expr> default_value)
+        : ClassMember(ClassMemberKind::Field, visibility, location)
+        , name(std::move(name))
+        , type(std::move(type))
+        , default_value(std::move(default_value))
+    {
+    }
+
+    std::string name;
+    std::string type;
+    std::unique_ptr<Expr> default_value;
+};
+
+struct MethodDeclaration final : ClassMember {
+    MethodDeclaration(
+        Visibility visibility,
+        SourceLocation location,
+        std::string name,
+        std::vector<Parameter> parameters,
+        std::optional<std::string> return_type,
+        std::unique_ptr<BlockStmt> body)
+        : ClassMember(ClassMemberKind::Method, visibility, location)
+        , name(std::move(name))
+        , parameters(std::move(parameters))
+        , return_type(std::move(return_type))
+        , body(std::move(body))
+    {
+    }
+
+    std::string name;
+    std::vector<Parameter> parameters;
+    std::optional<std::string> return_type;
+    std::unique_ptr<BlockStmt> body;
+};
+
+struct ClassDeclarationStmt final : Stmt {
+    ClassDeclarationStmt(
+        SourceLocation location,
+        std::string name,
+        std::vector<std::unique_ptr<ClassMember>> members)
+        : Stmt(StmtKind::ClassDeclaration, location)
+        , name(std::move(name))
+        , members(std::move(members))
+    {
+    }
+
+    std::string name;
+    std::vector<std::unique_ptr<ClassMember>> members;
 };
 
 struct Program {

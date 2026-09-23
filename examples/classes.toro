@@ -1,0 +1,26 @@
+class Player {
+    public name: string
+    private health: int = 100
+
+    function init(name: string) {
+        self.name = name
+    }
+
+    public function damage(amount: int) {
+        self.health = self.health - amount
+    }
+
+    public function get_health() -> int {
+        return self.health
+    }
+
+    function destroy() {
+        print("player destroyed")
+    }
+}
+
+function main() {
+    player := Player(name: "Austin")
+    player.damage(25)
+    print(player.get_health())
+}
