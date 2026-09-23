@@ -18,6 +18,7 @@ add_library(toro_core
     src/Parser.cpp
     src/SemanticAnalyzer.cpp
     src/SourceFile.cpp
+    src/TypeChecker.cpp
 )
 
 target_include_directories(toro_core
@@ -54,4 +55,9 @@ if(BUILD_TESTING)
     target_link_libraries(toro_semantic_tests PRIVATE toro_core)
     toro_enable_warnings(toro_semantic_tests)
     add_test(NAME semantic COMMAND toro_semantic_tests)
+
+    add_executable(toro_type_checker_tests tests/TypeCheckerTests.cpp)
+    target_link_libraries(toro_type_checker_tests PRIVATE toro_core)
+    toro_enable_warnings(toro_type_checker_tests)
+    add_test(NAME type_checker COMMAND toro_type_checker_tests)
 endif()

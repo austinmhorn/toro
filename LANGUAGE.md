@@ -198,5 +198,22 @@ their corresponding scope.
 
 Functions and declared types are registered as symbols, and `print` is a
 predefined symbol. `self` is available only in class methods. The current pass
-does not perform type checking, member lookup, overload resolution, interface
-conformance, inheritance validation, or generic constraint validation.
+does not perform member lookup, overload resolution, interface conformance,
+inheritance validation, or generic constraint validation.
+
+### Primitive type checking
+
+The initial type checker supports `int`, `dec`, `string`, and `bool`, with local
+type inference for `:=`. Explicit primitive annotations and later assignments
+must match exactly; `int` and `dec` are not implicitly converted.
+
+Arithmetic and ordered comparisons require matching numeric operand types.
+Equality requires compatible operands, logical operators require `bool`, and
+`if` or `while` conditions must be `bool`. Function calls validate primitive
+argument counts and types, and returns are checked against the function's
+declared return type.
+
+`null` is represented as a literal type but cannot initialize or be assigned to
+an ordinary non-null value. Nullable `T?` semantics are not implemented yet.
+Generic types, member types, inheritance, interfaces, and overloads remain
+deferred and do not receive primitive type validation beyond their expressions.

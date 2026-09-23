@@ -3,6 +3,7 @@
 #include "toro/SemanticAnalyzer.hpp"
 #include "toro/SourceFile.hpp"
 #include "toro/Token.hpp"
+#include "toro/TypeChecker.hpp"
 
 #include <exception>
 #include <iostream>
@@ -58,7 +59,8 @@ void check_source(std::string_view source)
     auto tokens = toro::Lexer(source).tokenize();
     const auto program = toro::Parser(std::move(tokens)).parse_program();
     toro::SemanticAnalyzer().analyze(program);
-    std::cout << "semantic check passed\n";
+    toro::TypeChecker().check(program);
+    std::cout << "check passed\n";
 }
 
 } // namespace

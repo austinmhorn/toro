@@ -13,7 +13,8 @@ control flow, loops, enums, `handle` statements, structs, named calls, and membe
 access and assignment, classes, single inheritance, interfaces, virtual or
 override methods, and generic declarations and type references into an AST.
 The semantic analysis pass provides lexical scopes, symbol registration, and
-basic name resolution before type checking.
+basic name resolution. A separate type-checking pass infers primitive local
+types and validates primitive expressions, assignments, calls, and returns.
 
 ## Build
 
@@ -96,15 +97,16 @@ Parse generic declarations, constraints, types, and calls:
 ./build/toro ast examples/generics.toro
 ```
 
-Run semantic name resolution on a source file:
+Run semantic name resolution and primitive type checking on a source file:
 
 ```bash
 ./build/toro check examples/hello.toro
 ```
 
-The `check` command currently reports duplicate declarations in the same scope,
-unknown identifiers, and invalid uses of `self`. Type checking and member lookup
-are not implemented yet.
+The `check` command reports name-resolution errors, primitive type mismatches,
+invalid conditions, function argument errors, and invalid returns. Generic type
+inference, member lookup, overload resolution, and nullable types are not
+implemented yet.
 
 ## Logical operators
 
