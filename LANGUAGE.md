@@ -213,7 +213,31 @@ Equality requires compatible operands, logical operators require `bool`, and
 argument counts and types, and returns are checked against the function's
 declared return type.
 
-`null` is represented as a literal type but cannot initialize or be assigned to
-an ordinary non-null value. Nullable `T?` semantics are not implemented yet.
 Generic types, member types, inheritance, interfaces, and overloads remain
 deferred and do not receive primitive type validation beyond their expressions.
+
+### Nullable types
+
+Types are non-nullable unless followed by `?`. A nullable type accepts its
+non-null value or `null`, including user and generic types:
+
+```toro
+name: string? = null
+user: User? = null
+users: List<User>? = null
+```
+
+A `T` value may be assigned or passed to `T?`. A `T?` value cannot be assigned,
+passed, or returned as `T` without future explicit handling. A bare inferred
+declaration such as `value := null` is rejected because its intended nullable
+type is unknown.
+
+Nullable values may be compared with `null` using `==` or `!=`. They are not
+implicitly boolean, so conditions require an explicit comparison:
+
+```toro
+if user != null {
+}
+```
+
+Flow-sensitive narrowing and null-safe member access are not implemented yet.

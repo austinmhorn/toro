@@ -33,6 +33,9 @@ std::string format_type(const TypeReference& type)
         }
         output += '>';
     }
+    if (type.nullable) {
+        output += '?';
+    }
     return output;
 }
 
@@ -1017,6 +1020,7 @@ TypeReference Parser::parse_type_reference(const char* message)
         } while (match({TokenType::Comma}));
         consume(TokenType::Greater, "expected '>' after generic type arguments");
     }
+    type.nullable = match({TokenType::Question});
     return type;
 }
 
@@ -1366,6 +1370,9 @@ bool Parser::scan_type_reference(std::size_t& index) const
     }
     ++index;
     if (index >= tokens_.size() || tokens_[index].type != TokenType::Less) {
+        if (index < tokens_.size() && tokens_[index].type == TokenType::Question) {
+            ++index;
+        }
         return true;
     }
 
@@ -1383,6 +1390,9 @@ bool Parser::scan_type_reference(std::size_t& index) const
         return false;
     }
     ++index;
+    if (index < tokens_.size() && tokens_[index].type == TokenType::Question) {
+        ++index;
+    }
     return true;
 }
 

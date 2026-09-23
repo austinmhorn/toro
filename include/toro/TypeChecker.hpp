@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace toro {
@@ -41,17 +42,22 @@ private:
     void check_block(const BlockStmt& block);
 
     [[nodiscard]] Type resolve_type(const TypeReference& reference) const;
+    [[nodiscard]] bool is_generic_parameter(const std::string& name) const;
+    [[nodiscard]] bool contains_generic_parameter(const TypeReference& reference) const;
     [[nodiscard]] Type require_value(Type type, SourceLocation location) const;
     void require_assignable(Type expected, Type actual, SourceLocation location) const;
     void require_condition(Type type, SourceLocation location) const;
 
     void push_scope();
     void pop_scope();
+    void push_generic_parameters(const std::vector<GenericParameter>& parameters);
+    void pop_generic_parameters();
     void declare_value(const std::string& name, Type type);
     [[nodiscard]] std::optional<Type> find_value(const std::string& name) const;
     [[nodiscard]] const FunctionSignature* find_function(const std::string& name) const;
 
     std::vector<Scope> scopes_;
+    std::vector<std::unordered_set<std::string>> generic_parameter_scopes_;
     std::optional<Type> current_return_type_;
     SourceLocation current_location_{1, 1};
 };

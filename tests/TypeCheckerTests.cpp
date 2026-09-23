@@ -184,6 +184,91 @@ void test_null_restrictions()
         "null cannot be compared with non-null type 'int'");
 }
 
+void test_nullable_declarations_and_assignments()
+{
+    expect_valid(
+        "name: string? = null\n"
+        "name = \"toro\"\n"
+        "other: string = \"compiler\"\n"
+        "name = other\n"
+        "number: int? = 10\n"
+        "number = null\n");
+    expect_valid(
+        "class User {}\n"
+        "user: User? = null\n"
+        "actual: User = User()\n"
+        "user = actual\n"
+        "items: List<User>? = null\n"
+        "nested: Map<string, List<User?>>? = null\n");
+    expect_error(
+        "maybe: string? = \"toro\"\n"
+        "required: string = maybe\n",
+        "cannot assign value of type 'string?' to type 'string'");
+    expect_error(
+        "class User {}\n"
+        "maybe: User? = User()\n"
+        "required: User = maybe\n",
+        "cannot assign value of type 'User?' to type 'User'");
+    expect_error(
+        "class User {}\n"
+        "class Team {}\n"
+        "user: User? = Team()\n",
+        "cannot assign value of type 'Team' to type 'User?'");
+    expect_error(
+        "class User {}\n"
+        "user: User? = 10\n",
+        "cannot assign value of type 'int' to type 'User?'");
+}
+
+void test_nullable_functions_and_equality()
+{
+    expect_valid(
+        "class User {}\n"
+        "function find_user(id: int) -> User? {\n"
+        "    return null\n"
+        "}\n"
+        "function default_name() -> string? { return \"toro\" }\n"
+        "function accept(user: User?) {\n"
+        "    missing := user == null\n"
+        "    present := user != null\n"
+        "    print(missing)\n"
+        "    print(present)\n"
+        "}\n"
+        "function main() {\n"
+        "    user: User? = find_user(1)\n"
+        "    accept(user)\n"
+        "    accept(User())\n"
+        "    accept(null)\n"
+        "}\n");
+    expect_error(
+        "class User {}\n"
+        "function find_user() -> User { return null }\n",
+        "null requires a nullable type");
+    expect_error(
+        "function require_name(name: string?) -> string { return name }\n",
+        "cannot assign value of type 'string?' to type 'string'");
+    expect_error(
+        "class User {}\n"
+        "function require_user(user: User) {}\n"
+        "require_user(null)\n",
+        "got 'null'");
+    expect_error(
+        "class User {}\n"
+        "function require_user(user: User) {}\n"
+        "maybe: User? = null\n"
+        "require_user(maybe)\n",
+        "expects 'User', got 'User?'");
+    expect_error(
+        "class User {}\n"
+        "user: User = User()\n"
+        "missing := user == null\n",
+        "null cannot be compared with non-null type 'User'");
+    expect_error(
+        "name: string? = null\n"
+        "if name {}\n",
+        "condition must have type 'bool', got nullable type 'string?'");
+}
+
 void test_existing_language_features_remain_checkable()
 {
     expect_valid(
@@ -226,6 +311,8 @@ int main()
         test_function_arguments();
         test_function_returns();
         test_null_restrictions();
+        test_nullable_declarations_and_assignments();
+        test_nullable_functions_and_equality();
         test_existing_language_features_remain_checkable();
     } catch (const std::exception& error) {
         std::cerr << "type checker test failure: " << error.what() << '\n';

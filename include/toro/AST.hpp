@@ -20,6 +20,7 @@ struct TypeReference {
     std::string name;
     std::vector<TypeReference> arguments;
     SourceLocation location;
+    bool nullable{false};
 };
 
 struct GenericParameter {

@@ -7,13 +7,13 @@
 namespace toro {
 namespace {
 
-constexpr Type int_type{TypeKind::Int};
-constexpr Type dec_type{TypeKind::Dec};
-constexpr Type string_type{TypeKind::String};
-constexpr Type bool_type{TypeKind::Bool};
-constexpr Type null_type{TypeKind::Null};
-constexpr Type void_type{TypeKind::Void};
-constexpr Type unknown_type{TypeKind::Unknown};
+const Type int_type{TypeKind::Int};
+const Type dec_type{TypeKind::Dec};
+const Type string_type{TypeKind::String};
+const Type bool_type{TypeKind::Bool};
+const Type null_type{TypeKind::Null};
+const Type void_type{TypeKind::Void};
+const Type unknown_type{TypeKind::Unknown, false, true};
 
 [[noreturn]] void throw_type_error(SourceLocation location, const std::string& message)
 {
@@ -34,12 +34,41 @@ void reject_standalone_null_type(Type type, SourceLocation location)
     }
 }
 
-bool is_assignable(Type expected, Type actual)
+bool is_assignable(const Type& expected, const Type& actual)
 {
     if (actual.kind == TypeKind::Null) {
-        return expected.kind == TypeKind::Null;
+        return expected.nullable;
     }
-    return is_unknown(expected) || is_unknown(actual) || expected == actual;
+    if (actual.nullable && !expected.nullable) {
+        return false;
+    }
+    if (is_unknown(expected) || is_unknown(actual)) {
+        if (is_unknown(expected) && is_unknown(actual)) {
+            return expected.name.empty() || actual.name.empty() || expected.name == actual.name;
+        }
+        const Type& unknown = is_unknown(expected) ? expected : actual;
+        return unknown.name.empty();
+    }
+    return expected.kind == actual.kind;
+}
+
+std::string format_type_reference(const TypeReference& reference)
+{
+    std::string result = reference.name;
+    if (!reference.arguments.empty()) {
+        result += '<';
+        for (std::size_t index = 0; index < reference.arguments.size(); ++index) {
+            if (index != 0) {
+                result += ", ";
+            }
+            result += format_type_reference(reference.arguments[index]);
+        }
+        result += '>';
+    }
+    if (reference.nullable) {
+        result += '?';
+    }
+    return result;
 }
 
 } // namespace
@@ -47,6 +76,7 @@ bool is_assignable(Type expected, Type actual)
 void TypeChecker::check(const Program& program)
 {
     scopes_.clear();
+    generic_parameter_scopes_.clear();
     current_return_type_.reset();
     current_location_ = SourceLocation{1, 1};
     push_scope();
@@ -68,6 +98,7 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
     for (const auto& statement : statements) {
         if (statement->kind == StmtKind::FunctionDeclaration) {
             const auto& function = static_cast<const FunctionDeclarationStmt&>(*statement);
+            push_generic_parameters(function.generic_parameters);
             FunctionSignature signature{
                 {},
                 function.return_type ? resolve_type(*function.return_type) : void_type,
@@ -80,25 +111,30 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                 });
             }
             scopes_.back().functions.emplace(function.name, std::move(signature));
+            pop_generic_parameters();
             continue;
         }
 
         switch (statement->kind) {
         case StmtKind::StructDeclaration:
-            declare_value(
-                static_cast<const StructDeclarationStmt&>(*statement).name, unknown_type);
+            declare_value(static_cast<const StructDeclarationStmt&>(*statement).name,
+                Type{TypeKind::Unknown, false, false,
+                    static_cast<const StructDeclarationStmt&>(*statement).name});
             break;
         case StmtKind::ClassDeclaration:
-            declare_value(
-                static_cast<const ClassDeclarationStmt&>(*statement).name, unknown_type);
+            declare_value(static_cast<const ClassDeclarationStmt&>(*statement).name,
+                Type{TypeKind::Unknown, false, false,
+                    static_cast<const ClassDeclarationStmt&>(*statement).name});
             break;
         case StmtKind::InterfaceDeclaration:
-            declare_value(
-                static_cast<const InterfaceDeclarationStmt&>(*statement).name, unknown_type);
+            declare_value(static_cast<const InterfaceDeclarationStmt&>(*statement).name,
+                Type{TypeKind::Unknown, false, false,
+                    static_cast<const InterfaceDeclarationStmt&>(*statement).name});
             break;
         case StmtKind::EnumDeclaration:
-            declare_value(
-                static_cast<const EnumDeclarationStmt&>(*statement).name, unknown_type);
+            declare_value(static_cast<const EnumDeclarationStmt&>(*statement).name,
+                Type{TypeKind::Unknown, false, false,
+                    static_cast<const EnumDeclarationStmt&>(*statement).name});
             break;
         default:
             break;
@@ -227,6 +263,7 @@ void TypeChecker::check_statement(const Stmt& statement)
     }
     case StmtKind::StructDeclaration: {
         const auto& declaration = static_cast<const StructDeclarationStmt&>(statement);
+        push_generic_parameters(declaration.generic_parameters);
         for (const auto& field : declaration.fields) {
             const Type declared = resolve_type(field.type);
             reject_standalone_null_type(declared, field.type.location);
@@ -237,10 +274,12 @@ void TypeChecker::check_statement(const Stmt& statement)
                 require_assignable(declared, actual, field.location);
             }
         }
+        pop_generic_parameters();
         return;
     }
     case StmtKind::ClassDeclaration: {
         const auto& declaration = static_cast<const ClassDeclarationStmt&>(statement);
+        push_generic_parameters(declaration.generic_parameters);
         for (const auto& member : declaration.members) {
             current_location_ = member->location;
             if (member->kind == ClassMemberKind::Field) {
@@ -256,6 +295,7 @@ void TypeChecker::check_statement(const Stmt& statement)
                 check_method(static_cast<const MethodDeclaration&>(*member));
             }
         }
+        pop_generic_parameters();
         return;
     }
     }
@@ -288,6 +328,11 @@ Type TypeChecker::check_expression(const Expr& expression)
         const auto& unary = static_cast<const UnaryExpr&>(expression);
         const Type operand = require_value(
             check_expression(*unary.operand), token_location(unary.operator_token));
+        if (operand.nullable) {
+            throw_type_error(
+                token_location(unary.operator_token),
+                "unary '-' cannot use nullable operand '" + type_name(operand) + "'");
+        }
         if (!is_unknown(operand) && !is_numeric(operand)) {
             throw_type_error(
                 token_location(unary.operator_token),
@@ -303,7 +348,7 @@ Type TypeChecker::check_expression(const Expr& expression)
     case ExprKind::MemberAccess: {
         const auto& member = static_cast<const MemberAccessExpr&>(expression);
         static_cast<void>(require_value(check_expression(*member.object), current_location_));
-        return unknown_type;
+        return Type{TypeKind::Unknown, false, true};
     }
     case ExprKind::Grouping:
         return check_expression(*static_cast<const GroupingExpr&>(expression).expression);
@@ -387,10 +432,13 @@ Type TypeChecker::check_call(const CallExpr& call)
                 "value '" + callee.name + "' of type '"
                     + std::string(type_name(*callee_type)) + "' is not callable");
         }
-        for (const Type argument : arguments) {
+        for (const Type& argument : arguments) {
             if (argument.kind == TypeKind::Null) {
                 throw_type_error(current_location_, "null requires a nullable parameter type");
             }
+        }
+        if (const auto callee_type = find_value(callee.name)) {
+            return *callee_type;
         }
         return unknown_type;
     }
@@ -401,7 +449,7 @@ Type TypeChecker::check_call(const CallExpr& call)
             current_location_,
             "value of type '" + std::string(type_name(callee_type)) + "' is not callable");
     }
-    for (const Type argument : arguments) {
+    for (const Type& argument : arguments) {
         if (argument.kind == TypeKind::Null) {
             throw_type_error(current_location_, "null requires a nullable parameter type");
         }
@@ -420,6 +468,9 @@ Type TypeChecker::check_binary(const BinaryExpr& binary)
     case TokenType::Minus:
     case TokenType::Star:
     case TokenType::Slash:
+        if (left.nullable || right.nullable) {
+            throw_type_error(location, "arithmetic cannot use nullable operands");
+        }
         if (!is_unknown(left) && !is_numeric(left)) {
             throw_type_error(
                 location,
@@ -446,6 +497,9 @@ Type TypeChecker::check_binary(const BinaryExpr& binary)
     case TokenType::LessEqual:
     case TokenType::Greater:
     case TokenType::GreaterEqual:
+        if (left.nullable || right.nullable) {
+            throw_type_error(location, "comparison cannot use nullable operands");
+        }
         if (!is_unknown(left) && !is_numeric(left)) {
             throw_type_error(
                 location,
@@ -466,24 +520,30 @@ Type TypeChecker::check_binary(const BinaryExpr& binary)
         }
         return bool_type;
     case TokenType::Equal:
-    case TokenType::NotEqual:
-        if (!is_unknown(left) && !is_unknown(right) && left != right) {
-            if (left.kind == TypeKind::Null || right.kind == TypeKind::Null) {
+    case TokenType::NotEqual: {
+        if (left.kind == TypeKind::Null || right.kind == TypeKind::Null) {
+            const Type other = left.kind == TypeKind::Null ? right : left;
+            if (!other.nullable && !(is_unknown(other) && other.deferred)) {
                 throw_type_error(
                     location,
-                    "null cannot be compared with non-null type '"
-                        + std::string(type_name(
-                            left.kind == TypeKind::Null ? right : left)) + "'");
+                    "null cannot be compared with non-null type '" + type_name(other) + "'");
             }
+            return bool_type;
+        }
+        if (!is_assignable(Type{left.kind, true, left.deferred, left.name}, right)
+            && !is_assignable(Type{right.kind, true, right.deferred, right.name}, left)) {
             throw_type_error(
                 location,
                 "equality operands must have the same type, got '"
-                    + std::string(type_name(left)) + "' and '"
-                    + std::string(type_name(right)) + "'");
+                    + type_name(left) + "' and '" + type_name(right) + "'");
         }
         return bool_type;
+    }
     case TokenType::And:
     case TokenType::Or:
+        if (left.nullable || right.nullable) {
+            throw_type_error(location, "logical operators cannot use nullable operands");
+        }
         if (!is_unknown(left) && left != bool_type) {
             throw_type_error(
                 location,
@@ -507,6 +567,7 @@ Type TypeChecker::check_binary(const BinaryExpr& binary)
 void TypeChecker::check_function(const FunctionDeclarationStmt& function)
 {
     const auto enclosing_return_type = current_return_type_;
+    push_generic_parameters(function.generic_parameters);
     current_return_type_ = function.return_type
         ? resolve_type(*function.return_type)
         : void_type;
@@ -522,12 +583,14 @@ void TypeChecker::check_function(const FunctionDeclarationStmt& function)
     }
     check_statement_list(function.body->statements);
     pop_scope();
+    pop_generic_parameters();
     current_return_type_ = enclosing_return_type;
 }
 
 void TypeChecker::check_method(const MethodDeclaration& method)
 {
     const auto enclosing_return_type = current_return_type_;
+    push_generic_parameters(method.generic_parameters);
     current_return_type_ = method.return_type ? resolve_type(*method.return_type) : void_type;
     reject_standalone_null_type(
         *current_return_type_, method.return_type ? method.return_type->location : method.location);
@@ -543,6 +606,7 @@ void TypeChecker::check_method(const MethodDeclaration& method)
         check_statement_list(method.body->statements);
     }
     pop_scope();
+    pop_generic_parameters();
     current_return_type_ = enclosing_return_type;
 }
 
@@ -555,25 +619,59 @@ void TypeChecker::check_block(const BlockStmt& block)
 
 Type TypeChecker::resolve_type(const TypeReference& reference) const
 {
+    if (contains_generic_parameter(reference)) {
+        return Type{TypeKind::Unknown, reference.nullable, true};
+    }
     if (!reference.arguments.empty()) {
-        return unknown_type;
+        TypeReference base = reference;
+        base.nullable = false;
+        return Type{
+            TypeKind::Unknown,
+            reference.nullable,
+            false,
+            format_type_reference(base),
+        };
     }
     if (reference.name == "int") {
-        return int_type;
+        return Type{TypeKind::Int, reference.nullable};
     }
     if (reference.name == "dec") {
-        return dec_type;
+        return Type{TypeKind::Dec, reference.nullable};
     }
     if (reference.name == "string") {
-        return string_type;
+        return Type{TypeKind::String, reference.nullable};
     }
     if (reference.name == "bool") {
-        return bool_type;
+        return Type{TypeKind::Bool, reference.nullable};
     }
     if (reference.name == "null") {
         return null_type;
     }
-    return unknown_type;
+    return Type{TypeKind::Unknown, reference.nullable, false, reference.name};
+}
+
+bool TypeChecker::is_generic_parameter(const std::string& name) const
+{
+    for (auto scope = generic_parameter_scopes_.rbegin();
+        scope != generic_parameter_scopes_.rend(); ++scope) {
+        if (scope->contains(name)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool TypeChecker::contains_generic_parameter(const TypeReference& reference) const
+{
+    if (is_generic_parameter(reference.name)) {
+        return true;
+    }
+    for (const auto& argument : reference.arguments) {
+        if (contains_generic_parameter(argument)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 Type TypeChecker::require_value(Type type, SourceLocation location) const
@@ -589,7 +687,7 @@ void TypeChecker::require_assignable(
     Type actual,
     SourceLocation location) const
 {
-    if (actual.kind == TypeKind::Null && expected.kind != TypeKind::Null) {
+    if (actual.kind == TypeKind::Null && !expected.nullable) {
         throw_type_error(location, "null requires a nullable type");
     }
     if (!is_assignable(expected, actual)) {
@@ -603,6 +701,11 @@ void TypeChecker::require_assignable(
 void TypeChecker::require_condition(Type type, SourceLocation location) const
 {
     type = require_value(type, location);
+    if (type.nullable) {
+        throw_type_error(
+            location,
+            "condition must have type 'bool', got nullable type '" + type_name(type) + "'");
+    }
     if (!is_unknown(type) && type != bool_type) {
         throw_type_error(
             location,
@@ -618,6 +721,20 @@ void TypeChecker::push_scope()
 void TypeChecker::pop_scope()
 {
     scopes_.pop_back();
+}
+
+void TypeChecker::push_generic_parameters(
+    const std::vector<GenericParameter>& parameters)
+{
+    auto& scope = generic_parameter_scopes_.emplace_back();
+    for (const auto& parameter : parameters) {
+        scope.insert(parameter.name);
+    }
+}
+
+void TypeChecker::pop_generic_parameters()
+{
+    generic_parameter_scopes_.pop_back();
 }
 
 void TypeChecker::declare_value(const std::string& name, Type type)

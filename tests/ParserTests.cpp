@@ -1166,6 +1166,48 @@ void test_generic_type_references()
         "nested generic type reference was not retained");
 }
 
+void test_nullable_type_references()
+{
+    expect_program_dump(
+        "struct NullableValues {\n"
+        "    name: string?\n"
+        "    user: User?\n"
+        "    users: List<User>?\n"
+        "    nested: Map<string, List<User?>?>?\n"
+        "}\n"
+        "function find(id: int) -> User? { return null }\n",
+        "StructDeclaration(NullableValues)\n"
+        "  Field(name: string?)\n"
+        "  Field(user: User?)\n"
+        "  Field(users: List<User>?)\n"
+        "  Field(nested: Map<string, List<User?>?>?)\n"
+        "\n"
+        "FunctionDeclaration(find)\n"
+        "  Parameters\n"
+        "    Parameter(id: int)\n"
+        "  return type: User?\n"
+        "  Block\n"
+        "    Return\n"
+        "      Null\n");
+
+    const auto program = parse_program(
+        "value: Map<string, List<User?>?>? = null\n");
+    const auto& declaration = static_cast<const toro::VariableDeclarationStmt&>(
+        *program.statements.front());
+    const auto& type = *declaration.explicit_type;
+    expect(type.nullable, "outer generic nullability was not retained");
+    expect(type.arguments[1].nullable, "nested generic nullability was not retained");
+    expect(type.arguments[1].arguments.front().nullable,
+        "generic argument nullability was not retained");
+
+    expect_dump(
+        "create<List<User>?>()",
+        "Call\n"
+        "  Identifier(create)\n"
+        "  GenericArguments\n"
+        "    List<User>?\n");
+}
+
 void test_explicit_generic_calls()
 {
     expect_program_dump(
@@ -1574,6 +1616,7 @@ int main()
         test_generic_constraints();
         test_generic_struct_class_and_interface();
         test_generic_type_references();
+        test_nullable_type_references();
         test_explicit_generic_calls();
         test_generic_call_comparison_disambiguation();
         test_failures();
