@@ -28,4 +28,8 @@ class Dog : Animal implements Drawable, Named {
 
 struct Sprite implements Drawable {
     id: int
+
+    function draw() {
+        print("sprite")
+    }
 }

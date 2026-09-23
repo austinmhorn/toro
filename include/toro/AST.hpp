@@ -501,12 +501,14 @@ struct StructDeclarationStmt final : Stmt {
         std::vector<GenericParameter> generic_parameters,
         std::vector<TypeReference> interfaces,
         std::vector<StructField> fields,
+        std::vector<std::unique_ptr<ClassMember>> methods,
         std::vector<std::unique_ptr<ConversionOverload>> conversions)
         : Stmt(StmtKind::StructDeclaration, location)
         , name(std::move(name))
         , generic_parameters(std::move(generic_parameters))
         , interfaces(std::move(interfaces))
         , fields(std::move(fields))
+        , methods(std::move(methods))
         , conversions(std::move(conversions))
     {
     }
@@ -515,6 +517,7 @@ struct StructDeclarationStmt final : Stmt {
     std::vector<GenericParameter> generic_parameters;
     std::vector<TypeReference> interfaces;
     std::vector<StructField> fields;
+    std::vector<std::unique_ptr<ClassMember>> methods;
     std::vector<std::unique_ptr<ConversionOverload>> conversions;
 };
 

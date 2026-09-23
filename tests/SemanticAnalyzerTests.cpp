@@ -154,7 +154,7 @@ void test_self_context()
         "        self.value = value\n"
         "    }\n"
         "}\n");
-    expect_error("print(self)\n", "'self' is only valid inside class methods");
+    expect_error("print(self)\n", "'self' is only valid inside class or struct methods");
     expect_error(
         "class Player {\n"
         "    function outer() {\n"
@@ -163,7 +163,7 @@ void test_self_context()
         "        }\n"
         "    }\n"
         "}\n",
-        "'self' is only valid inside class methods");
+        "'self' is only valid inside class or struct methods");
 }
 
 void test_duplicate_declared_symbols()

@@ -1,6 +1,7 @@
 #include "toro/TypeChecker.hpp"
 
 #include <algorithm>
+#include <functional>
 #include <stdexcept>
 #include <string>
 
@@ -34,7 +35,7 @@ void reject_standalone_null_type(Type type, SourceLocation location)
     }
 }
 
-bool is_assignable(const Type& expected, const Type& actual)
+bool is_directly_assignable(const Type& expected, const Type& actual)
 {
     if (actual.kind == TypeKind::Null) {
         return expected.nullable;
@@ -112,7 +113,11 @@ void TypeChecker::check(const Program& program)
     current_type_name_.reset();
     current_location_ = SourceLocation{1, 1};
     push_scope();
-    check_statement_list(program.statements);
+    predeclare(program.statements);
+    validate_nominal_types();
+    for (const auto& statement : program.statements) {
+        check_statement(*statement);
+    }
     pop_scope();
 }
 
@@ -154,6 +159,11 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                 Type{TypeKind::Unknown, false, false, declaration.name});
             push_generic_parameters(declaration.generic_parameters);
             NominalTypeInfo type_info;
+            type_info.kind = NominalKind::Struct;
+            type_info.location = declaration.location;
+            for (const auto& interface_name : declaration.interfaces) {
+                type_info.interfaces.push_back(interface_name.name);
+            }
             for (const auto& field : declaration.fields) {
                 const Type field_type = resolve_type(field.type);
                 type_info.field_order.push_back(field.name);
@@ -161,7 +171,30 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                     field_type,
                     Visibility::Public,
                     field.default_value == nullptr && !has_zero_value(field_type),
+                    declaration.name,
                 });
+            }
+            for (const auto& method : declaration.methods) {
+                const auto& method_declaration =
+                    static_cast<const MethodDeclaration&>(*method);
+                push_generic_parameters(method_declaration.generic_parameters);
+                FunctionSignature signature{
+                    {},
+                    method_declaration.return_type
+                        ? resolve_type(*method_declaration.return_type) : void_type,
+                };
+                for (const auto& parameter : method_declaration.parameters) {
+                    signature.parameters.push_back(FunctionParameterType{
+                        parameter.name, resolve_type(parameter.type)});
+                }
+                pop_generic_parameters();
+                if (!type_info.methods.emplace(method_declaration.name, MethodInfo{
+                        std::move(signature), Visibility::Public, declaration.name,
+                        false, false, false}).second) {
+                    throw_type_error(method_declaration.location,
+                        "duplicate method '" + method_declaration.name + "' in struct '"
+                            + declaration.name + "'");
+                }
             }
             for (const auto& conversion : declaration.conversions) {
                 declare_conversion(declaration.name, resolve_type(conversion->target_type));
@@ -176,6 +209,15 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                 Type{TypeKind::Unknown, false, false, declaration.name});
             push_generic_parameters(declaration.generic_parameters);
             NominalTypeInfo type_info;
+            type_info.kind = NominalKind::Class;
+            type_info.is_abstract = declaration.is_abstract;
+            type_info.location = declaration.location;
+            if (declaration.base_type) {
+                type_info.base = declaration.base_type->name;
+            }
+            for (const auto& interface_name : declaration.interfaces) {
+                type_info.interfaces.push_back(interface_name.name);
+            }
             for (const auto& member : declaration.members) {
                 if (member->kind == ClassMemberKind::Field) {
                     const auto& field = static_cast<const ClassField&>(*member);
@@ -185,6 +227,7 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                         field_type,
                         field.visibility,
                         field.default_value == nullptr && !has_zero_value(field_type),
+                        declaration.name,
                     });
                 } else if (member->kind == ClassMemberKind::Method) {
                     const auto& method = static_cast<const MethodDeclaration&>(*member);
@@ -201,10 +244,18 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                         });
                     }
                     pop_generic_parameters();
-                    type_info.methods.emplace(method.name, MethodInfo{
+                    if (!type_info.methods.emplace(method.name, MethodInfo{
                         std::move(signature),
                         method.visibility,
-                    });
+                        declaration.name,
+                        method.is_virtual || method.is_override,
+                        method.body == nullptr,
+                        method.is_override,
+                    }).second) {
+                        throw_type_error(method.location,
+                            "duplicate method '" + method.name + "' in class '"
+                                + declaration.name + "'");
+                    }
                 } else {
                     const auto& conversion = static_cast<const ConversionOverload&>(*member);
                     declare_conversion(
@@ -215,11 +266,38 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
             pop_generic_parameters();
             break;
         }
-        case StmtKind::InterfaceDeclaration:
-            declare_value(static_cast<const InterfaceDeclarationStmt&>(*statement).name,
-                Type{TypeKind::Unknown, false, false,
-                    static_cast<const InterfaceDeclarationStmt&>(*statement).name});
+        case StmtKind::InterfaceDeclaration: {
+            const auto& declaration = static_cast<const InterfaceDeclarationStmt&>(*statement);
+            declare_value(declaration.name,
+                Type{TypeKind::Unknown, false, false, declaration.name});
+            push_generic_parameters(declaration.generic_parameters);
+            NominalTypeInfo type_info;
+            type_info.kind = NominalKind::Interface;
+            type_info.is_abstract = true;
+            type_info.location = declaration.location;
+            for (const auto& method : declaration.methods) {
+                push_generic_parameters(method.generic_parameters);
+                FunctionSignature signature{
+                    {},
+                    method.return_type ? resolve_type(*method.return_type) : void_type,
+                };
+                for (const auto& parameter : method.parameters) {
+                    signature.parameters.push_back(FunctionParameterType{
+                        parameter.name, resolve_type(parameter.type)});
+                }
+                pop_generic_parameters();
+                if (!type_info.methods.emplace(method.name, MethodInfo{
+                        std::move(signature), Visibility::Public, declaration.name,
+                        false, true, false}).second) {
+                    throw_type_error(method.location,
+                        "duplicate method '" + method.name + "' in interface '"
+                            + declaration.name + "'");
+                }
+            }
+            scopes_.back().nominal_types.emplace(declaration.name, std::move(type_info));
+            pop_generic_parameters();
             break;
+        }
         case StmtKind::EnumDeclaration:
             declare_value(static_cast<const EnumDeclarationStmt&>(*statement).name,
                 Type{TypeKind::Unknown, false, false,
@@ -227,6 +305,142 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
             break;
         default:
             break;
+        }
+    }
+}
+
+void TypeChecker::validate_nominal_types()
+{
+    for (const auto& [name, type_info] : scopes_.back().nominal_types) {
+        if (type_info.base) {
+            const auto* base = find_nominal_type(*type_info.base);
+            if (!base || base->kind != NominalKind::Class) {
+                throw_type_error(type_info.location,
+                    "base type '" + *type_info.base + "' of class '" + name
+                        + "' must name an existing class");
+            }
+        }
+        for (const auto& interface_name : type_info.interfaces) {
+            const auto* interface_type = find_nominal_type(interface_name);
+            if (!interface_type || interface_type->kind != NominalKind::Interface) {
+                throw_type_error(type_info.location,
+                    "implemented type '" + interface_name + "' on '" + name
+                        + "' must name an existing interface");
+            }
+        }
+    }
+
+    validate_inheritance_cycles();
+    for (const auto& [name, type_info] : scopes_.back().nominal_types) {
+        if (type_info.kind == NominalKind::Class) {
+            validate_class(name, type_info);
+        }
+        if (type_info.kind != NominalKind::Interface) {
+            validate_interfaces(name, type_info);
+        }
+    }
+}
+
+void TypeChecker::validate_inheritance_cycles() const
+{
+    std::unordered_map<std::string, int> state;
+    std::function<void(const std::string&)> visit = [&](const std::string& name) {
+        if (state[name] == 2) {
+            return;
+        }
+        if (state[name] == 1) {
+            const auto* type_info = find_nominal_type(name);
+            throw_type_error(type_info ? type_info->location : SourceLocation{1, 1},
+                "inheritance cycle involving class '" + name + "'");
+        }
+        state[name] = 1;
+        const auto* type_info = find_nominal_type(name);
+        if (type_info && type_info->base) {
+            visit(*type_info->base);
+        }
+        state[name] = 2;
+    };
+
+    for (const auto& [name, type_info] : scopes_.back().nominal_types) {
+        if (type_info.kind == NominalKind::Class) {
+            visit(name);
+        }
+    }
+}
+
+void TypeChecker::validate_class(
+    const std::string& name,
+    const NominalTypeInfo& type_info) const
+{
+    for (const auto& [method_name, method] : type_info.methods) {
+        const MethodInfo* inherited = type_info.base
+            ? find_method(*type_info.base, method_name)
+            : nullptr;
+        if (method.is_override) {
+            if (!inherited) {
+                throw_type_error(type_info.location,
+                    "method '" + name + "." + method_name
+                        + "' is marked override but no inherited method exists");
+            }
+            if (!inherited->is_virtual) {
+                throw_type_error(type_info.location,
+                    "method '" + name + "." + method_name
+                        + "' cannot override non-virtual method");
+            }
+            if (!signatures_match(method.signature, inherited->signature)) {
+                throw_type_error(type_info.location,
+                    "override '" + name + "." + method_name
+                        + "' does not match the inherited signature");
+            }
+        } else if (inherited && inherited->is_virtual) {
+            throw_type_error(type_info.location,
+                "method '" + name + "." + method_name
+                    + "' must use override for an inherited virtual method");
+        }
+    }
+
+    if (!type_info.is_abstract) {
+        std::unordered_set<std::string> candidate_names;
+        const NominalTypeInfo* current = &type_info;
+        while (current) {
+            for (const auto& [method_name, unused] : current->methods) {
+                static_cast<void>(unused);
+                candidate_names.insert(method_name);
+            }
+            current = current->base ? find_nominal_type(*current->base) : nullptr;
+        }
+        for (const auto& method_name : candidate_names) {
+            const auto* method = find_method(name, method_name);
+            if (method && method->is_abstract) {
+                throw_type_error(type_info.location,
+                    "concrete class '" + name + "' does not implement abstract method '"
+                        + method_name + "'");
+            }
+        }
+    }
+}
+
+void TypeChecker::validate_interfaces(
+    const std::string& name,
+    const NominalTypeInfo& type_info) const
+{
+    for (const auto& interface_name : type_info.interfaces) {
+        const auto* interface_type = find_nominal_type(interface_name);
+        if (!interface_type) {
+            continue;
+        }
+        for (const auto& [method_name, requirement] : interface_type->methods) {
+            const auto* implementation = find_method(name, method_name);
+            if (!implementation || implementation->visibility != Visibility::Public) {
+                throw_type_error(type_info.location,
+                    "type '" + name + "' does not provide public interface method '"
+                        + interface_name + "." + method_name + "'");
+            }
+            if (!signatures_match(implementation->signature, requirement.signature)) {
+                throw_type_error(type_info.location,
+                    "method '" + name + "." + method_name
+                        + "' does not match interface '" + interface_name + "'");
+            }
         }
     }
 }
@@ -362,6 +576,9 @@ void TypeChecker::check_statement(const Stmt& statement)
             }
         }
         const Type source_type{TypeKind::Unknown, false, false, declaration.name};
+        for (const auto& method : declaration.methods) {
+            check_method(static_cast<const MethodDeclaration&>(*method), source_type);
+        }
         for (const auto& conversion : declaration.conversions) {
             check_conversion(*conversion, source_type);
         }
@@ -523,11 +740,37 @@ Type TypeChecker::check_construction(
     const std::vector<Type>& arguments,
     const NominalTypeInfo& type_info)
 {
-    if (arguments.size() > type_info.fields.size()) {
+    if (type_info.kind == NominalKind::Interface) {
+        throw_type_error(
+            current_location_, "interface '" + name + "' cannot be constructed");
+    }
+    if (type_info.kind == NominalKind::Class && type_info.is_abstract) {
+        throw_type_error(
+            current_location_, "abstract class '" + name + "' cannot be constructed");
+    }
+    std::vector<std::string> field_order;
+    std::unordered_map<std::string, const FieldInfo*> fields;
+    std::function<void(const NominalTypeInfo&)> collect_fields =
+        [&](const NominalTypeInfo& current) {
+            if (current.base) {
+                if (const auto* base = find_nominal_type(*current.base)) {
+                    collect_fields(*base);
+                }
+            }
+            for (const auto& field_name : current.field_order) {
+                if (!fields.contains(field_name)) {
+                    field_order.push_back(field_name);
+                }
+                fields[field_name] = &current.fields.at(field_name);
+            }
+        };
+    collect_fields(type_info);
+
+    if (arguments.size() > fields.size()) {
         throw_type_error(
             current_location_,
             "construction of '" + name + "' accepts at most "
-                + std::to_string(type_info.fields.size()) + " fields, got "
+                + std::to_string(fields.size()) + " fields, got "
                 + std::to_string(arguments.size()));
     }
 
@@ -537,14 +780,14 @@ Type TypeChecker::check_construction(
         if (call.arguments[index].name) {
             field_name = *call.arguments[index].name;
         } else {
-            if (index >= type_info.field_order.size()) {
+            if (index >= field_order.size()) {
                 throw_type_error(current_location_, "too many positional fields for '" + name + "'");
             }
-            field_name = type_info.field_order[index];
+            field_name = field_order[index];
         }
 
-        const auto field = type_info.fields.find(field_name);
-        if (field == type_info.fields.end()) {
+        const auto field = fields.find(field_name);
+        if (field == fields.end()) {
             throw_type_error(
                 current_location_,
                 "type '" + name + "' has no field named '" + field_name + "'");
@@ -553,22 +796,23 @@ Type TypeChecker::check_construction(
             throw_type_error(
                 current_location_, "field '" + field_name + "' is supplied more than once");
         }
-        if (!can_access(field->second.visibility, name)) {
+        if (!can_access(field->second->visibility, field->second->owner)) {
             throw_type_error(
-                current_location_, "field '" + name + "." + field_name + "' is private");
+                current_location_, "field '" + field->second->owner + "."
+                    + field_name + "' is private");
         }
-        if (!is_assignable(field->second.type, arguments[index])) {
+        if (!is_assignable(field->second->type, arguments[index])) {
             throw_type_error(
                 current_location_,
                 "field '" + name + "." + field_name + "' expects '"
-                    + type_name(field->second.type) + "', got '"
+                    + type_name(field->second->type) + "', got '"
                     + type_name(arguments[index]) + "'");
         }
     }
 
-    for (const auto& field_name : type_info.field_order) {
-        const auto& field = type_info.fields.at(field_name);
-        if (field.required && !supplied.contains(field_name)) {
+    for (const auto& field_name : field_order) {
+        const auto* field = fields.at(field_name);
+        if (field->required && !supplied.contains(field_name)) {
             throw_type_error(
                 current_location_,
                 "construction of '" + name + "' is missing required field '"
@@ -603,9 +847,9 @@ Type TypeChecker::check_method_call(
         throw_type_error(
             current_location_, "cannot resolve members of type '" + type_name(object) + "'");
     }
-    const auto method = type_info->methods.find(callee.member);
-    if (method == type_info->methods.end()) {
-        if (type_info->fields.contains(callee.member)) {
+    const auto* method = find_method(object.name, callee.member);
+    if (!method) {
+        if (find_field(object.name, callee.member)) {
             throw_type_error(
                 current_location_, "field '" + object.name + "." + callee.member
                     + "' is not callable");
@@ -614,15 +858,15 @@ Type TypeChecker::check_method_call(
             current_location_, "type '" + object.name + "' has no method named '"
                 + callee.member + "'");
     }
-    if (!can_access(method->second.visibility, object.name)) {
+    if (!can_access(method->visibility, method->owner)) {
         throw_type_error(
-            current_location_, "method '" + object.name + "." + callee.member
+            current_location_, "method '" + method->owner + "." + callee.member
                 + "' is private");
     }
     check_arguments(
         "method", object.name + "." + callee.member,
-        call.arguments, arguments, method->second.signature);
-    return method->second.signature.return_type;
+        call.arguments, arguments, method->signature);
+    return method->signature.return_type;
 }
 
 void TypeChecker::check_arguments(
@@ -696,20 +940,18 @@ Type TypeChecker::check_member_access(const MemberAccessExpr& member)
         throw_type_error(
             current_location_, "cannot resolve members of type '" + type_name(object) + "'");
     }
-    if (const auto field = type_info->fields.find(member.member);
-        field != type_info->fields.end()) {
-        if (!can_access(field->second.visibility, object.name)) {
+    if (const auto* field = find_field(object.name, member.member)) {
+        if (!can_access(field->visibility, field->owner)) {
             throw_type_error(
-                current_location_, "field '" + object.name + "." + member.member
+                current_location_, "field '" + field->owner + "." + member.member
                     + "' is private");
         }
-        return field->second.type;
+        return field->type;
     }
-    if (const auto method = type_info->methods.find(member.member);
-        method != type_info->methods.end()) {
-        if (!can_access(method->second.visibility, object.name)) {
+    if (const auto* method = find_method(object.name, member.member)) {
+        if (!can_access(method->visibility, method->owner)) {
             throw_type_error(
-                current_location_, "method '" + object.name + "." + member.member
+                current_location_, "method '" + method->owner + "." + member.member
                     + "' is private");
         }
         return unknown_type;
@@ -1031,6 +1273,56 @@ void TypeChecker::require_assignable(
     }
 }
 
+bool TypeChecker::is_assignable(const Type& expected, const Type& actual) const
+{
+    if (is_directly_assignable(expected, actual)) {
+        return true;
+    }
+    if (actual.nullable && !expected.nullable) {
+        return false;
+    }
+    if (!is_unknown(expected) || !is_unknown(actual)
+        || expected.name.empty() || actual.name.empty()) {
+        return false;
+    }
+    return is_subtype(actual.name, expected.name);
+}
+
+bool TypeChecker::is_subtype(
+    const std::string& actual,
+    const std::string& expected) const
+{
+    if (actual == expected) {
+        return true;
+    }
+    const auto* type_info = find_nominal_type(actual);
+    if (!type_info) {
+        return false;
+    }
+    for (const auto& interface_name : type_info->interfaces) {
+        if (interface_name == expected) {
+            return true;
+        }
+    }
+    return type_info->base && is_subtype(*type_info->base, expected);
+}
+
+bool TypeChecker::signatures_match(
+    const FunctionSignature& left,
+    const FunctionSignature& right) const
+{
+    if (left.parameters.size() != right.parameters.size()
+        || left.return_type != right.return_type) {
+        return false;
+    }
+    for (std::size_t index = 0; index < left.parameters.size(); ++index) {
+        if (left.parameters[index].type != right.parameters[index].type) {
+            return false;
+        }
+    }
+    return true;
+}
+
 void TypeChecker::require_condition(Type type, SourceLocation location) const
 {
     type = require_value(type, location);
@@ -1123,6 +1415,40 @@ const TypeChecker::NominalTypeInfo* TypeChecker::find_nominal_type(
         }
     }
     return nullptr;
+}
+
+const TypeChecker::FieldInfo* TypeChecker::find_field(
+    const std::string& type_name_value,
+    const std::string& field_name) const
+{
+    const auto* type_info = find_nominal_type(type_name_value);
+    if (!type_info) {
+        return nullptr;
+    }
+    if (const auto field = type_info->fields.find(field_name);
+        field != type_info->fields.end()) {
+        return &field->second;
+    }
+    return type_info->base ? find_field(*type_info->base, field_name) : nullptr;
+}
+
+const TypeChecker::MethodInfo* TypeChecker::find_method(
+    const std::string& type_name_value,
+    const std::string& method_name,
+    bool include_private) const
+{
+    const auto* type_info = find_nominal_type(type_name_value);
+    if (!type_info) {
+        return nullptr;
+    }
+    if (const auto method = type_info->methods.find(method_name);
+        method != type_info->methods.end()
+        && (include_private || method->second.visibility == Visibility::Public)) {
+        return &method->second;
+    }
+    return type_info->base
+        ? find_method(*type_info->base, method_name, include_private)
+        : nullptr;
 }
 
 bool TypeChecker::can_access(

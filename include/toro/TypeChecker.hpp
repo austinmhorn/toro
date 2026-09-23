@@ -30,17 +30,29 @@ private:
         Type type;
         Visibility visibility;
         bool required;
+        std::string owner;
     };
 
     struct MethodInfo {
         FunctionSignature signature;
         Visibility visibility;
+        std::string owner;
+        bool is_virtual;
+        bool is_abstract;
+        bool is_override;
     };
 
+    enum class NominalKind { Struct, Class, Interface };
+
     struct NominalTypeInfo {
+        NominalKind kind;
+        bool is_abstract{false};
+        std::optional<std::string> base;
+        std::vector<std::string> interfaces;
         std::vector<std::string> field_order;
         std::unordered_map<std::string, FieldInfo> fields;
         std::unordered_map<std::string, MethodInfo> methods;
+        SourceLocation location;
     };
 
     struct Scope {
@@ -52,6 +64,10 @@ private:
 
     void check_statement_list(const std::vector<std::unique_ptr<Stmt>>& statements);
     void predeclare(const std::vector<std::unique_ptr<Stmt>>& statements);
+    void validate_nominal_types();
+    void validate_inheritance_cycles() const;
+    void validate_class(const std::string& name, const NominalTypeInfo& type_info) const;
+    void validate_interfaces(const std::string& name, const NominalTypeInfo& type_info) const;
     void check_statement(const Stmt& statement);
     [[nodiscard]] Type check_expression(const Expr& expression);
     [[nodiscard]] Type check_call(const CallExpr& call);
@@ -83,6 +99,11 @@ private:
     [[nodiscard]] bool contains_generic_parameter(const TypeReference& reference) const;
     [[nodiscard]] Type require_value(Type type, SourceLocation location) const;
     void require_assignable(Type expected, Type actual, SourceLocation location) const;
+    [[nodiscard]] bool is_assignable(const Type& expected, const Type& actual) const;
+    [[nodiscard]] bool is_subtype(const std::string& actual, const std::string& expected) const;
+    [[nodiscard]] bool signatures_match(
+        const FunctionSignature& left,
+        const FunctionSignature& right) const;
     void require_condition(Type type, SourceLocation location) const;
 
     void push_scope();
@@ -94,6 +115,13 @@ private:
     [[nodiscard]] std::optional<Type> find_value(const std::string& name) const;
     [[nodiscard]] const FunctionSignature* find_function(const std::string& name) const;
     [[nodiscard]] const NominalTypeInfo* find_nominal_type(const std::string& name) const;
+    [[nodiscard]] const FieldInfo* find_field(
+        const std::string& type_name,
+        const std::string& field_name) const;
+    [[nodiscard]] const MethodInfo* find_method(
+        const std::string& type_name,
+        const std::string& method_name,
+        bool include_private = true) const;
     [[nodiscard]] bool can_access(Visibility visibility, const std::string& owner) const;
     [[nodiscard]] bool find_conversion(
         const Type& source_type,

@@ -164,6 +164,9 @@ void SemanticAnalyzer::analyze_statement(const Stmt& statement)
                 analyze_expression(*field.default_value);
             }
         }
+        for (const auto& method : declaration.methods) {
+            analyze_method(static_cast<const MethodDeclaration&>(*method));
+        }
         for (const auto& conversion : declaration.conversions) {
             analyze_conversion(*conversion);
         }
@@ -203,7 +206,7 @@ void SemanticAnalyzer::analyze_expression(const Expr& expression)
         if (identifier.name == "self") {
             if (!inside_class_method_) {
                 throw_semantic_error(
-                    current_location_, "'self' is only valid inside class methods");
+                    current_location_, "'self' is only valid inside class or struct methods");
             }
             return;
         }

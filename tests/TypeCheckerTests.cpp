@@ -500,6 +500,138 @@ void test_method_calls()
         "type 'Counter' has no method named 'reset'");
 }
 
+void test_inheritance_and_subtyping()
+{
+    expect_valid(
+        "class Animal {\n"
+        "    public name: string\n"
+        "    public virtual function speak() -> string { return \"...\" }\n"
+        "}\n"
+        "class Dog : Animal {\n"
+        "    public override function speak() -> string { return \"woof\" }\n"
+        "}\n"
+        "function accept(animal: Animal) { print(animal.name) }\n"
+        "dog := Dog(name: \"Rex\")\n"
+        "animal: Animal = dog\n"
+        "accept(dog)\n"
+        "sound: string = dog.speak()\n");
+    expect_error(
+        "class Dog : Missing {}\n",
+        "base type 'Missing' of class 'Dog' must name an existing class");
+    expect_error(
+        "struct Animal {}\n"
+        "class Dog : Animal {}\n",
+        "must name an existing class");
+    expect_error(
+        "class First : Second {}\n"
+        "class Second : First {}\n",
+        "inheritance cycle");
+    expect_error(
+        "class Base { private secret: int }\n"
+        "class Derived : Base {\n"
+        "    public function reveal() -> int { return self.secret }\n"
+        "}\n",
+        "field 'Base.secret' is private");
+    expect_error(
+        "class Animal {}\n"
+        "class Dog : Animal {}\n"
+        "animal := Animal()\n"
+        "dog: Dog = animal\n",
+        "cannot assign value of type 'Animal' to type 'Dog'");
+}
+
+void test_virtual_and_override_validation()
+{
+    expect_valid(
+        "class Base { public virtual function value(x: int) -> string { return \"base\" } }\n"
+        "class Derived : Base {\n"
+        "    public override function value(x: int) -> string { return \"derived\" }\n"
+        "}\n");
+    expect_error(
+        "class Base {}\n"
+        "class Derived : Base { override function missing() {} }\n",
+        "marked override but no inherited method exists");
+    expect_error(
+        "class Base { public function value() {} }\n"
+        "class Derived : Base { public override function value() {} }\n",
+        "cannot override non-virtual method");
+    expect_error(
+        "class Base { public virtual function value(x: int) -> int { return x } }\n"
+        "class Derived : Base {\n"
+        "    public override function value(x: dec) -> int { return 1 }\n"
+        "}\n",
+        "does not match the inherited signature");
+    expect_error(
+        "class Base { public virtual function value() {} }\n"
+        "class Derived : Base { public function value() {} }\n",
+        "must use override for an inherited virtual method");
+}
+
+void test_abstract_classes()
+{
+    expect_valid(
+        "abstract class Shape { public virtual function area() -> dec }\n"
+        "class Circle : Shape {\n"
+        "    public override function area() -> dec { return 1.0 }\n"
+        "}\n"
+        "shape: Shape = Circle()\n");
+    expect_error(
+        "abstract class Shape { public virtual function area() -> dec }\n"
+        "shape := Shape()\n",
+        "abstract class 'Shape' cannot be constructed");
+    expect_error(
+        "abstract class Shape { public virtual function area() -> dec }\n"
+        "class Circle : Shape {}\n",
+        "does not implement abstract method 'area'");
+}
+
+void test_interface_conformance()
+{
+    expect_valid(
+        "interface Printable { function print_value() -> string }\n"
+        "interface Resettable { function reset() }\n"
+        "class Player implements Printable, Resettable {\n"
+        "    public name: string\n"
+        "    public function print_value() -> string { return self.name }\n"
+        "    public function reset() {}\n"
+        "}\n"
+        "function emit(value: Printable) { print(value.print_value()) }\n"
+        "player := Player()\n"
+        "printable: Printable = player\n"
+        "emit(player)\n");
+    expect_valid(
+        "interface Printable { function print_value() -> string }\n"
+        "struct Label implements Printable {\n"
+        "    value: string\n"
+        "    function print_value() -> string { return self.value }\n"
+        "}\n"
+        "function emit(value: Printable) { print(value.print_value()) }\n"
+        "label := Label()\n"
+        "printable: Printable = label\n"
+        "emit(label)\n");
+    expect_error(
+        "interface Printable { function print_value() -> string }\n"
+        "class Player implements Printable {}\n",
+        "does not provide public interface method 'Printable.print_value'");
+    expect_error(
+        "interface Printable { function print_value() -> string }\n"
+        "class Player implements Printable {\n"
+        "    public function print_value() -> int { return 1 }\n"
+        "}\n",
+        "does not match interface 'Printable'");
+    expect_error(
+        "class NotAnInterface {}\n"
+        "class Player implements NotAnInterface {}\n",
+        "must name an existing interface");
+    expect_error(
+        "interface First { function value() -> int }\n"
+        "interface Second { function value() -> string }\n"
+        "class Both implements First, Second {\n"
+        "    public function value() -> int { return 1 }\n"
+        "}\n",
+        "does not match interface");
+}
+
 void test_existing_language_features_remain_checkable()
 {
     expect_valid(
@@ -549,6 +681,10 @@ int main()
         test_construction_and_field_access();
         test_member_errors_and_visibility();
         test_method_calls();
+        test_inheritance_and_subtyping();
+        test_virtual_and_override_validation();
+        test_abstract_classes();
+        test_interface_conformance();
         test_existing_language_features_remain_checkable();
     } catch (const std::exception& error) {
         std::cerr << "type checker test failure: " << error.what() << '\n';

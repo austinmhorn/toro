@@ -288,6 +288,24 @@ void append_statement_dump(const Stmt& statement, std::size_t depth, std::string
                 append_dump(*field.default_value, depth + 3, output);
             }
         }
+        for (const auto& method : declaration.methods) {
+            const auto& method_declaration = static_cast<const MethodDeclaration&>(*method);
+            output += std::string((depth + 1) * 2, ' ') + "public Method("
+                + method_declaration.name + ")\n";
+            append_generic_parameters(
+                method_declaration.generic_parameters, depth + 2, output);
+            output += std::string((depth + 2) * 2, ' ') + "Parameters\n";
+            for (const auto& parameter : method_declaration.parameters) {
+                output += std::string((depth + 3) * 2, ' ')
+                    + "Parameter(" + parameter.name + ": "
+                    + format_type(parameter.type) + ")\n";
+            }
+            if (method_declaration.return_type) {
+                output += std::string((depth + 2) * 2, ' ')
+                    + "return type: " + format_type(*method_declaration.return_type) + "\n";
+            }
+            append_statement_dump(*method_declaration.body, depth + 2, output);
+        }
         for (const auto& conversion : declaration.conversions) {
             output += std::string((depth + 1) * 2, ' ')
                 + "Conversion(as " + format_type(conversion->target_type) + ")\n";
@@ -809,10 +827,17 @@ std::unique_ptr<Stmt> Parser::parse_struct_declaration()
     consume(TokenType::LeftBrace, "expected '{' before struct body");
 
     std::vector<StructField> fields;
+    std::vector<std::unique_ptr<ClassMember>> methods;
     std::vector<std::unique_ptr<ConversionOverload>> conversions;
     std::unordered_set<std::string> conversion_targets;
+    bool saw_destroy = false;
     while (!at_end() && peek().type != TokenType::RightBrace) {
         statement_line_ = peek().line;
+        if (check(TokenType::Function)) {
+            methods.push_back(parse_method_declaration(
+                Visibility::Public, false, false, saw_destroy));
+            continue;
+        }
         if (check(TokenType::Overload)) {
             const Token overload_token = peek();
             auto conversion = parse_conversion_overload();
@@ -856,6 +881,7 @@ std::unique_ptr<Stmt> Parser::parse_struct_declaration()
         std::move(generic_parameters),
         std::move(interfaces),
         std::move(fields),
+        std::move(methods),
         std::move(conversions));
 }
 

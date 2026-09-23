@@ -93,6 +93,8 @@ Struct fields have explicit types and may provide a default expression. During
 construction, explicit defaults take priority over toro's type zero values.
 Without an explicit default, `int`, `dec`, `string`, and `bool` fields receive
 `0`, `0.0`, `""`, and `false`, respectively. Nullable fields receive `null`.
+Structs may also declare public, non-virtual methods with normal `function`
+syntax.
 
 ```toro
 struct Player {
@@ -166,8 +168,11 @@ class Dog : Animal implements Drawable {
 ```
 
 Interface methods are signatures without bodies. `virtual` and `override` are
-explicit method modifiers. A virtual method may omit its body; dispatch,
-override validation, and interface conformance belong to later semantic phases.
+explicit method modifiers. An abstract class may leave virtual methods bodyless.
+Overrides must match an inherited virtual method exactly, and concrete classes
+must implement inherited abstract methods. Implementing classes and structs must
+provide matching public interface methods. Runtime virtual dispatch belongs to
+a later phase.
 
 ### Generics
 
@@ -198,9 +203,10 @@ parameters, loop variables, and `handle` payload bindings are visible only in
 their corresponding scope.
 
 Functions and declared types are registered as symbols, and `print` is a
-predefined symbol. `self` is available only in class methods. The current pass
-does not perform function overload resolution, interface conformance,
-inheritance validation, or generic constraint validation.
+predefined symbol. `self` is available in class and struct methods. The current
+passes validate inheritance, abstract methods, overrides, and interface
+conformance, but do not perform function overload resolution or generic
+constraint validation.
 
 ### Primitive type checking
 
@@ -214,8 +220,9 @@ Equality requires compatible operands, logical operators require `bool`, and
 argument counts and types, and returns are checked against the function's
 declared return type.
 
-Generic specialization, inheritance, interfaces, and overloads remain deferred.
-Concrete struct and class fields and methods are type checked.
+Generic specialization and overloads remain deferred. Concrete struct and class
+fields and methods are type checked, including inherited members and interface
+method signatures.
 
 ### Construction and members
 
@@ -231,11 +238,16 @@ members are accessible only while checking the declaring class.
 Member access returns the declared field type and may be chained. Member
 assignment checks the field type. Method calls validate positional or named
 arguments and return the declared result type; a method without a return type
-cannot be used as a value. `self` is typed as its containing class, so method
+cannot be used as a value. `self` is typed as its containing class or struct, so method
 bodies receive the same field, method, and visibility checks as external code.
 
-Constructor-specific `init` behavior, inheritance member lookup, generic member
-specialization, and runtime construction are not implemented yet.
+Public inherited fields and methods participate in lookup. Private members remain
+accessible only within their declaring type. Derived values are assignable to
+their base class and implemented interfaces, but assignment in the opposite
+direction is rejected.
+
+Constructor-specific `init` behavior, generic member specialization, virtual
+dispatch, and runtime construction are not implemented yet.
 
 ### Nullable types
 

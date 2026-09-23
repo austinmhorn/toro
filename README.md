@@ -15,7 +15,8 @@ override methods, and generic declarations and type references into an AST.
 The semantic analysis pass provides lexical scopes, symbol registration, and
 basic name resolution. A separate type-checking pass infers primitive local
 types and validates expressions, assignments, functions, struct/class
-construction, fields, methods, visibility, nullable types, and explicit casts.
+construction, fields, methods, visibility, inheritance, interface conformance,
+abstract classes, nullable types, and explicit casts.
 
 ## Build
 
@@ -109,7 +110,7 @@ conditions and returns, bad construction fields, invalid member access, method
 argument errors, and visibility violations. Construction supplies zero values
 for primitive and nullable fields, honors explicit field defaults, and requires
 non-null named fields that cannot be safely defaulted. Generic member
-specialization, inheritance member lookup, function overload resolution, and
+specialization, runtime virtual dispatch, function overload resolution, and
 flow-sensitive null narrowing are not implemented yet. Explicit `as` casts
 support numeric conversions and user-defined class or struct conversions.
 
