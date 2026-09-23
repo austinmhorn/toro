@@ -68,30 +68,64 @@ void append_dump(const Expr& expression, std::size_t depth, std::string& output)
     }
 }
 
-void append_statement_dump(const Stmt& statement, std::string& output)
+void append_statement_dump(const Stmt& statement, std::size_t depth, std::string& output)
 {
+    const std::string indentation(depth * 2, ' ');
+
     switch (statement.kind) {
     case StmtKind::VariableDeclaration: {
         const auto& declaration = static_cast<const VariableDeclarationStmt&>(statement);
-        output += "VariableDeclaration(" + declaration.name + ")\n  ";
+        output += indentation + "VariableDeclaration(" + declaration.name + ")\n";
+        output.append((depth + 1) * 2, ' ');
         if (declaration.explicit_type) {
             output += "type: " + *declaration.explicit_type + "\n";
         } else {
             output += "inferred\n";
         }
-        append_dump(*declaration.initializer, 1, output);
+        append_dump(*declaration.initializer, depth + 1, output);
         return;
     }
     case StmtKind::Assignment: {
         const auto& assignment = static_cast<const AssignmentStmt&>(statement);
-        output += "Assignment(" + assignment.name + ")\n";
-        append_dump(*assignment.value, 1, output);
+        output += indentation + "Assignment(" + assignment.name + ")\n";
+        append_dump(*assignment.value, depth + 1, output);
         return;
     }
     case StmtKind::Expression: {
         const auto& expression = static_cast<const ExpressionStmt&>(statement);
-        output += "ExpressionStatement\n";
-        append_dump(*expression.expression, 1, output);
+        output += indentation + "ExpressionStatement\n";
+        append_dump(*expression.expression, depth + 1, output);
+        return;
+    }
+    case StmtKind::FunctionDeclaration: {
+        const auto& function = static_cast<const FunctionDeclarationStmt&>(statement);
+        output += indentation + "FunctionDeclaration(" + function.name + ")\n";
+        output += std::string((depth + 1) * 2, ' ') + "Parameters\n";
+        for (const auto& parameter : function.parameters) {
+            output += std::string((depth + 2) * 2, ' ')
+                + "Parameter(" + parameter.name + ": " + parameter.type + ")\n";
+        }
+        if (function.return_type) {
+            output += std::string((depth + 1) * 2, ' ')
+                + "return type: " + *function.return_type + "\n";
+        }
+        append_statement_dump(*function.body, depth + 1, output);
+        return;
+    }
+    case StmtKind::Return: {
+        const auto& return_statement = static_cast<const ReturnStmt&>(statement);
+        output += indentation + "Return\n";
+        if (return_statement.value) {
+            append_dump(*return_statement.value, depth + 1, output);
+        }
+        return;
+    }
+    case StmtKind::Block: {
+        const auto& block = static_cast<const BlockStmt&>(statement);
+        output += indentation + "Block\n";
+        for (const auto& nested_statement : block.statements) {
+            append_statement_dump(*nested_statement, depth + 1, output);
+        }
         return;
     }
     }
@@ -130,6 +164,17 @@ Program Parser::parse_program()
 
 std::unique_ptr<Stmt> Parser::parse_statement()
 {
+    if (check(TokenType::Function)) {
+        return parse_function_declaration();
+    }
+    if (check(TokenType::Return)) {
+        return parse_return_statement();
+    }
+    if (check(TokenType::LeftBrace)) {
+        auto block = parse_block_statement();
+        require_statement_end();
+        return block;
+    }
     if (check(TokenType::Identifier)
         && (check_next(TokenType::Declare) || check_next(TokenType::Colon))) {
         return parse_variable_declaration();
@@ -175,6 +220,89 @@ std::unique_ptr<Stmt> Parser::parse_variable_declaration()
 
     return std::make_unique<VariableDeclarationStmt>(
         location, std::move(name.lexeme), std::move(explicit_type), std::move(initializer));
+}
+
+std::unique_ptr<Stmt> Parser::parse_function_declaration()
+{
+    Token function_token = advance();
+    const Token& name = consume(TokenType::Identifier, "expected function name");
+    const std::string function_name = name.lexeme;
+    consume(TokenType::LeftParen, "expected '(' after function name");
+
+    std::vector<Parameter> parameters;
+    if (!check(TokenType::RightParen)) {
+        do {
+            const Token& parameter_name = consume(
+                TokenType::Identifier, "expected parameter name");
+            Parameter parameter{
+                parameter_name.lexeme,
+                {},
+                SourceLocation{parameter_name.line, parameter_name.column},
+            };
+            consume(TokenType::Colon, "expected ':' after parameter name");
+            const Token& parameter_type = consume(
+                TokenType::Identifier, "expected parameter type after ':'");
+            parameter.type = parameter_type.lexeme;
+            parameters.push_back(std::move(parameter));
+        } while (match({TokenType::Comma}));
+    }
+
+    consume(TokenType::RightParen, "expected ')' after parameters");
+
+    std::optional<std::string> return_type;
+    if (match({TokenType::Arrow})) {
+        const Token& type = consume(TokenType::Identifier, "expected return type after '->'");
+        return_type = type.lexeme;
+    }
+
+    if (!check(TokenType::LeftBrace)) {
+        throw_parse_error(peek(), "expected '{' before function body");
+    }
+    auto body = parse_block_statement();
+    require_statement_end();
+
+    return std::make_unique<FunctionDeclarationStmt>(
+        SourceLocation{function_token.line, function_token.column},
+        function_name,
+        std::move(parameters),
+        std::move(return_type),
+        std::move(body));
+}
+
+std::unique_ptr<Stmt> Parser::parse_return_statement()
+{
+    Token return_token = advance();
+    std::unique_ptr<Expr> value;
+
+    if (!at_end()
+        && peek().type != TokenType::RightBrace
+        && peek().line == return_token.line) {
+        value = parse_equality();
+    }
+
+    require_statement_end();
+    return std::make_unique<ReturnStmt>(
+        SourceLocation{return_token.line, return_token.column}, std::move(value));
+}
+
+std::unique_ptr<BlockStmt> Parser::parse_block_statement()
+{
+    Token left_brace = advance();
+    std::vector<std::unique_ptr<Stmt>> statements;
+
+    while (!at_end() && peek().type != TokenType::RightBrace) {
+        statement_line_ = peek().line;
+        statements.push_back(parse_statement());
+    }
+
+    if (at_end()) {
+        throw_parse_error(peek(), "expected '}' after block");
+    }
+
+    Token right_brace = advance();
+    statement_line_ = right_brace.line;
+    return std::make_unique<BlockStmt>(
+        SourceLocation{left_brace.line, left_brace.column}, std::move(statements));
 }
 
 std::unique_ptr<Expr> Parser::parse_equality()
@@ -377,7 +505,10 @@ void Parser::require_expression(const char* message) const
 
 void Parser::require_statement_end() const
 {
-    if (!at_end() && statement_line_ && peek().line == *statement_line_) {
+    if (!at_end()
+        && peek().type != TokenType::RightBrace
+        && statement_line_
+        && peek().line == *statement_line_) {
         throw_parse_error(peek(), "unexpected token after statement");
     }
 }
@@ -393,7 +524,7 @@ std::string dump_program(const Program& program)
 {
     std::string output;
     for (std::size_t index = 0; index < program.statements.size(); ++index) {
-        append_statement_dump(*program.statements[index], output);
+        append_statement_dump(*program.statements[index], 0, output);
         if (index + 1 < program.statements.size()) {
             output += '\n';
         }

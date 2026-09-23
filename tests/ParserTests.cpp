@@ -200,6 +200,106 @@ void test_call_expression_statement()
         "    Integer(20)\n");
 }
 
+void test_empty_function()
+{
+    expect_program_dump(
+        "function main() {\n}\n",
+        "FunctionDeclaration(main)\n"
+        "  Parameters\n"
+        "  Block\n");
+}
+
+void test_function_parameters_and_return_type()
+{
+    expect_program_dump(
+        "function add(a: int, b: int) -> int {\n"
+        "    return a + b\n"
+        "}\n",
+        "FunctionDeclaration(add)\n"
+        "  Parameters\n"
+        "    Parameter(a: int)\n"
+        "    Parameter(b: int)\n"
+        "  return type: int\n"
+        "  Block\n"
+        "    Return\n"
+        "      Binary(+)\n"
+        "        Identifier(a)\n"
+        "        Identifier(b)\n");
+
+    const auto program = parse_program("function one(value: dec) {}\n");
+    const auto& function = static_cast<const toro::FunctionDeclarationStmt&>(
+        *program.statements.front());
+    expect(function.location.line == 1 && function.location.column == 1,
+        "function location was not retained");
+    expect(function.parameters.front().location.column == 14,
+        "parameter location was not retained");
+}
+
+void test_return_without_value()
+{
+    expect_program_dump(
+        "function finish() {\n"
+        "    return\n"
+        "}\n",
+        "FunctionDeclaration(finish)\n"
+        "  Parameters\n"
+        "  Block\n"
+        "    Return\n");
+}
+
+void test_nested_function_statements()
+{
+    expect_program_dump(
+        "function main() {\n"
+        "    result := add(10, 20)\n"
+        "    print(result)\n"
+        "}\n",
+        "FunctionDeclaration(main)\n"
+        "  Parameters\n"
+        "  Block\n"
+        "    VariableDeclaration(result)\n"
+        "      inferred\n"
+        "      Call\n"
+        "        Identifier(add)\n"
+        "        Integer(10)\n"
+        "        Integer(20)\n"
+        "    ExpressionStatement\n"
+        "      Call\n"
+        "        Identifier(print)\n"
+        "        Identifier(result)\n");
+}
+
+void test_multiple_functions()
+{
+    const auto program = parse_program(
+        "function first() {\n}\n\n"
+        "function second(value: int) -> int {\n"
+        "    return value\n"
+        "}\n");
+    expect(program.statements.size() == 2, "expected two function declarations");
+    expect(program.statements[0]->kind == toro::StmtKind::FunctionDeclaration,
+        "first statement was not a function");
+    expect(program.statements[1]->kind == toro::StmtKind::FunctionDeclaration,
+        "second statement was not a function");
+}
+
+void test_standalone_block()
+{
+    expect_program_dump(
+        "{\n"
+        "    x := 10\n"
+        "    print(x)\n"
+        "}\n",
+        "Block\n"
+        "  VariableDeclaration(x)\n"
+        "    inferred\n"
+        "    Integer(10)\n"
+        "  ExpressionStatement\n"
+        "    Call\n"
+        "      Identifier(print)\n"
+        "      Identifier(x)\n");
+}
+
 void expect_parse_error(std::string_view source, std::string_view expected_message)
 {
     try {
@@ -242,6 +342,25 @@ void test_statement_failures()
     expect_program_error(":= 10", "line 1, column 1: expected expression");
 }
 
+void test_function_failures()
+{
+    expect_program_error(
+        "function bad(a: int,) {}",
+        "expected parameter name");
+    expect_program_error(
+        "function bad(a) {}",
+        "expected ':' after parameter name");
+    expect_program_error(
+        "function bad(a:) {}",
+        "expected parameter type after ':'");
+    expect_program_error(
+        "function bad() {\n    return\n",
+        "expected '}' after block");
+    expect_program_error(
+        "function bad() {\n    return + 1\n}\n",
+        "expected expression");
+}
+
 } // namespace
 
 int main()
@@ -260,8 +379,15 @@ int main()
         test_assignment_expression();
         test_multiple_statements_and_blank_lines();
         test_call_expression_statement();
+        test_empty_function();
+        test_function_parameters_and_return_type();
+        test_return_without_value();
+        test_nested_function_statements();
+        test_multiple_functions();
+        test_standalone_block();
         test_failures();
         test_statement_failures();
+        test_function_failures();
     } catch (const std::exception& error) {
         std::cerr << "parser test failure: " << error.what() << '\n';
         return 1;

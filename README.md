@@ -8,7 +8,7 @@ toro is currently under active development.
 
 The first compiler implementation is written in C++23.
 It currently loads and tokenizes `.toro` source files and can parse expressions,
-variable declarations, assignments, and basic call-expression statements into an AST.
+variable declarations, assignments, calls, functions, returns, and blocks into an AST.
 
 ## Build
 

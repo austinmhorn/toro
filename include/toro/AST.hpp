@@ -152,6 +152,9 @@ enum class StmtKind {
     VariableDeclaration,
     Assignment,
     Expression,
+    FunctionDeclaration,
+    Return,
+    Block,
 };
 
 struct Stmt {
@@ -208,6 +211,53 @@ struct ExpressionStmt final : Stmt {
     }
 
     std::unique_ptr<Expr> expression;
+};
+
+struct Parameter {
+    std::string name;
+    std::string type;
+    SourceLocation location;
+};
+
+struct BlockStmt final : Stmt {
+    BlockStmt(SourceLocation location, std::vector<std::unique_ptr<Stmt>> statements)
+        : Stmt(StmtKind::Block, location)
+        , statements(std::move(statements))
+    {
+    }
+
+    std::vector<std::unique_ptr<Stmt>> statements;
+};
+
+struct FunctionDeclarationStmt final : Stmt {
+    FunctionDeclarationStmt(
+        SourceLocation location,
+        std::string name,
+        std::vector<Parameter> parameters,
+        std::optional<std::string> return_type,
+        std::unique_ptr<BlockStmt> body)
+        : Stmt(StmtKind::FunctionDeclaration, location)
+        , name(std::move(name))
+        , parameters(std::move(parameters))
+        , return_type(std::move(return_type))
+        , body(std::move(body))
+    {
+    }
+
+    std::string name;
+    std::vector<Parameter> parameters;
+    std::optional<std::string> return_type;
+    std::unique_ptr<BlockStmt> body;
+};
+
+struct ReturnStmt final : Stmt {
+    ReturnStmt(SourceLocation location, std::unique_ptr<Expr> value)
+        : Stmt(StmtKind::Return, location)
+        , value(std::move(value))
+    {
+    }
+
+    std::unique_ptr<Expr> value;
 };
 
 struct Program {
