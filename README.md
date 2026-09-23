@@ -7,8 +7,8 @@ toro is a statically typed, native programming language focused on readable synt
 toro is currently under active development.
 
 The first compiler implementation is written in C++23.
-It currently loads and tokenizes `.toro` source files and can parse standalone
-expressions into an AST. Statement parsing is an upcoming milestone.
+It currently loads and tokenizes `.toro` source files and can parse expressions,
+variable declarations, assignments, and basic call-expression statements into an AST.
 
 ## Build
 
@@ -41,6 +41,12 @@ Parse a file containing one expression and print its AST:
 
 ```bash
 ./build/toro ast-expression examples/expression.toro
+```
+
+Parse top-level statements and print their AST:
+
+```bash
+./build/toro ast examples/variables.toro
 ```
 
 Run the test suite:

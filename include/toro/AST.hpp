@@ -2,9 +2,12 @@
 
 #include "toro/Token.hpp"
 
+#include <cstddef>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace toro {
 
@@ -17,6 +20,7 @@ enum class ExprKind {
     Identifier,
     Unary,
     Binary,
+    Call,
     Grouping,
 };
 
@@ -117,6 +121,18 @@ struct BinaryExpr final : Expr {
     std::unique_ptr<Expr> right;
 };
 
+struct CallExpr final : Expr {
+    CallExpr(std::unique_ptr<Expr> callee, std::vector<std::unique_ptr<Expr>> arguments)
+        : Expr(ExprKind::Call)
+        , callee(std::move(callee))
+        , arguments(std::move(arguments))
+    {
+    }
+
+    std::unique_ptr<Expr> callee;
+    std::vector<std::unique_ptr<Expr>> arguments;
+};
+
 struct GroupingExpr final : Expr {
     explicit GroupingExpr(std::unique_ptr<Expr> expression)
         : Expr(ExprKind::Grouping)
@@ -127,6 +143,78 @@ struct GroupingExpr final : Expr {
     std::unique_ptr<Expr> expression;
 };
 
+struct SourceLocation {
+    std::size_t line;
+    std::size_t column;
+};
+
+enum class StmtKind {
+    VariableDeclaration,
+    Assignment,
+    Expression,
+};
+
+struct Stmt {
+    Stmt(StmtKind kind, SourceLocation location)
+        : kind(kind)
+        , location(location)
+    {
+    }
+
+    virtual ~Stmt() = default;
+
+    StmtKind kind;
+    SourceLocation location;
+};
+
+struct VariableDeclarationStmt final : Stmt {
+    VariableDeclarationStmt(
+        SourceLocation location,
+        std::string name,
+        std::optional<std::string> explicit_type,
+        std::unique_ptr<Expr> initializer)
+        : Stmt(StmtKind::VariableDeclaration, location)
+        , name(std::move(name))
+        , explicit_type(std::move(explicit_type))
+        , initializer(std::move(initializer))
+    {
+    }
+
+    std::string name;
+    std::optional<std::string> explicit_type;
+    std::unique_ptr<Expr> initializer;
+};
+
+struct AssignmentStmt final : Stmt {
+    AssignmentStmt(
+        SourceLocation location,
+        std::string name,
+        std::unique_ptr<Expr> value)
+        : Stmt(StmtKind::Assignment, location)
+        , name(std::move(name))
+        , value(std::move(value))
+    {
+    }
+
+    std::string name;
+    std::unique_ptr<Expr> value;
+};
+
+struct ExpressionStmt final : Stmt {
+    ExpressionStmt(SourceLocation location, std::unique_ptr<Expr> expression)
+        : Stmt(StmtKind::Expression, location)
+        , expression(std::move(expression))
+    {
+    }
+
+    std::unique_ptr<Expr> expression;
+};
+
+struct Program {
+    std::vector<std::unique_ptr<Stmt>> statements;
+};
+
 [[nodiscard]] std::string dump_expression(const Expr& expression);
+[[nodiscard]] std::string dump_program(const Program& program);
 
 } // namespace toro

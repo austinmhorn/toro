@@ -25,10 +25,22 @@ std::unique_ptr<toro::Expr> parse(std::string_view source)
     return toro::Parser(std::move(tokens)).parse_expression();
 }
 
+toro::Program parse_program(std::string_view source)
+{
+    auto tokens = toro::Lexer(source).tokenize();
+    return toro::Parser(std::move(tokens)).parse_program();
+}
+
 void expect_dump(std::string_view source, std::string_view expected)
 {
     const auto expression = parse(source);
     expect(toro::dump_expression(*expression) == expected, "unexpected expression tree");
+}
+
+void expect_program_dump(std::string_view source, std::string_view expected)
+{
+    const auto program = parse_program(source);
+    expect(toro::dump_program(program) == expected, "unexpected statement tree");
 }
 
 void test_literals_and_identifier()
@@ -113,6 +125,81 @@ void test_remaining_binary_operators()
     expect_dump("2 > 1", "Binary(>)\n  Integer(2)\n  Integer(1)\n");
 }
 
+void test_variable_declarations()
+{
+    expect_program_dump(
+        "x := 10",
+        "VariableDeclaration(x)\n"
+        "  inferred\n"
+        "  Integer(10)\n");
+    expect_program_dump(
+        "price: dec = 19.99",
+        "VariableDeclaration(price)\n"
+        "  type: dec\n"
+        "  Decimal(19.99)\n");
+
+    const auto program = parse_program("\n  value := 1");
+    expect(program.statements.size() == 1, "expected one declaration");
+    const auto& declaration = static_cast<const toro::VariableDeclarationStmt&>(
+        *program.statements.front());
+    expect(declaration.location.line == 2, "declaration line was not retained");
+    expect(declaration.location.column == 3, "declaration column was not retained");
+}
+
+void test_declaration_and_assignment_are_distinct()
+{
+    const auto program = parse_program("x := 10\nx = 20");
+    expect(program.statements.size() == 2, "expected two statements");
+    expect(program.statements[0]->kind == toro::StmtKind::VariableDeclaration,
+        "declaration was not represented as a declaration");
+    expect(program.statements[1]->kind == toro::StmtKind::Assignment,
+        "assignment was not represented as an assignment");
+}
+
+void test_assignment_expression()
+{
+    expect_program_dump(
+        "x = x + 1",
+        "Assignment(x)\n"
+        "  Binary(+)\n"
+        "    Identifier(x)\n"
+        "    Integer(1)\n");
+}
+
+void test_multiple_statements_and_blank_lines()
+{
+    expect_program_dump(
+        "x := 10\n\nprice: dec = 19.99\n\nx = x + 5\n\nprint(x)\n",
+        "VariableDeclaration(x)\n"
+        "  inferred\n"
+        "  Integer(10)\n"
+        "\n"
+        "VariableDeclaration(price)\n"
+        "  type: dec\n"
+        "  Decimal(19.99)\n"
+        "\n"
+        "Assignment(x)\n"
+        "  Binary(+)\n"
+        "    Identifier(x)\n"
+        "    Integer(5)\n"
+        "\n"
+        "ExpressionStatement\n"
+        "  Call\n"
+        "    Identifier(print)\n"
+        "    Identifier(x)\n");
+}
+
+void test_call_expression_statement()
+{
+    expect_program_dump(
+        "add(10, 20)",
+        "ExpressionStatement\n"
+        "  Call\n"
+        "    Identifier(add)\n"
+        "    Integer(10)\n"
+        "    Integer(20)\n");
+}
+
 void expect_parse_error(std::string_view source, std::string_view expected_message)
 {
     try {
@@ -133,6 +220,28 @@ void test_failures()
     expect_parse_error("10 20", "line 1, column 4: unexpected token after expression");
 }
 
+void expect_program_error(std::string_view source, std::string_view expected_message)
+{
+    try {
+        static_cast<void>(parse_program(source));
+    } catch (const std::runtime_error& error) {
+        expect(std::string_view(error.what()).find(expected_message) != std::string_view::npos,
+            "statement error message was not descriptive");
+        return;
+    }
+    throw std::runtime_error("expected statement parser failure");
+}
+
+void test_statement_failures()
+{
+    expect_program_error("x: = 10", "line 1, column 4: expected type name after ':'");
+    expect_program_error("10 = x", "line 1, column 4: invalid assignment target");
+    expect_program_error("x :=", "line 1, column 5: expected variable initializer");
+    expect_program_error("x: int", "line 1, column 7: expected '=' and initializer");
+    expect_program_error("x := 10\n* 2", "line 2, column 1: expected expression");
+    expect_program_error(":= 10", "line 1, column 1: expected expression");
+}
+
 } // namespace
 
 int main()
@@ -146,7 +255,13 @@ int main()
         test_equality_precedence();
         test_left_associativity();
         test_remaining_binary_operators();
+        test_variable_declarations();
+        test_declaration_and_assignment_are_distinct();
+        test_assignment_expression();
+        test_multiple_statements_and_blank_lines();
+        test_call_expression_statement();
         test_failures();
+        test_statement_failures();
     } catch (const std::exception& error) {
         std::cerr << "parser test failure: " << error.what() << '\n';
         return 1;

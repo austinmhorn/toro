@@ -15,12 +15,13 @@ void print_usage(std::ostream& output)
     output << "Usage: toro <source.toro>\n"
               "       toro tokens <source.toro>\n"
               "       toro ast-expression <source.toro>\n"
+              "       toro ast <source.toro>\n"
               "       toro --version\n";
 }
 
 bool is_source_command(std::string_view command)
 {
-    return command == "tokens" || command == "ast-expression";
+    return command == "tokens" || command == "ast-expression" || command == "ast";
 }
 
 void print_tokens(std::string_view source)
@@ -40,6 +41,13 @@ void print_expression_ast(std::string_view source)
     auto tokens = toro::Lexer(source).tokenize();
     auto expression = toro::Parser(std::move(tokens)).parse_expression();
     std::cout << toro::dump_expression(*expression);
+}
+
+void print_ast(std::string_view source)
+{
+    auto tokens = toro::Lexer(source).tokenize();
+    const auto program = toro::Parser(std::move(tokens)).parse_program();
+    std::cout << toro::dump_program(program);
 }
 
 } // namespace
@@ -68,8 +76,10 @@ int main(int argc, char* argv[])
             const auto source = toro::load_source_file(argv[2]);
             if (std::string_view(argv[1]) == "tokens") {
                 print_tokens(source.contents);
-            } else {
+            } else if (std::string_view(argv[1]) == "ast-expression") {
                 print_expression_ast(source.contents);
+            } else {
+                print_ast(source.contents);
             }
         } else {
             const auto source = toro::load_source_file(argv[1]);
