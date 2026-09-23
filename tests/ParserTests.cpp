@@ -469,6 +469,99 @@ void test_logical_operators_in_if_condition()
         "logical operators parsed incorrectly in if condition");
 }
 
+void test_basic_while()
+{
+    expect_program_dump(
+        "while running {\n"
+        "    update()\n"
+        "}\n",
+        "While\n"
+        "  Condition\n"
+        "    Identifier(running)\n"
+        "  Block\n"
+        "    ExpressionStatement\n"
+        "      Call\n"
+        "        Identifier(update)\n");
+
+    const auto program = parse_program("\n  while active {\n    stop\n  }\n");
+    const auto& loop = static_cast<const toro::WhileStmt&>(*program.statements.front());
+    expect(loop.location.line == 2 && loop.location.column == 3,
+        "while source location was not retained");
+}
+
+void test_while_logical_condition()
+{
+    expect_program_dump(
+        "while running and ready or forced {\n"
+        "    stop\n"
+        "}\n",
+        "While\n"
+        "  Condition\n"
+        "    Binary(or)\n"
+        "      Binary(and)\n"
+        "        Identifier(running)\n"
+        "        Identifier(ready)\n"
+        "      Identifier(forced)\n"
+        "  Block\n"
+        "    Stop\n");
+}
+
+void test_basic_for_in()
+{
+    expect_program_dump(
+        "for user in users {\n"
+        "    print(user)\n"
+        "}\n",
+        "ForIn(user)\n"
+        "  Collection\n"
+        "    Identifier(users)\n"
+        "  Block\n"
+        "    ExpressionStatement\n"
+        "      Call\n"
+        "        Identifier(print)\n"
+        "        Identifier(user)\n");
+}
+
+void test_nested_loops_and_loop_control()
+{
+    const auto program = parse_program(
+        "while outer {\n"
+        "    for item in items {\n"
+        "        stop\n"
+        "    }\n"
+        "    continue\n"
+        "}\n");
+    const auto& outer = static_cast<const toro::WhileStmt&>(*program.statements.front());
+    expect(outer.body->statements.front()->kind == toro::StmtKind::ForIn,
+        "nested for loop was not retained");
+    const auto& inner = static_cast<const toro::ForInStmt&>(
+        *outer.body->statements.front());
+    expect(inner.body->statements.front()->kind == toro::StmtKind::Stop,
+        "stop was not retained in nested loop");
+    expect(outer.body->statements.back()->kind == toro::StmtKind::Continue,
+        "continue was not retained in outer loop");
+}
+
+void test_loop_control_inside_conditionals()
+{
+    const auto program = parse_program(
+        "for user in users {\n"
+        "    if disabled {\n"
+        "        continue\n"
+        "    }\n"
+        "    if admin {\n"
+        "        stop\n"
+        "    }\n"
+        "}\n");
+    const auto& loop = static_cast<const toro::ForInStmt&>(*program.statements.front());
+    const auto& continue_if = static_cast<const toro::IfStmt&>(*loop.body->statements[0]);
+    const auto& stop_if = static_cast<const toro::IfStmt&>(*loop.body->statements[1]);
+    expect(continue_if.then_block->statements.front()->kind == toro::StmtKind::Continue,
+        "continue was not retained inside conditional");
+    expect(stop_if.then_block->statements.front()->kind == toro::StmtKind::Stop,
+        "stop was not retained inside conditional");
+}
+
 void expect_parse_error(std::string_view source, std::string_view expected_message)
 {
     try {
@@ -549,6 +642,44 @@ void test_if_failures()
         "expected '{' after if condition");
 }
 
+void test_loop_failures()
+{
+    expect_program_error(
+        "while {\n}\n",
+        "expected condition after 'while'");
+    expect_program_error(
+        "while running\n    update()\n",
+        "expected '{' after while condition");
+    expect_program_error(
+        "while running {\n    update()\n",
+        "expected '}' after block");
+    expect_program_error(
+        "for in users {\n}\n",
+        "expected loop variable after 'for'");
+    expect_program_error(
+        "for user users {\n}\n",
+        "expected 'in' after loop variable");
+    expect_program_error(
+        "for user in {\n}\n",
+        "expected collection expression after 'in'");
+    expect_program_error(
+        "for user in users\n    print(user)\n",
+        "expected '{' after for collection");
+    expect_program_error(
+        "stop\n",
+        "'stop' is only valid inside a loop");
+    expect_program_error(
+        "continue\n",
+        "'continue' is only valid inside a loop");
+    expect_program_error(
+        "while running {\n"
+        "    function nested() {\n"
+        "        stop\n"
+        "    }\n"
+        "}\n",
+        "'stop' is only valid inside a loop");
+}
+
 } // namespace
 
 int main()
@@ -581,10 +712,16 @@ int main()
         test_nested_if_and_return();
         test_declarations_and_assignments_in_branches();
         test_logical_operators_in_if_condition();
+        test_basic_while();
+        test_while_logical_condition();
+        test_basic_for_in();
+        test_nested_loops_and_loop_control();
+        test_loop_control_inside_conditionals();
         test_failures();
         test_statement_failures();
         test_function_failures();
         test_if_failures();
+        test_loop_failures();
     } catch (const std::exception& error) {
         std::cerr << "parser test failure: " << error.what() << '\n';
         return 1;

@@ -24,6 +24,9 @@ private:
     [[nodiscard]] std::unique_ptr<Stmt> parse_function_declaration();
     [[nodiscard]] std::unique_ptr<Stmt> parse_return_statement();
     [[nodiscard]] std::unique_ptr<Stmt> parse_if_statement();
+    [[nodiscard]] std::unique_ptr<Stmt> parse_while_statement();
+    [[nodiscard]] std::unique_ptr<Stmt> parse_for_in_statement();
+    [[nodiscard]] std::unique_ptr<Stmt> parse_loop_control_statement();
     [[nodiscard]] std::unique_ptr<BlockStmt> parse_block_statement();
     [[nodiscard]] std::unique_ptr<Expr> parse_or();
     [[nodiscard]] std::unique_ptr<Expr> parse_and();
@@ -49,6 +52,7 @@ private:
 
     std::vector<Token> tokens_;
     std::size_t current_{0};
+    std::size_t loop_depth_{0};
     std::optional<std::size_t> statement_line_;
 };
 

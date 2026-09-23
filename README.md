@@ -9,7 +9,7 @@ toro is currently under active development.
 The first compiler implementation is written in C++23.
 It currently loads and tokenizes `.toro` source files and can parse expressions,
 variable declarations, assignments, calls, functions, returns, blocks, and conditional
-control flow into an AST.
+control flow and loops into an AST.
 
 ## Build
 
@@ -54,6 +54,12 @@ Parse conditional control flow:
 
 ```bash
 ./build/toro ast examples/conditionals.toro
+```
+
+Parse collection and conditional loops:
+
+```bash
+./build/toro ast examples/loops.toro
 ```
 
 ## Logical operators

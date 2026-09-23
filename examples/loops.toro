@@ -1,0 +1,15 @@
+function process(users: list) {
+    for user in users {
+        if user == null {
+            continue
+        }
+
+        print(user)
+    }
+
+    running := true
+
+    while running {
+        stop
+    }
+}

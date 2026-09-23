@@ -52,3 +52,9 @@ These operators will short-circuit when execution and code generation are implem
 
 - `false and expression` does not evaluate `expression`.
 - `true or expression` does not evaluate `expression`.
+
+### Loops
+
+Collection iteration uses `for item in collection`, and conditional loops use
+`while condition`. `stop` exits the nearest enclosing loop; `continue` skips to
+its next iteration.

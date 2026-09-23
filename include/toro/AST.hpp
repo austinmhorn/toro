@@ -156,6 +156,10 @@ enum class StmtKind {
     Return,
     Block,
     If,
+    While,
+    ForIn,
+    Stop,
+    Continue,
 };
 
 struct Stmt {
@@ -277,6 +281,53 @@ struct IfStmt final : Stmt {
     std::unique_ptr<Expr> condition;
     std::unique_ptr<BlockStmt> then_block;
     std::unique_ptr<Stmt> else_branch;
+};
+
+struct WhileStmt final : Stmt {
+    WhileStmt(
+        SourceLocation location,
+        std::unique_ptr<Expr> condition,
+        std::unique_ptr<BlockStmt> body)
+        : Stmt(StmtKind::While, location)
+        , condition(std::move(condition))
+        , body(std::move(body))
+    {
+    }
+
+    std::unique_ptr<Expr> condition;
+    std::unique_ptr<BlockStmt> body;
+};
+
+struct ForInStmt final : Stmt {
+    ForInStmt(
+        SourceLocation location,
+        std::string variable_name,
+        std::unique_ptr<Expr> collection,
+        std::unique_ptr<BlockStmt> body)
+        : Stmt(StmtKind::ForIn, location)
+        , variable_name(std::move(variable_name))
+        , collection(std::move(collection))
+        , body(std::move(body))
+    {
+    }
+
+    std::string variable_name;
+    std::unique_ptr<Expr> collection;
+    std::unique_ptr<BlockStmt> body;
+};
+
+struct StopStmt final : Stmt {
+    explicit StopStmt(SourceLocation location)
+        : Stmt(StmtKind::Stop, location)
+    {
+    }
+};
+
+struct ContinueStmt final : Stmt {
+    explicit ContinueStmt(SourceLocation location)
+        : Stmt(StmtKind::Continue, location)
+    {
+    }
 };
 
 struct Program {

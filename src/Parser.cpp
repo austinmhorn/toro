@@ -141,6 +141,28 @@ void append_statement_dump(const Stmt& statement, std::size_t depth, std::string
         }
         return;
     }
+    case StmtKind::While: {
+        const auto& while_statement = static_cast<const WhileStmt&>(statement);
+        output += indentation + "While\n";
+        output += std::string((depth + 1) * 2, ' ') + "Condition\n";
+        append_dump(*while_statement.condition, depth + 2, output);
+        append_statement_dump(*while_statement.body, depth + 1, output);
+        return;
+    }
+    case StmtKind::ForIn: {
+        const auto& for_statement = static_cast<const ForInStmt&>(statement);
+        output += indentation + "ForIn(" + for_statement.variable_name + ")\n";
+        output += std::string((depth + 1) * 2, ' ') + "Collection\n";
+        append_dump(*for_statement.collection, depth + 2, output);
+        append_statement_dump(*for_statement.body, depth + 1, output);
+        return;
+    }
+    case StmtKind::Stop:
+        output += indentation + "Stop\n";
+        return;
+    case StmtKind::Continue:
+        output += indentation + "Continue\n";
+        return;
     }
 }
 
@@ -185,6 +207,15 @@ std::unique_ptr<Stmt> Parser::parse_statement()
     }
     if (check(TokenType::If)) {
         return parse_if_statement();
+    }
+    if (check(TokenType::While)) {
+        return parse_while_statement();
+    }
+    if (check(TokenType::For)) {
+        return parse_for_in_statement();
+    }
+    if (check(TokenType::Stop) || check(TokenType::Continue)) {
+        return parse_loop_control_statement();
     }
     if (check(TokenType::Else)) {
         throw_parse_error(peek(), "unexpected 'else' without matching 'if'");
@@ -277,7 +308,10 @@ std::unique_ptr<Stmt> Parser::parse_function_declaration()
     if (!check(TokenType::LeftBrace)) {
         throw_parse_error(peek(), "expected '{' before function body");
     }
+    const auto enclosing_loop_depth = loop_depth_;
+    loop_depth_ = 0;
     auto body = parse_block_statement();
+    loop_depth_ = enclosing_loop_depth;
     require_statement_end();
 
     return std::make_unique<FunctionDeclarationStmt>(
@@ -339,6 +373,79 @@ std::unique_ptr<Stmt> Parser::parse_if_statement()
         std::move(condition),
         std::move(then_block),
         std::move(else_branch));
+}
+
+std::unique_ptr<Stmt> Parser::parse_while_statement()
+{
+    Token while_token = advance();
+    if (at_end()
+        || peek().line != while_token.line
+        || peek().type == TokenType::LeftBrace) {
+        throw_parse_error(peek(), "expected condition after 'while'");
+    }
+
+    auto condition = parse_or();
+    if (!check(TokenType::LeftBrace)) {
+        throw_parse_error(peek(), "expected '{' after while condition");
+    }
+
+    ++loop_depth_;
+    auto body = parse_block_statement();
+    --loop_depth_;
+    require_statement_end();
+
+    return std::make_unique<WhileStmt>(
+        SourceLocation{while_token.line, while_token.column},
+        std::move(condition),
+        std::move(body));
+}
+
+std::unique_ptr<Stmt> Parser::parse_for_in_statement()
+{
+    Token for_token = advance();
+    const Token& variable = consume(TokenType::Identifier, "expected loop variable after 'for'");
+    const std::string variable_name = variable.lexeme;
+    consume(TokenType::In, "expected 'in' after loop variable");
+
+    if (at_end()
+        || peek().line != for_token.line
+        || peek().type == TokenType::LeftBrace) {
+        throw_parse_error(peek(), "expected collection expression after 'in'");
+    }
+
+    auto collection = parse_or();
+    if (!check(TokenType::LeftBrace)) {
+        throw_parse_error(peek(), "expected '{' after for collection");
+    }
+
+    ++loop_depth_;
+    auto body = parse_block_statement();
+    --loop_depth_;
+    require_statement_end();
+
+    return std::make_unique<ForInStmt>(
+        SourceLocation{for_token.line, for_token.column},
+        variable_name,
+        std::move(collection),
+        std::move(body));
+}
+
+std::unique_ptr<Stmt> Parser::parse_loop_control_statement()
+{
+    Token keyword = advance();
+    if (loop_depth_ == 0) {
+        const char* message = keyword.type == TokenType::Stop
+            ? "'stop' is only valid inside a loop"
+            : "'continue' is only valid inside a loop";
+        throw_parse_error(keyword, message);
+    }
+
+    require_statement_end();
+    const SourceLocation location{keyword.line, keyword.column};
+    if (keyword.type == TokenType::Stop) {
+        return std::make_unique<StopStmt>(location);
+    }
+    return std::make_unique<ContinueStmt>(location);
 }
 
 std::unique_ptr<BlockStmt> Parser::parse_block_statement()
