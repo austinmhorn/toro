@@ -30,10 +30,14 @@ private:
     [[nodiscard]] std::unique_ptr<Stmt> parse_enum_declaration();
     [[nodiscard]] std::unique_ptr<Stmt> parse_handle_statement();
     [[nodiscard]] std::unique_ptr<Stmt> parse_struct_declaration();
-    [[nodiscard]] std::unique_ptr<Stmt> parse_class_declaration();
+    [[nodiscard]] std::unique_ptr<Stmt> parse_class_declaration(bool is_abstract);
+    [[nodiscard]] std::unique_ptr<Stmt> parse_interface_declaration();
+    [[nodiscard]] std::vector<std::string> parse_interface_list();
     [[nodiscard]] std::unique_ptr<ClassMember> parse_class_field(Visibility visibility);
     [[nodiscard]] std::unique_ptr<ClassMember> parse_method_declaration(
         Visibility visibility,
+        bool is_virtual,
+        bool is_override,
         bool& saw_destroy);
     [[nodiscard]] std::unique_ptr<BlockStmt> parse_block_statement();
     [[nodiscard]] std::unique_ptr<Expr> parse_or();

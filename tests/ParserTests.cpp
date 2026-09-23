@@ -945,6 +945,111 @@ void test_self_member_and_method_calls()
         "        get_health\n");
 }
 
+void test_interface_declaration()
+{
+    expect_program_dump(
+        "interface Drawable {\n"
+        "    function draw()\n"
+        "    function resize(amount: int) -> bool\n"
+        "}\n",
+        "InterfaceDeclaration(Drawable)\n"
+        "  Method(draw)\n"
+        "    Parameters\n"
+        "  Method(resize)\n"
+        "    Parameters\n"
+        "      Parameter(amount: int)\n"
+        "    return type: bool\n");
+
+    const auto program = parse_program("\n  interface Empty {\n  }\n");
+    const auto& declaration = static_cast<const toro::InterfaceDeclarationStmt&>(
+        *program.statements.front());
+    expect(declaration.location.line == 2 && declaration.location.column == 3,
+        "interface source location was not retained");
+    expect(declaration.methods.empty(), "empty interface unexpectedly has methods");
+}
+
+void test_abstract_class_and_virtual_method()
+{
+    expect_program_dump(
+        "abstract class Animal {\n"
+        "    public name: string\n"
+        "    virtual function speak()\n"
+        "}\n",
+        "ClassDeclaration(Animal)\n"
+        "  abstract\n"
+        "  public Field(name: string)\n"
+        "  private virtual Method(speak)\n"
+        "    Parameters\n"
+        "    Body(none)\n");
+
+    const auto program = parse_program(
+        "abstract class Animal {\n virtual function speak()\n}\n");
+    const auto& declaration = static_cast<const toro::ClassDeclarationStmt&>(
+        *program.statements.front());
+    expect(declaration.is_abstract, "abstract class flag was not retained");
+    const auto& method = static_cast<const toro::MethodDeclaration&>(
+        *declaration.members.front());
+    expect(method.is_virtual && !method.is_override,
+        "virtual method modifier was not retained");
+    expect(method.body == nullptr, "bodyless virtual method unexpectedly has a body");
+}
+
+void test_class_inheritance_and_interfaces()
+{
+    expect_program_dump(
+        "class Dog : Animal implements Drawable, Named {\n"
+        "    override function speak() {\n"
+        "        print(\"woof\")\n"
+        "    }\n"
+        "}\n",
+        "ClassDeclaration(Dog)\n"
+        "  Base(Animal)\n"
+        "  Implements\n"
+        "    Drawable\n"
+        "    Named\n"
+        "  private override Method(speak)\n"
+        "    Parameters\n"
+        "    Block\n"
+        "      ExpressionStatement\n"
+        "        Call\n"
+        "          Identifier(print)\n"
+        "          String(woof)\n");
+
+    const auto program = parse_program(
+        "class Dog : Animal implements Drawable, Named {\n"
+        " override function speak() {}\n"
+        "}\n");
+    const auto& declaration = static_cast<const toro::ClassDeclarationStmt&>(
+        *program.statements.front());
+    expect(declaration.base_type == "Animal", "class base type was not retained");
+    expect(declaration.interfaces.size() == 2,
+        "multiple implemented interfaces were not retained");
+    const auto& method = static_cast<const toro::MethodDeclaration&>(
+        *declaration.members.front());
+    expect(method.is_override && !method.is_virtual,
+        "override method modifier was not retained");
+}
+
+void test_struct_interfaces()
+{
+    expect_program_dump(
+        "struct Sprite implements Drawable, Serializable {\n"
+        "    id: int\n"
+        "}\n",
+        "StructDeclaration(Sprite)\n"
+        "  Implements\n"
+        "    Drawable\n"
+        "    Serializable\n"
+        "  Field(id: int)\n");
+
+    const auto program = parse_program(
+        "struct Sprite implements Drawable, Serializable {\n id: int\n}\n");
+    const auto& declaration = static_cast<const toro::StructDeclarationStmt&>(
+        *program.statements.front());
+    expect(declaration.interfaces.size() == 2,
+        "struct interface list was not retained");
+}
+
 void expect_parse_error(std::string_view source, std::string_view expected_message)
 {
     try {
@@ -1181,6 +1286,50 @@ void test_destroy_failures()
         "class may declare at most one destroy method");
 }
 
+void test_inheritance_and_interface_failures()
+{
+    expect_program_error("interface {\n}\n", "expected interface name");
+    expect_program_error(
+        "interface Broken {\n value: int\n}\n",
+        "interfaces may contain only function signatures");
+    expect_program_error(
+        "interface Broken {\n function run() {}\n}\n",
+        "interface methods cannot declare a body");
+    expect_program_error(
+        "interface Broken {\n function run(value)\n}\n",
+        "expected ':' after parameter name");
+    expect_program_error(
+        "interface Broken {\n function run()\n",
+        "expected '}' after interface body");
+    expect_program_error(
+        "class Broken : {\n}\n",
+        "expected base class after ':'");
+    expect_program_error(
+        "class Broken : First, Second {\n}\n",
+        "multiple class inheritance is not supported");
+    expect_program_error(
+        "class Broken implements {\n}\n",
+        "expected interface name after 'implements'");
+    expect_program_error(
+        "class Broken implements First, {\n}\n",
+        "expected interface name after 'implements'");
+    expect_program_error(
+        "struct Broken : Base {\n}\n",
+        "structs cannot inherit from a base type");
+    expect_program_error(
+        "abstract struct Broken {\n}\n",
+        "expected 'class' after 'abstract'");
+    expect_program_error(
+        "class Broken {\n function run()\n}\n",
+        "expected '{' before method body");
+    expect_program_error(
+        "class Broken {\n override function run()\n}\n",
+        "expected '{' before method body");
+    expect_program_error(
+        "class Broken {\n virtual override function run() {}\n}\n",
+        "method may have only one virtual or override modifier");
+}
+
 } // namespace
 
 int main()
@@ -1233,6 +1382,10 @@ int main()
         test_class_fields_and_visibility();
         test_class_methods_init_and_destroy();
         test_self_member_and_method_calls();
+        test_interface_declaration();
+        test_abstract_class_and_virtual_method();
+        test_class_inheritance_and_interfaces();
+        test_struct_interfaces();
         test_failures();
         test_statement_failures();
         test_function_failures();
@@ -1244,6 +1397,7 @@ int main()
         test_named_argument_failures();
         test_class_failures();
         test_destroy_failures();
+        test_inheritance_and_interface_failures();
     } catch (const std::exception& error) {
         std::cerr << "parser test failure: " << error.what() << '\n';
         return 1;

@@ -221,6 +221,12 @@ void append_statement_dump(const Stmt& statement, std::size_t depth, std::string
     case StmtKind::StructDeclaration: {
         const auto& declaration = static_cast<const StructDeclarationStmt&>(statement);
         output += indentation + "StructDeclaration(" + declaration.name + ")\n";
+        if (!declaration.interfaces.empty()) {
+            output += std::string((depth + 1) * 2, ' ') + "Implements\n";
+            for (const auto& interface_name : declaration.interfaces) {
+                output += std::string((depth + 2) * 2, ' ') + interface_name + "\n";
+            }
+        }
         for (const auto& field : declaration.fields) {
             output += std::string((depth + 1) * 2, ' ')
                 + "Field(" + field.name + ": " + field.type + ")\n";
@@ -234,6 +240,19 @@ void append_statement_dump(const Stmt& statement, std::size_t depth, std::string
     case StmtKind::ClassDeclaration: {
         const auto& declaration = static_cast<const ClassDeclarationStmt&>(statement);
         output += indentation + "ClassDeclaration(" + declaration.name + ")\n";
+        if (declaration.is_abstract) {
+            output += std::string((depth + 1) * 2, ' ') + "abstract\n";
+        }
+        if (declaration.base_type) {
+            output += std::string((depth + 1) * 2, ' ')
+                + "Base(" + *declaration.base_type + ")\n";
+        }
+        if (!declaration.interfaces.empty()) {
+            output += std::string((depth + 1) * 2, ' ') + "Implements\n";
+            for (const auto& interface_name : declaration.interfaces) {
+                output += std::string((depth + 2) * 2, ' ') + interface_name + "\n";
+            }
+        }
         for (const auto& member : declaration.members) {
             const std::string member_indentation((depth + 1) * 2, ' ');
             if (member->kind == ClassMemberKind::Field) {
@@ -248,8 +267,13 @@ void append_statement_dump(const Stmt& statement, std::size_t depth, std::string
             }
 
             const auto& method = static_cast<const MethodDeclaration&>(*member);
-            output += member_indentation + visibility_name(method.visibility)
-                + " Method(" + method.name + ")\n";
+            output += member_indentation + visibility_name(method.visibility) + " ";
+            if (method.is_virtual) {
+                output += "virtual ";
+            } else if (method.is_override) {
+                output += "override ";
+            }
+            output += "Method(" + method.name + ")\n";
             output += std::string((depth + 2) * 2, ' ') + "Parameters\n";
             for (const auto& parameter : method.parameters) {
                 output += std::string((depth + 3) * 2, ' ')
@@ -259,7 +283,29 @@ void append_statement_dump(const Stmt& statement, std::size_t depth, std::string
                 output += std::string((depth + 2) * 2, ' ')
                     + "return type: " + *method.return_type + "\n";
             }
-            append_statement_dump(*method.body, depth + 2, output);
+            if (method.body) {
+                append_statement_dump(*method.body, depth + 2, output);
+            } else {
+                output += std::string((depth + 2) * 2, ' ') + "Body(none)\n";
+            }
+        }
+        return;
+    }
+    case StmtKind::InterfaceDeclaration: {
+        const auto& declaration = static_cast<const InterfaceDeclarationStmt&>(statement);
+        output += indentation + "InterfaceDeclaration(" + declaration.name + ")\n";
+        for (const auto& method : declaration.methods) {
+            output += std::string((depth + 1) * 2, ' ')
+                + "Method(" + method.name + ")\n";
+            output += std::string((depth + 2) * 2, ' ') + "Parameters\n";
+            for (const auto& parameter : method.parameters) {
+                output += std::string((depth + 3) * 2, ' ')
+                    + "Parameter(" + parameter.name + ": " + parameter.type + ")\n";
+            }
+            if (method.return_type) {
+                output += std::string((depth + 2) * 2, ' ')
+                    + "return type: " + *method.return_type + "\n";
+            }
         }
         return;
     }
@@ -309,7 +355,13 @@ std::unique_ptr<Stmt> Parser::parse_statement()
         return parse_struct_declaration();
     }
     if (check(TokenType::Class)) {
-        return parse_class_declaration();
+        return parse_class_declaration(false);
+    }
+    if (check(TokenType::Abstract)) {
+        return parse_class_declaration(true);
+    }
+    if (check(TokenType::Interface)) {
+        return parse_interface_declaration();
     }
     if (check(TokenType::Return)) {
         return parse_return_statement();
@@ -678,6 +730,13 @@ std::unique_ptr<Stmt> Parser::parse_struct_declaration()
     Token struct_token = advance();
     const Token& name = consume(TokenType::Identifier, "expected struct name");
     const std::string struct_name = name.lexeme;
+    if (check(TokenType::Colon)) {
+        throw_parse_error(peek(), "structs cannot inherit from a base type");
+    }
+    std::vector<std::string> interfaces;
+    if (match({TokenType::Implements})) {
+        interfaces = parse_interface_list();
+    }
     consume(TokenType::LeftBrace, "expected '{' before struct body");
 
     std::vector<StructField> fields;
@@ -715,14 +774,31 @@ std::unique_ptr<Stmt> Parser::parse_struct_declaration()
     return std::make_unique<StructDeclarationStmt>(
         SourceLocation{struct_token.line, struct_token.column},
         struct_name,
+        std::move(interfaces),
         std::move(fields));
 }
 
-std::unique_ptr<Stmt> Parser::parse_class_declaration()
+std::unique_ptr<Stmt> Parser::parse_class_declaration(bool is_abstract)
 {
     Token class_token = advance();
+    if (is_abstract) {
+        consume(TokenType::Class, "expected 'class' after 'abstract'");
+    }
     const Token& name = consume(TokenType::Identifier, "expected class name");
     const std::string class_name = name.lexeme;
+    std::optional<std::string> base_type;
+    if (match({TokenType::Colon})) {
+        const Token& base = consume(TokenType::Identifier, "expected base class after ':'");
+        base_type = base.lexeme;
+        if (match({TokenType::Comma})) {
+            throw_parse_error(previous(), "multiple class inheritance is not supported");
+        }
+    }
+
+    std::vector<std::string> interfaces;
+    if (match({TokenType::Implements})) {
+        interfaces = parse_interface_list();
+    }
     consume(TokenType::LeftBrace, "expected '{' before class body");
 
     std::vector<std::unique_ptr<ClassMember>> members;
@@ -736,9 +812,21 @@ std::unique_ptr<Stmt> Parser::parse_class_declaration()
             visibility = Visibility::Private;
         }
 
+        bool is_virtual = false;
+        bool is_override = false;
+        if (match({TokenType::Virtual})) {
+            is_virtual = true;
+        } else if (match({TokenType::Override})) {
+            is_override = true;
+        }
+        if (check(TokenType::Virtual) || check(TokenType::Override)) {
+            throw_parse_error(peek(), "method may have only one virtual or override modifier");
+        }
+
         if (check(TokenType::Function)) {
-            members.push_back(parse_method_declaration(visibility, saw_destroy));
-        } else if (check(TokenType::Identifier)) {
+            members.push_back(parse_method_declaration(
+                visibility, is_virtual, is_override, saw_destroy));
+        } else if (!is_virtual && !is_override && check(TokenType::Identifier)) {
             members.push_back(parse_class_field(visibility));
         } else {
             throw_parse_error(peek(), "expected class field or method");
@@ -755,7 +843,83 @@ std::unique_ptr<Stmt> Parser::parse_class_declaration()
     return std::make_unique<ClassDeclarationStmt>(
         SourceLocation{class_token.line, class_token.column},
         class_name,
+        is_abstract,
+        std::move(base_type),
+        std::move(interfaces),
         std::move(members));
+}
+
+std::unique_ptr<Stmt> Parser::parse_interface_declaration()
+{
+    Token interface_token = advance();
+    const Token& name = consume(TokenType::Identifier, "expected interface name");
+    const std::string interface_name = name.lexeme;
+    consume(TokenType::LeftBrace, "expected '{' before interface body");
+
+    std::vector<InterfaceMethod> methods;
+    while (!at_end() && peek().type != TokenType::RightBrace) {
+        statement_line_ = peek().line;
+        Token function_token = consume(
+            TokenType::Function, "interfaces may contain only function signatures");
+        const Token& method_name = consume(
+            TokenType::Identifier, "expected interface method name");
+        InterfaceMethod method{
+            method_name.lexeme,
+            {},
+            std::nullopt,
+            SourceLocation{function_token.line, function_token.column},
+        };
+        consume(TokenType::LeftParen, "expected '(' after interface method name");
+        if (!check(TokenType::RightParen)) {
+            do {
+                const Token& parameter_name = consume(
+                    TokenType::Identifier, "expected parameter name");
+                Parameter parameter{
+                    parameter_name.lexeme,
+                    {},
+                    SourceLocation{parameter_name.line, parameter_name.column},
+                };
+                consume(TokenType::Colon, "expected ':' after parameter name");
+                const Token& parameter_type = consume(
+                    TokenType::Identifier, "expected parameter type after ':'");
+                parameter.type = parameter_type.lexeme;
+                method.parameters.push_back(std::move(parameter));
+            } while (match({TokenType::Comma}));
+        }
+        consume(TokenType::RightParen, "expected ')' after parameters");
+        if (match({TokenType::Arrow})) {
+            const Token& return_type = consume(
+                TokenType::Identifier, "expected return type after '->'");
+            method.return_type = return_type.lexeme;
+        }
+        if (check(TokenType::LeftBrace)) {
+            throw_parse_error(peek(), "interface methods cannot declare a body");
+        }
+        require_statement_end();
+        methods.push_back(std::move(method));
+    }
+
+    if (at_end()) {
+        throw_parse_error(peek(), "expected '}' after interface body");
+    }
+    Token right_brace = advance();
+    statement_line_ = right_brace.line;
+    require_statement_end();
+    return std::make_unique<InterfaceDeclarationStmt>(
+        SourceLocation{interface_token.line, interface_token.column},
+        interface_name,
+        std::move(methods));
+}
+
+std::vector<std::string> Parser::parse_interface_list()
+{
+    std::vector<std::string> interfaces;
+    do {
+        const Token& interface_name = consume(
+            TokenType::Identifier, "expected interface name after 'implements'");
+        interfaces.push_back(interface_name.lexeme);
+    } while (match({TokenType::Comma}));
+    return interfaces;
 }
 
 std::unique_ptr<ClassMember> Parser::parse_class_field(Visibility visibility)
@@ -783,6 +947,8 @@ std::unique_ptr<ClassMember> Parser::parse_class_field(Visibility visibility)
 
 std::unique_ptr<ClassMember> Parser::parse_method_declaration(
     Visibility visibility,
+    bool is_virtual,
+    bool is_override,
     bool& saw_destroy)
 {
     Token function_token = advance();
@@ -829,13 +995,15 @@ std::unique_ptr<ClassMember> Parser::parse_method_declaration(
         return_type = type.lexeme;
     }
 
-    if (!check(TokenType::LeftBrace)) {
+    std::unique_ptr<BlockStmt> body;
+    if (check(TokenType::LeftBrace)) {
+        const auto enclosing_loop_depth = loop_depth_;
+        loop_depth_ = 0;
+        body = parse_block_statement();
+        loop_depth_ = enclosing_loop_depth;
+    } else if (!is_virtual || is_destroy) {
         throw_parse_error(peek(), "expected '{' before method body");
     }
-    const auto enclosing_loop_depth = loop_depth_;
-    loop_depth_ = 0;
-    auto body = parse_block_statement();
-    loop_depth_ = enclosing_loop_depth;
     require_statement_end();
 
     return std::make_unique<MethodDeclaration>(
@@ -844,6 +1012,8 @@ std::unique_ptr<ClassMember> Parser::parse_method_declaration(
         method_name,
         std::move(parameters),
         std::move(return_type),
+        is_virtual,
+        is_override,
         std::move(body));
 }
 

@@ -11,7 +11,7 @@ namespace {
 
 using Keyword = std::pair<std::string_view, TokenType>;
 
-constexpr std::array<Keyword, 28> keywords{{
+constexpr std::array<Keyword, 29> keywords{{
     {"function", TokenType::Function},
     {"return", TokenType::Return},
     {"if", TokenType::If},
@@ -31,6 +31,7 @@ constexpr std::array<Keyword, 28> keywords{{
     {"virtual", TokenType::Virtual},
     {"override", TokenType::Override},
     {"abstract", TokenType::Abstract},
+    {"implements", TokenType::Implements},
     {"true", TokenType::True},
     {"false", TokenType::False},
     {"null", TokenType::Null},

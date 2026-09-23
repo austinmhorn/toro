@@ -137,3 +137,33 @@ class Player {
 
 `init` and `destroy` have no runtime semantics yet. A class may declare one
 parameterless `destroy()` method, and it cannot declare a return type.
+
+### Interfaces and inheritance
+
+Classes may inherit from one base class after `:` and may implement multiple
+comma-separated interfaces. Structs may implement interfaces but cannot inherit
+from a base type.
+
+```toro
+interface Drawable {
+    function draw()
+}
+
+abstract class Animal {
+    virtual function speak()
+}
+
+class Dog : Animal implements Drawable {
+    override function speak() {
+        print("woof")
+    }
+
+    public function draw() {
+        print("dog")
+    }
+}
+```
+
+Interface methods are signatures without bodies. `virtual` and `override` are
+explicit method modifiers. A virtual method may omit its body; dispatch,
+override validation, and interface conformance belong to later semantic phases.

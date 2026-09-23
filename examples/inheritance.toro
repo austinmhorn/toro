@@ -1,0 +1,31 @@
+interface Drawable {
+    function draw()
+}
+
+interface Named {
+    function get_name() -> string
+}
+
+abstract class Animal {
+    public name: string
+
+    virtual function speak()
+}
+
+class Dog : Animal implements Drawable, Named {
+    override function speak() {
+        print("woof")
+    }
+
+    public function draw() {
+        print("dog")
+    }
+
+    public function get_name() -> string {
+        return self.name
+    }
+}
+
+struct Sprite implements Drawable {
+    id: int
+}

@@ -183,6 +183,7 @@ enum class StmtKind {
     Handle,
     StructDeclaration,
     ClassDeclaration,
+    InterfaceDeclaration,
 };
 
 struct Stmt {
@@ -422,14 +423,17 @@ struct StructDeclarationStmt final : Stmt {
     StructDeclarationStmt(
         SourceLocation location,
         std::string name,
+        std::vector<std::string> interfaces,
         std::vector<StructField> fields)
         : Stmt(StmtKind::StructDeclaration, location)
         , name(std::move(name))
+        , interfaces(std::move(interfaces))
         , fields(std::move(fields))
     {
     }
 
     std::string name;
+    std::vector<std::string> interfaces;
     std::vector<StructField> fields;
 };
 
@@ -484,11 +488,15 @@ struct MethodDeclaration final : ClassMember {
         std::string name,
         std::vector<Parameter> parameters,
         std::optional<std::string> return_type,
+        bool is_virtual,
+        bool is_override,
         std::unique_ptr<BlockStmt> body)
         : ClassMember(ClassMemberKind::Method, visibility, location)
         , name(std::move(name))
         , parameters(std::move(parameters))
         , return_type(std::move(return_type))
+        , is_virtual(is_virtual)
+        , is_override(is_override)
         , body(std::move(body))
     {
     }
@@ -496,6 +504,8 @@ struct MethodDeclaration final : ClassMember {
     std::string name;
     std::vector<Parameter> parameters;
     std::optional<std::string> return_type;
+    bool is_virtual;
+    bool is_override;
     std::unique_ptr<BlockStmt> body;
 };
 
@@ -503,15 +513,46 @@ struct ClassDeclarationStmt final : Stmt {
     ClassDeclarationStmt(
         SourceLocation location,
         std::string name,
+        bool is_abstract,
+        std::optional<std::string> base_type,
+        std::vector<std::string> interfaces,
         std::vector<std::unique_ptr<ClassMember>> members)
         : Stmt(StmtKind::ClassDeclaration, location)
         , name(std::move(name))
+        , is_abstract(is_abstract)
+        , base_type(std::move(base_type))
+        , interfaces(std::move(interfaces))
         , members(std::move(members))
     {
     }
 
     std::string name;
+    bool is_abstract;
+    std::optional<std::string> base_type;
+    std::vector<std::string> interfaces;
     std::vector<std::unique_ptr<ClassMember>> members;
+};
+
+struct InterfaceMethod {
+    std::string name;
+    std::vector<Parameter> parameters;
+    std::optional<std::string> return_type;
+    SourceLocation location;
+};
+
+struct InterfaceDeclarationStmt final : Stmt {
+    InterfaceDeclarationStmt(
+        SourceLocation location,
+        std::string name,
+        std::vector<InterfaceMethod> methods)
+        : Stmt(StmtKind::InterfaceDeclaration, location)
+        , name(std::move(name))
+        , methods(std::move(methods))
+    {
+    }
+
+    std::string name;
+    std::vector<InterfaceMethod> methods;
 };
 
 struct Program {
