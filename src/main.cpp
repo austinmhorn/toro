@@ -1,3 +1,4 @@
+#include "toro/CGenerator.hpp"
 #include "toro/Lexer.hpp"
 #include "toro/Parser.hpp"
 #include "toro/SemanticAnalyzer.hpp"
@@ -19,13 +20,14 @@ void print_usage(std::ostream& output)
               "       toro ast-expression <source.toro>\n"
               "       toro ast <source.toro>\n"
               "       toro check <source.toro>\n"
+              "       toro emit-c <source.toro>\n"
               "       toro --version\n";
 }
 
 bool is_source_command(std::string_view command)
 {
     return command == "tokens" || command == "ast-expression"
-        || command == "ast" || command == "check";
+        || command == "ast" || command == "check" || command == "emit-c";
 }
 
 void print_tokens(std::string_view source)
@@ -63,6 +65,15 @@ void check_source(std::string_view source)
     std::cout << "check passed\n";
 }
 
+void emit_c(std::string_view source)
+{
+    auto tokens = toro::Lexer(source).tokenize();
+    const auto program = toro::Parser(std::move(tokens)).parse_program();
+    toro::SemanticAnalyzer().analyze(program);
+    toro::TypeChecker().check(program);
+    std::cout << toro::CGenerator().generate(program);
+}
+
 } // namespace
 
 int main(int argc, char* argv[])
@@ -93,6 +104,8 @@ int main(int argc, char* argv[])
                 print_expression_ast(source.contents);
             } else if (std::string_view(argv[1]) == "check") {
                 check_source(source.contents);
+            } else if (std::string_view(argv[1]) == "emit-c") {
+                emit_c(source.contents);
             } else {
                 print_ast(source.contents);
             }

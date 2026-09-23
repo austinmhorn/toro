@@ -14,6 +14,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 include(CTest)
 
 add_library(toro_core
+    src/CGenerator.cpp
     src/Lexer.cpp
     src/Parser.cpp
     src/SemanticAnalyzer.cpp
@@ -60,4 +61,15 @@ if(BUILD_TESTING)
     target_link_libraries(toro_type_checker_tests PRIVATE toro_core)
     toro_enable_warnings(toro_type_checker_tests)
     add_test(NAME type_checker COMMAND toro_type_checker_tests)
+
+    add_executable(toro_c_generator_tests tests/CGeneratorTests.cpp)
+    target_link_libraries(toro_c_generator_tests PRIVATE toro_core)
+    toro_enable_warnings(toro_c_generator_tests)
+    find_program(TORO_TEST_C_COMPILER NAMES cc clang gcc)
+    if(TORO_TEST_C_COMPILER)
+        target_compile_definitions(toro_c_generator_tests PRIVATE
+            TORO_TEST_C_COMPILER="${TORO_TEST_C_COMPILER}"
+        )
+    endif()
+    add_test(NAME c_generator COMMAND toro_c_generator_tests)
 endif()

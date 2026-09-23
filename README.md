@@ -22,6 +22,8 @@ checker validates explicit or inferred generic construction, constraints, and
 substituted field and method types, including recursively nested generic types.
 Enum variants are typed constructors, and `handle` validates case payload
 bindings, variant identity, duplicate cases, and exhaustive coverage.
+A minimal backend can emit portable C for the currently supported primitive
+procedural subset.
 
 ## Build
 
@@ -110,6 +112,12 @@ Run semantic name resolution and primitive type checking on a source file:
 ./build/toro check examples/hello.toro
 ```
 
+Generate C after parsing and checking a source file:
+
+```bash
+./build/toro emit-c examples/hello.toro
+```
+
 The `check` command reports name-resolution errors, type mismatches, invalid
 conditions and returns, bad construction fields, invalid member access, method
 argument errors, and visibility violations. Construction supplies zero values
@@ -131,6 +139,12 @@ function returning `Result`.
 Functions and concrete methods with declared return types must return on every
 reachable path. Complete `if`/`else` trees and exhaustive returning `handle`
 statements satisfy this requirement; loops are not assumed to execute.
+
+The initial C backend lowers primitive variables, expressions, functions,
+returns, calls, `if`/`else`, `while`, and primitive `print(...)` calls. It uses
+deterministically prefixed C identifiers and emits a C entry-point wrapper for a
+toro `main`. Valid toro features outside this subset fail with a backend
+diagnostic instead of producing partial or incorrect C.
 
 ## Logical operators
 

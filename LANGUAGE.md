@@ -295,6 +295,29 @@ through fields and methods. Runtime specialization remains deferred. Concrete
 struct and class fields and methods are type checked, including inherited
 members and interface method signatures.
 
+### C generation
+
+The initial backend emits C only after parsing, semantic analysis, and type
+checking succeed. Its current subset includes primitive variables and
+reassignment, arithmetic, comparisons, equality, logical expressions, unary
+minus, functions, parameters, returns, calls, `if`/`else`, `while`, and
+primitive `print(...)` calls.
+
+Primitive types map directly to C:
+
+```text
+int     -> int64_t
+dec     -> double
+bool    -> bool
+string  -> const char*
+```
+
+Generated names are deterministically prefixed to avoid collisions with C
+keywords and backend helpers. Classes, structs, enums, Result, generics,
+overloads, conversions, interfaces, inheritance, collections, and ARC are not
+lowered yet. Encountering one of these otherwise valid features produces a
+backend diagnostic.
+
 ### Function and method overloads
 
 Functions and methods may share a name when their ordered parameter types or
