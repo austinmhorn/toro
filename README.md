@@ -14,7 +14,8 @@ access and assignment, classes, single inheritance, interfaces, virtual or
 override methods, and generic declarations and type references into an AST.
 The semantic analysis pass provides lexical scopes, symbol registration, and
 basic name resolution. A separate type-checking pass infers primitive local
-types and validates primitive expressions, assignments, calls, and returns.
+types and validates expressions, assignments, functions, struct/class
+construction, fields, methods, visibility, nullable types, and explicit casts.
 
 ## Build
 
@@ -103,12 +104,14 @@ Run semantic name resolution and primitive type checking on a source file:
 ./build/toro check examples/hello.toro
 ```
 
-The `check` command reports name-resolution errors, primitive type mismatches,
-invalid conditions, function argument errors, invalid returns, and nullable
-assignment errors. Generic type inference, member lookup, function overload
-resolution, and flow-sensitive null narrowing are not implemented yet. Explicit
-`as` casts support numeric conversions and user-defined class or struct
-conversions.
+The `check` command reports name-resolution errors, type mismatches, invalid
+conditions and returns, bad construction fields, invalid member access, method
+argument errors, and visibility violations. Construction supplies zero values
+for primitive and nullable fields, honors explicit field defaults, and requires
+non-null named fields that cannot be safely defaulted. Generic member
+specialization, inheritance member lookup, function overload resolution, and
+flow-sensitive null narrowing are not implemented yet. Explicit `as` casts
+support numeric conversions and user-defined class or struct conversions.
 
 ## Logical operators
 

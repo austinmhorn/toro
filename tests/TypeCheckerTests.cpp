@@ -294,7 +294,7 @@ void test_user_defined_conversions()
 {
     expect_valid(
         "class Player {\n"
-        "    name: string\n"
+        "    public name: string\n"
         "    overload as string { return self.name }\n"
         "}\n"
         "function main() {\n"
@@ -345,6 +345,161 @@ void test_user_defined_conversions()
         "no conversion from 'Player' to 'int'");
 }
 
+void test_construction_and_field_access()
+{
+    expect_valid(
+        "struct Vec2 {\n"
+        "    x: dec\n"
+        "    y: dec\n"
+        "}\n"
+        "class Player {\n"
+        "    public name: string\n"
+        "    public position: Vec2\n"
+        "    private health: int = 100\n"
+        "    public function damage(amount: int) {\n"
+        "        self.health = self.health - amount\n"
+        "    }\n"
+        "    public function get_health() -> int { return self.health }\n"
+        "}\n"
+        "function main() {\n"
+        "    player := Player(\n"
+        "        name: \"Austin\",\n"
+        "        position: Vec2(x: 10.0, y: 20.0)\n"
+        "    )\n"
+        "    player.name = \"toro\"\n"
+        "    player.position.x = 15.0\n"
+        "    player.damage(amount: 25)\n"
+        "    health := player.get_health()\n"
+        "    x := player.position.x\n"
+        "    print(health)\n"
+        "    print(x)\n"
+        "}\n");
+    expect_valid(
+        "struct Point {\n"
+        "    x: int\n"
+        "    y: int = 0\n"
+        "}\n"
+        "point := Point(10)\n"
+        "point.x = 20\n");
+    expect_valid(
+        "class User {}\n"
+        "struct Defaults {\n"
+        "    integer: int\n"
+        "    decimal: dec\n"
+        "    text: string\n"
+        "    flag: bool\n"
+        "    owner: User?\n"
+        "}\n"
+        "defaults := Defaults()\n");
+
+    expect_error(
+        "class User {}\n"
+        "struct Account {\n"
+        "    owner: User\n"
+        "}\n"
+        "account := Account()\n",
+        "missing required field 'owner'");
+    expect_error(
+        "struct Point { x: int }\n"
+        "struct Shape { position: Point }\n"
+        "shape := Shape()\n",
+        "missing required field 'position'");
+    expect_error(
+        "struct Point { x: int }\n"
+        "point := Point(z: 1)\n",
+        "has no field named 'z'");
+    expect_error(
+        "struct Point { x: int }\n"
+        "point := Point(x: \"wrong\")\n",
+        "field 'Point.x' expects 'int', got 'string'");
+    expect_error(
+        "struct Point { x: int }\n"
+        "point := Point(1, 2)\n",
+        "accepts at most 1 fields, got 2");
+    expect_error(
+        "struct Point {\n"
+        "    x: int\n"
+        "    y: int\n"
+        "}\n"
+        "point := Point(1, x: 2)\n",
+        "field 'x' is supplied more than once");
+}
+
+void test_member_errors_and_visibility()
+{
+    expect_error(
+        "class Player { private health: int = 100 }\n"
+        "player := Player()\n"
+        "print(player.health)\n",
+        "field 'Player.health' is private");
+    expect_error(
+        "class Player { private health: int = 100 }\n"
+        "player := Player(health: 50)\n",
+        "field 'Player.health' is private");
+    expect_error(
+        "struct Point { x: int }\n"
+        "point := Point(x: 1)\n"
+        "print(point.y)\n",
+        "type 'Point' has no member named 'y'");
+    expect_error(
+        "struct Point { x: int }\n"
+        "point := Point(x: 1)\n"
+        "point.x = \"wrong\"\n",
+        "cannot assign value of type 'string' to type 'int'");
+    expect_error(
+        "value := 10\n"
+        "value.x = 20\n",
+        "cannot access member 'x' on type 'int'");
+    expect_error(
+        "class Player { public name: string }\n"
+        "player := Player(name: \"Austin\")\n"
+        "player.name()\n",
+        "field 'Player.name' is not callable");
+}
+
+void test_method_calls()
+{
+    expect_valid(
+        "class Counter {\n"
+        "    private value: int = 0\n"
+        "    public function add(amount: int) { self.value = self.value + amount }\n"
+        "    public function get() -> int { return self.value }\n"
+        "}\n"
+        "counter := Counter()\n"
+        "counter.add(amount: 2)\n"
+        "value: int = counter.get()\n");
+    expect_error(
+        "class Counter { public function add(amount: int) {} }\n"
+        "counter := Counter()\n"
+        "counter.add()\n",
+        "method 'Counter.add' expects 1 arguments, got 0");
+    expect_error(
+        "class Counter { public function add(amount: int) {} }\n"
+        "counter := Counter()\n"
+        "counter.add(\"wrong\")\n",
+        "argument 1 to 'Counter.add' expects 'int', got 'string'");
+    expect_error(
+        "class Counter { public function add(amount: int) {} }\n"
+        "counter := Counter()\n"
+        "counter.add(value: 1)\n",
+        "method 'Counter.add' has no parameter named 'value'");
+    expect_error(
+        "class Counter { public function reset() {} }\n"
+        "counter := Counter()\n"
+        "value := counter.reset()\n",
+        "expression does not produce a value");
+    expect_error(
+        "class Counter { function reset() {} }\n"
+        "counter := Counter()\n"
+        "counter.reset()\n",
+        "method 'Counter.reset' is private");
+    expect_error(
+        "class Counter {}\n"
+        "counter := Counter()\n"
+        "counter.reset()\n",
+        "type 'Counter' has no method named 'reset'");
+}
+
 void test_existing_language_features_remain_checkable()
 {
     expect_valid(
@@ -363,7 +518,7 @@ void test_existing_language_features_remain_checkable()
         "}\n");
     expect_valid(
         "class Box<T> {\n"
-        "    value: T\n"
+        "    public value: T\n"
         "    function get() -> T { return self.value }\n"
         "}\n"
         "function identity<T>(value: T) -> T { return value }\n"
@@ -391,6 +546,9 @@ int main()
         test_nullable_functions_and_equality();
         test_builtin_casts();
         test_user_defined_conversions();
+        test_construction_and_field_access();
+        test_member_errors_and_visibility();
+        test_method_calls();
         test_existing_language_features_remain_checkable();
     } catch (const std::exception& error) {
         std::cerr << "type checker test failure: " << error.what() << '\n';

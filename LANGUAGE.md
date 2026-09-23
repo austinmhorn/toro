@@ -89,9 +89,10 @@ Wildcard cases and exhaustiveness checking are not defined yet.
 
 ### Structs and members
 
-Struct fields have explicit types and may provide a default expression. The
-meaning of omitted defaults and zero values will be defined during semantic
-analysis.
+Struct fields have explicit types and may provide a default expression. During
+construction, explicit defaults take priority over toro's type zero values.
+Without an explicit default, `int`, `dec`, `string`, and `bool` fields receive
+`0`, `0.0`, `""`, and `false`, respectively. Nullable fields receive `null`.
 
 ```toro
 struct Player {
@@ -114,7 +115,7 @@ print(player.name)
 
 Classes contain ordered fields and methods. Members are private by default and
 may be marked `public` or `private`. Methods use normal `function` syntax, and
-`self` refers syntactically to the current instance.
+`self` has the containing class type and may access that class's private members.
 
 ```toro
 class Player {
@@ -198,7 +199,7 @@ their corresponding scope.
 
 Functions and declared types are registered as symbols, and `print` is a
 predefined symbol. `self` is available only in class methods. The current pass
-does not perform member lookup, function overload resolution, interface conformance,
+does not perform function overload resolution, interface conformance,
 inheritance validation, or generic constraint validation.
 
 ### Primitive type checking
@@ -213,8 +214,28 @@ Equality requires compatible operands, logical operators require `bool`, and
 argument counts and types, and returns are checked against the function's
 declared return type.
 
-Generic types, member types, inheritance, interfaces, and overloads remain
-deferred and do not receive primitive type validation beyond their expressions.
+Generic specialization, inheritance, interfaces, and overloads remain deferred.
+Concrete struct and class fields and methods are type checked.
+
+### Construction and members
+
+Struct and class construction validates positional and named fields, rejects
+duplicate or unknown fields, and checks field types. Primitive and nullable
+fields may be omitted because they have zero values, and fields with explicit
+defaults may also be omitted. A non-null named or generic field remains required
+when the current type model cannot safely construct a default. Nested structs
+are not implicitly default-constructed yet. Struct fields are public. Class
+fields and methods are private by default and may be marked `public`; private
+members are accessible only while checking the declaring class.
+
+Member access returns the declared field type and may be chained. Member
+assignment checks the field type. Method calls validate positional or named
+arguments and return the declared result type; a method without a return type
+cannot be used as a value. `self` is typed as its containing class, so method
+bodies receive the same field, method, and visibility checks as external code.
+
+Constructor-specific `init` behavior, inheritance member lookup, generic member
+specialization, and runtime construction are not implemented yet.
 
 ### Nullable types
 

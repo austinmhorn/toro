@@ -26,9 +26,27 @@ private:
         Type return_type;
     };
 
+    struct FieldInfo {
+        Type type;
+        Visibility visibility;
+        bool required;
+    };
+
+    struct MethodInfo {
+        FunctionSignature signature;
+        Visibility visibility;
+    };
+
+    struct NominalTypeInfo {
+        std::vector<std::string> field_order;
+        std::unordered_map<std::string, FieldInfo> fields;
+        std::unordered_map<std::string, MethodInfo> methods;
+    };
+
     struct Scope {
         std::unordered_map<std::string, Type> values;
         std::unordered_map<std::string, FunctionSignature> functions;
+        std::unordered_map<std::string, NominalTypeInfo> nominal_types;
         std::unordered_map<std::string, std::unordered_set<std::string>> conversions;
     };
 
@@ -37,10 +55,26 @@ private:
     void check_statement(const Stmt& statement);
     [[nodiscard]] Type check_expression(const Expr& expression);
     [[nodiscard]] Type check_call(const CallExpr& call);
+    [[nodiscard]] Type check_construction(
+        const std::string& name,
+        const CallExpr& call,
+        const std::vector<Type>& arguments,
+        const NominalTypeInfo& type_info);
+    [[nodiscard]] Type check_method_call(
+        const MemberAccessExpr& callee,
+        const CallExpr& call,
+        const std::vector<Type>& arguments);
+    void check_arguments(
+        const std::string& callable_kind,
+        const std::string& callable_name,
+        const std::vector<CallArgument>& call_arguments,
+        const std::vector<Type>& arguments,
+        const FunctionSignature& signature) const;
+    [[nodiscard]] Type check_member_access(const MemberAccessExpr& member);
     [[nodiscard]] Type check_binary(const BinaryExpr& binary);
     [[nodiscard]] Type check_cast(const CastExpr& cast);
     void check_function(const FunctionDeclarationStmt& function);
-    void check_method(const MethodDeclaration& method);
+    void check_method(const MethodDeclaration& method, const Type& containing_type);
     void check_conversion(const ConversionOverload& conversion, const Type& source_type);
     void check_block(const BlockStmt& block);
 
@@ -59,6 +93,8 @@ private:
     void declare_conversion(const std::string& source_name, const Type& target_type);
     [[nodiscard]] std::optional<Type> find_value(const std::string& name) const;
     [[nodiscard]] const FunctionSignature* find_function(const std::string& name) const;
+    [[nodiscard]] const NominalTypeInfo* find_nominal_type(const std::string& name) const;
+    [[nodiscard]] bool can_access(Visibility visibility, const std::string& owner) const;
     [[nodiscard]] bool find_conversion(
         const Type& source_type,
         const Type& target_type) const;
@@ -66,6 +102,7 @@ private:
     std::vector<Scope> scopes_;
     std::vector<std::unordered_set<std::string>> generic_parameter_scopes_;
     std::optional<Type> current_return_type_;
+    std::optional<std::string> current_type_name_;
     SourceLocation current_location_{1, 1};
 };
 
