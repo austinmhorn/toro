@@ -11,18 +11,35 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-add_executable(toro
-    src/main.cpp
+include(CTest)
+
+add_library(toro_core
+    src/Lexer.cpp
     src/SourceFile.cpp
 )
 
-target_include_directories(toro
-    PRIVATE
+target_include_directories(toro_core
+    PUBLIC
         ${PROJECT_SOURCE_DIR}/include
 )
 
-if(MSVC)
-    target_compile_options(toro PRIVATE /W4 /permissive-)
-else()
-    target_compile_options(toro PRIVATE -Wall -Wextra -Wpedantic)
+add_executable(toro src/main.cpp)
+target_link_libraries(toro PRIVATE toro_core)
+
+function(toro_enable_warnings target)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+endfunction()
+
+toro_enable_warnings(toro_core)
+toro_enable_warnings(toro)
+
+if(BUILD_TESTING)
+    add_executable(toro_lexer_tests tests/LexerTests.cpp)
+    target_link_libraries(toro_lexer_tests PRIVATE toro_core)
+    toro_enable_warnings(toro_lexer_tests)
+    add_test(NAME lexer COMMAND toro_lexer_tests)
 endif()
