@@ -86,3 +86,26 @@ handle message {
 ```
 
 Wildcard cases and exhaustiveness checking are not defined yet.
+
+### Structs and members
+
+Struct fields have explicit types and may provide a default expression. The
+meaning of omitted defaults and zero values will be defined during semantic
+analysis.
+
+```toro
+struct Player {
+    name: string = ""
+    health: int = 100
+}
+```
+
+Calls accept positional arguments followed by named arguments. Member access
+may be chained, and identifier or member-access expressions may be assignment
+targets:
+
+```toro
+player := Player(name: "Austin")
+player.health = 75
+print(player.name)
+```

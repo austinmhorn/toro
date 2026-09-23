@@ -240,6 +240,95 @@ void test_call_expression_statement()
         "    Integer(20)\n");
 }
 
+void test_member_access()
+{
+    expect_dump(
+        "player.name",
+        "MemberAccess\n"
+        "  Identifier(player)\n"
+        "  name\n");
+    expect_dump(
+        "player.position.x",
+        "MemberAccess\n"
+        "  MemberAccess\n"
+        "    Identifier(player)\n"
+        "    position\n"
+        "  x\n");
+    expect_dump(
+        "service.client.connect()",
+        "Call\n"
+        "  MemberAccess\n"
+        "    MemberAccess\n"
+        "      Identifier(service)\n"
+        "      client\n"
+        "    connect\n");
+}
+
+void test_member_assignment()
+{
+    expect_program_dump(
+        "player.health = 50\n"
+        "player.position.x = 10.0\n",
+        "MemberAssignment\n"
+        "  MemberAccess\n"
+        "    Identifier(player)\n"
+        "    health\n"
+        "  Integer(50)\n"
+        "\n"
+        "MemberAssignment\n"
+        "  MemberAccess\n"
+        "    MemberAccess\n"
+        "      Identifier(player)\n"
+        "      position\n"
+        "    x\n"
+        "  Decimal(10.0)\n");
+
+    const auto program = parse_program("\n  player.health = 75\n");
+    expect(program.statements.front()->kind == toro::StmtKind::MemberAssignment,
+        "member assignment did not use its dedicated statement node");
+    expect(program.statements.front()->location.line == 2
+            && program.statements.front()->location.column == 3,
+        "member assignment source location was not retained");
+}
+
+void test_named_call_arguments()
+{
+    expect_dump(
+        "create(10, name: \"Austin\", active: true)",
+        "Call\n"
+        "  Identifier(create)\n"
+        "  Integer(10)\n"
+        "  NamedArgument(name)\n"
+        "    String(Austin)\n"
+        "  NamedArgument(active)\n"
+        "    Bool(true)\n");
+}
+
+void test_nested_multiline_construction()
+{
+    expect_program_dump(
+        "player := Player(\n"
+        "    name: \"Austin\",\n"
+        "    position: Vec2(\n"
+        "        x: 10.0,\n"
+        "        y: 20.0\n"
+        "    )\n"
+        ")\n",
+        "VariableDeclaration(player)\n"
+        "  inferred\n"
+        "  Call\n"
+        "    Identifier(Player)\n"
+        "    NamedArgument(name)\n"
+        "      String(Austin)\n"
+        "    NamedArgument(position)\n"
+        "      Call\n"
+        "        Identifier(Vec2)\n"
+        "        NamedArgument(x)\n"
+        "          Decimal(10.0)\n"
+        "        NamedArgument(y)\n"
+        "          Decimal(20.0)\n");
+}
+
 void test_empty_function()
 {
     expect_program_dump(
@@ -688,6 +777,53 @@ void test_handle_preserves_loop_context()
         "handle case body did not preserve loop context");
 }
 
+void test_struct_declarations()
+{
+    expect_program_dump(
+        "struct Empty {\n}\n\n"
+        "struct Vec2 {\n"
+        "    x: dec\n"
+        "    y: dec\n"
+        "}\n",
+        "StructDeclaration(Empty)\n"
+        "\n"
+        "StructDeclaration(Vec2)\n"
+        "  Field(x: dec)\n"
+        "  Field(y: dec)\n");
+
+    const auto program = parse_program("\n  struct Point {\n    x: dec\n  }\n");
+    const auto& declaration = static_cast<const toro::StructDeclarationStmt&>(
+        *program.statements.front());
+    expect(declaration.location.line == 2 && declaration.location.column == 3,
+        "struct source location was not retained");
+    expect(declaration.fields.front().location.line == 3,
+        "struct field source location was not retained");
+}
+
+void test_struct_field_defaults()
+{
+    expect_program_dump(
+        "struct Player {\n"
+        "    name: string = \"\"\n"
+        "    health: int = 100\n"
+        "    position: Vec2\n"
+        "}\n",
+        "StructDeclaration(Player)\n"
+        "  Field(name: string)\n"
+        "    Default\n"
+        "      String()\n"
+        "  Field(health: int)\n"
+        "    Default\n"
+        "      Integer(100)\n"
+        "  Field(position: Vec2)\n");
+
+    const auto program = parse_program("struct Config {\n enabled: bool = true\n}\n");
+    const auto& declaration = static_cast<const toro::StructDeclarationStmt&>(
+        *program.statements.front());
+    expect(declaration.fields.front().default_value != nullptr,
+        "struct field default expression was not retained");
+}
+
 void expect_parse_error(std::string_view source, std::string_view expected_message)
 {
     try {
@@ -713,8 +849,11 @@ void expect_program_error(std::string_view source, std::string_view expected_mes
     try {
         static_cast<void>(parse_program(source));
     } catch (const std::runtime_error& error) {
-        expect(std::string_view(error.what()).find(expected_message) != std::string_view::npos,
-            "statement error message was not descriptive");
+        if (std::string_view(error.what()).find(expected_message) == std::string_view::npos) {
+            throw std::runtime_error(
+                "expected statement error containing '" + std::string(expected_message)
+                + "', got '" + error.what() + "'");
+        }
         return;
     }
     throw std::runtime_error("expected statement parser failure");
@@ -851,6 +990,39 @@ void test_handle_failures()
         "'stop' is only valid inside a loop");
 }
 
+void test_struct_and_member_failures()
+{
+    expect_program_error("struct {\n}\n", "expected struct name");
+    expect_program_error(
+        "struct Broken {\n value int\n}\n",
+        "expected ':' after struct field name");
+    expect_program_error(
+        "struct Broken {\n value:\n}\n",
+        "expected struct field type after ':'");
+    expect_program_error(
+        "struct Broken {\n value: int =\n}\n",
+        "expected default value after '='");
+    expect_program_error(
+        "struct Broken {\n value: int,\n}\n",
+        "unexpected token after statement");
+    expect_program_error(
+        "struct Broken {\n value: int\n",
+        "expected '}' after struct body");
+    expect_program_error("player. = 10", "expected member name after '.'");
+    expect_program_error("(a + b) = 5", "invalid assignment target");
+}
+
+void test_named_argument_failures()
+{
+    expect_program_error(
+        "create(name: \"Austin\", 10)",
+        "positional argument cannot follow named argument");
+    expect_program_error(
+        "create(name: \"Austin\", name: \"other\")",
+        "duplicate named argument");
+    expect_program_error("create(name:)", "expected value after named argument");
+}
+
 } // namespace
 
 int main()
@@ -871,6 +1043,10 @@ int main()
         test_assignment_expression();
         test_multiple_statements_and_blank_lines();
         test_call_expression_statement();
+        test_member_access();
+        test_member_assignment();
+        test_named_call_arguments();
+        test_nested_multiline_construction();
         test_empty_function();
         test_function_parameters_and_return_type();
         test_return_without_value();
@@ -893,6 +1069,8 @@ int main()
         test_handle_cases();
         test_nested_handle_and_function_context();
         test_handle_preserves_loop_context();
+        test_struct_declarations();
+        test_struct_field_defaults();
         test_failures();
         test_statement_failures();
         test_function_failures();
@@ -900,6 +1078,8 @@ int main()
         test_loop_failures();
         test_enum_failures();
         test_handle_failures();
+        test_struct_and_member_failures();
+        test_named_argument_failures();
     } catch (const std::exception& error) {
         std::cerr << "parser test failure: " << error.what() << '\n';
         return 1;

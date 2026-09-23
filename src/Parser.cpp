@@ -2,6 +2,7 @@
 
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 #include <utility>
 
 namespace toro {
@@ -55,8 +56,21 @@ void append_dump(const Expr& expression, std::size_t depth, std::string& output)
         output += "Call\n";
         append_dump(*call.callee, depth + 1, output);
         for (const auto& argument : call.arguments) {
-            append_dump(*argument, depth + 1, output);
+            if (argument.name) {
+                output += std::string((depth + 1) * 2, ' ')
+                    + "NamedArgument(" + *argument.name + ")\n";
+                append_dump(*argument.value, depth + 2, output);
+            } else {
+                append_dump(*argument.value, depth + 1, output);
+            }
         }
+        return;
+    }
+    case ExprKind::MemberAccess: {
+        const auto& member = static_cast<const MemberAccessExpr&>(expression);
+        output += "MemberAccess\n";
+        append_dump(*member.object, depth + 1, output);
+        output += std::string((depth + 1) * 2, ' ') + member.member + "\n";
         return;
     }
     case ExprKind::Grouping: {
@@ -88,6 +102,13 @@ void append_statement_dump(const Stmt& statement, std::size_t depth, std::string
     case StmtKind::Assignment: {
         const auto& assignment = static_cast<const AssignmentStmt&>(statement);
         output += indentation + "Assignment(" + assignment.name + ")\n";
+        append_dump(*assignment.value, depth + 1, output);
+        return;
+    }
+    case StmtKind::MemberAssignment: {
+        const auto& assignment = static_cast<const MemberAssignmentStmt&>(statement);
+        output += indentation + "MemberAssignment\n";
+        append_dump(*assignment.target, depth + 1, output);
         append_dump(*assignment.value, depth + 1, output);
         return;
     }
@@ -192,6 +213,19 @@ void append_statement_dump(const Stmt& statement, std::size_t depth, std::string
         }
         return;
     }
+    case StmtKind::StructDeclaration: {
+        const auto& declaration = static_cast<const StructDeclarationStmt&>(statement);
+        output += indentation + "StructDeclaration(" + declaration.name + ")\n";
+        for (const auto& field : declaration.fields) {
+            output += std::string((depth + 1) * 2, ' ')
+                + "Field(" + field.name + ": " + field.type + ")\n";
+            if (field.default_value) {
+                output += std::string((depth + 2) * 2, ' ') + "Default\n";
+                append_dump(*field.default_value, depth + 3, output);
+            }
+        }
+        return;
+    }
     }
 }
 
@@ -234,6 +268,9 @@ std::unique_ptr<Stmt> Parser::parse_statement()
     if (check(TokenType::Enum)) {
         return parse_enum_declaration();
     }
+    if (check(TokenType::Struct)) {
+        return parse_struct_declaration();
+    }
     if (check(TokenType::Return)) {
         return parse_return_statement();
     }
@@ -270,16 +307,26 @@ std::unique_ptr<Stmt> Parser::parse_statement()
 
     if (match({TokenType::Assign})) {
         const Token assignment = previous();
-        if (expression->kind != ExprKind::Identifier) {
-            throw_parse_error(assignment, "invalid assignment target; expected identifier");
+        if (expression->kind != ExprKind::Identifier
+            && expression->kind != ExprKind::MemberAccess) {
+            throw_parse_error(
+                assignment, "invalid assignment target; expected identifier or member access");
         }
 
         require_expression("expected assignment value");
         auto value = parse_or();
         require_statement_end();
 
-        auto name = std::move(static_cast<IdentifierExpr&>(*expression).name);
-        return std::make_unique<AssignmentStmt>(location, std::move(name), std::move(value));
+        if (expression->kind == ExprKind::Identifier) {
+            auto name = std::move(static_cast<IdentifierExpr&>(*expression).name);
+            return std::make_unique<AssignmentStmt>(
+                location, std::move(name), std::move(value));
+        }
+
+        auto target = std::unique_ptr<MemberAccessExpr>(
+            static_cast<MemberAccessExpr*>(expression.release()));
+        return std::make_unique<MemberAssignmentStmt>(
+            location, std::move(target), std::move(value));
     }
 
     require_statement_end();
@@ -586,6 +633,51 @@ std::unique_ptr<Stmt> Parser::parse_handle_statement()
         std::move(cases));
 }
 
+std::unique_ptr<Stmt> Parser::parse_struct_declaration()
+{
+    Token struct_token = advance();
+    const Token& name = consume(TokenType::Identifier, "expected struct name");
+    const std::string struct_name = name.lexeme;
+    consume(TokenType::LeftBrace, "expected '{' before struct body");
+
+    std::vector<StructField> fields;
+    while (!at_end() && peek().type != TokenType::RightBrace) {
+        statement_line_ = peek().line;
+        const Token& field_name = consume(
+            TokenType::Identifier, "expected struct field name");
+        StructField field{
+            field_name.lexeme,
+            {},
+            nullptr,
+            SourceLocation{field_name.line, field_name.column},
+        };
+        consume(TokenType::Colon, "expected ':' after struct field name");
+        const Token& field_type = consume(
+            TokenType::Identifier, "expected struct field type after ':'");
+        field.type = field_type.lexeme;
+
+        if (match({TokenType::Assign})) {
+            require_expression("expected default value after '='");
+            field.default_value = parse_or();
+        }
+
+        require_statement_end();
+        fields.push_back(std::move(field));
+    }
+
+    if (at_end()) {
+        throw_parse_error(peek(), "expected '}' after struct body");
+    }
+
+    Token right_brace = advance();
+    statement_line_ = right_brace.line;
+    require_statement_end();
+    return std::make_unique<StructDeclarationStmt>(
+        SourceLocation{struct_token.line, struct_token.column},
+        struct_name,
+        std::move(fields));
+}
+
 std::unique_ptr<BlockStmt> Parser::parse_block_statement()
 {
     Token left_brace = advance();
@@ -710,8 +802,17 @@ std::unique_ptr<Expr> Parser::parse_call()
 {
     auto expression = parse_primary();
 
-    while (match({TokenType::LeftParen})) {
-        expression = finish_call(std::move(expression));
+    while (true) {
+        if (match({TokenType::LeftParen})) {
+            expression = finish_call(std::move(expression));
+        } else if (match({TokenType::Dot})) {
+            const Token& member = consume(
+                TokenType::Identifier, "expected member name after '.'");
+            expression = std::make_unique<MemberAccessExpr>(
+                std::move(expression), member.lexeme);
+        } else {
+            break;
+        }
     }
 
     return expression;
@@ -751,15 +852,41 @@ std::unique_ptr<Expr> Parser::parse_primary()
 
 std::unique_ptr<Expr> Parser::finish_call(std::unique_ptr<Expr> callee)
 {
-    std::vector<std::unique_ptr<Expr>> arguments;
+    const auto enclosing_statement_line = statement_line_;
+    statement_line_.reset();
+
+    std::vector<CallArgument> arguments;
+    std::unordered_set<std::string> named_arguments;
+    bool saw_named_argument = false;
     if (!check(TokenType::RightParen)) {
         do {
             require_expression("expected call argument");
-            arguments.push_back(parse_or());
+            std::optional<std::string> name;
+            if (check(TokenType::Identifier) && check_next(TokenType::Colon)) {
+                name = advance().lexeme;
+                advance();
+                saw_named_argument = true;
+                if (!named_arguments.insert(*name).second) {
+                    throw_parse_error(previous(), "duplicate named argument");
+                }
+                if (check(TokenType::Comma) || check(TokenType::RightParen)) {
+                    throw_parse_error(peek(), "expected value after named argument");
+                }
+                require_expression("expected value after named argument");
+            } else if (saw_named_argument) {
+                throw_parse_error(peek(), "positional argument cannot follow named argument");
+            }
+
+            arguments.push_back(CallArgument{std::move(name), parse_or()});
         } while (match({TokenType::Comma}));
     }
 
     consume(TokenType::RightParen, "expected ')' after call arguments");
+    if (enclosing_statement_line) {
+        statement_line_ = previous().line;
+    } else {
+        statement_line_.reset();
+    }
     return std::make_unique<CallExpr>(std::move(callee), std::move(arguments));
 }
 

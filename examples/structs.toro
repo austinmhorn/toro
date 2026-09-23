@@ -1,0 +1,26 @@
+struct Vec2 {
+    x: dec
+    y: dec
+}
+
+struct Player {
+    name: string = ""
+    health: int = 100
+    position: Vec2
+}
+
+function main() {
+    player := Player(
+        name: "Austin",
+        position: Vec2(
+            x: 10.0,
+            y: 20.0
+        )
+    )
+
+    player.health = 75
+    player.position.x = 15.0
+
+    print(player.name)
+    print(player.position.x)
+}

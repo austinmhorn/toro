@@ -29,6 +29,7 @@ private:
     [[nodiscard]] std::unique_ptr<Stmt> parse_loop_control_statement();
     [[nodiscard]] std::unique_ptr<Stmt> parse_enum_declaration();
     [[nodiscard]] std::unique_ptr<Stmt> parse_handle_statement();
+    [[nodiscard]] std::unique_ptr<Stmt> parse_struct_declaration();
     [[nodiscard]] std::unique_ptr<BlockStmt> parse_block_statement();
     [[nodiscard]] std::unique_ptr<Expr> parse_or();
     [[nodiscard]] std::unique_ptr<Expr> parse_and();

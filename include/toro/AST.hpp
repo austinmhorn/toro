@@ -21,6 +21,7 @@ enum class ExprKind {
     Unary,
     Binary,
     Call,
+    MemberAccess,
     Grouping,
 };
 
@@ -121,8 +122,13 @@ struct BinaryExpr final : Expr {
     std::unique_ptr<Expr> right;
 };
 
+struct CallArgument {
+    std::optional<std::string> name;
+    std::unique_ptr<Expr> value;
+};
+
 struct CallExpr final : Expr {
-    CallExpr(std::unique_ptr<Expr> callee, std::vector<std::unique_ptr<Expr>> arguments)
+    CallExpr(std::unique_ptr<Expr> callee, std::vector<CallArgument> arguments)
         : Expr(ExprKind::Call)
         , callee(std::move(callee))
         , arguments(std::move(arguments))
@@ -130,7 +136,19 @@ struct CallExpr final : Expr {
     }
 
     std::unique_ptr<Expr> callee;
-    std::vector<std::unique_ptr<Expr>> arguments;
+    std::vector<CallArgument> arguments;
+};
+
+struct MemberAccessExpr final : Expr {
+    MemberAccessExpr(std::unique_ptr<Expr> object, std::string member)
+        : Expr(ExprKind::MemberAccess)
+        , object(std::move(object))
+        , member(std::move(member))
+    {
+    }
+
+    std::unique_ptr<Expr> object;
+    std::string member;
 };
 
 struct GroupingExpr final : Expr {
@@ -151,6 +169,7 @@ struct SourceLocation {
 enum class StmtKind {
     VariableDeclaration,
     Assignment,
+    MemberAssignment,
     Expression,
     FunctionDeclaration,
     Return,
@@ -162,6 +181,7 @@ enum class StmtKind {
     Continue,
     EnumDeclaration,
     Handle,
+    StructDeclaration,
 };
 
 struct Stmt {
@@ -207,6 +227,21 @@ struct AssignmentStmt final : Stmt {
     }
 
     std::string name;
+    std::unique_ptr<Expr> value;
+};
+
+struct MemberAssignmentStmt final : Stmt {
+    MemberAssignmentStmt(
+        SourceLocation location,
+        std::unique_ptr<MemberAccessExpr> target,
+        std::unique_ptr<Expr> value)
+        : Stmt(StmtKind::MemberAssignment, location)
+        , target(std::move(target))
+        , value(std::move(value))
+    {
+    }
+
+    std::unique_ptr<MemberAccessExpr> target;
     std::unique_ptr<Expr> value;
 };
 
@@ -373,6 +408,28 @@ struct HandleStmt final : Stmt {
 
     std::unique_ptr<Expr> expression;
     std::vector<HandleCase> cases;
+};
+
+struct StructField {
+    std::string name;
+    std::string type;
+    std::unique_ptr<Expr> default_value;
+    SourceLocation location;
+};
+
+struct StructDeclarationStmt final : Stmt {
+    StructDeclarationStmt(
+        SourceLocation location,
+        std::string name,
+        std::vector<StructField> fields)
+        : Stmt(StmtKind::StructDeclaration, location)
+        , name(std::move(name))
+        , fields(std::move(fields))
+    {
+    }
+
+    std::string name;
+    std::vector<StructField> fields;
 };
 
 struct Program {
