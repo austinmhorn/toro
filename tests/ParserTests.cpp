@@ -562,6 +562,132 @@ void test_loop_control_inside_conditionals()
         "stop was not retained inside conditional");
 }
 
+void test_simple_enum()
+{
+    expect_program_dump(
+        "enum Direction {\n"
+        "    north\n"
+        "    south\n"
+        "    east\n"
+        "    west\n"
+        "}\n",
+        "EnumDeclaration(Direction)\n"
+        "  Variant(north)\n"
+        "  Variant(south)\n"
+        "  Variant(east)\n"
+        "  Variant(west)\n");
+
+    const auto program = parse_program("\n  enum State {\n    ready\n  }\n");
+    const auto& declaration = static_cast<const toro::EnumDeclarationStmt&>(
+        *program.statements.front());
+    expect(declaration.location.line == 2 && declaration.location.column == 3,
+        "enum source location was not retained");
+    expect(declaration.variants.front().location.line == 3,
+        "enum variant source location was not retained");
+}
+
+void test_enum_payload_variants()
+{
+    expect_program_dump(
+        "enum Message {\n"
+        "    text(string)\n"
+        "    image(Image)\n"
+        "    quit\n"
+        "}\n",
+        "EnumDeclaration(Message)\n"
+        "  Variant(text)\n"
+        "    PayloadType(string)\n"
+        "  Variant(image)\n"
+        "    PayloadType(Image)\n"
+        "  Variant(quit)\n");
+
+    const auto program = parse_program("enum Value {\n number(int)\n none\n}\n");
+    const auto& declaration = static_cast<const toro::EnumDeclarationStmt&>(
+        *program.statements.front());
+    expect(declaration.variants.size() == 2, "mixed enum variants were not retained");
+    expect(declaration.variants.front().payload_type == "int",
+        "enum payload type was not retained");
+    expect(!declaration.variants.back().payload_type,
+        "payload-free enum variant unexpectedly has a payload");
+}
+
+void test_handle_cases()
+{
+    expect_program_dump(
+        "handle message {\n"
+        "    text(value) {\n"
+        "        print(value)\n"
+        "    }\n"
+        "\n"
+        "    quit {\n"
+        "        return\n"
+        "    }\n"
+        "}\n",
+        "Handle\n"
+        "  Expression\n"
+        "    Identifier(message)\n"
+        "  Case(text)\n"
+        "    Binding(value)\n"
+        "    Block\n"
+        "      ExpressionStatement\n"
+        "        Call\n"
+        "          Identifier(print)\n"
+        "          Identifier(value)\n"
+        "  Case(quit)\n"
+        "    Block\n"
+        "      Return\n");
+
+    const auto program = parse_program("handle value {\n some(item) {}\n none {}\n}\n");
+    const auto& handle = static_cast<const toro::HandleStmt&>(*program.statements.front());
+    expect(handle.location.line == 1 && handle.location.column == 1,
+        "handle source location was not retained");
+    expect(handle.cases.size() == 2, "multiple handle cases were not retained");
+    expect(handle.cases.front().binding_name == "item",
+        "handle binding name was not retained");
+    expect(!handle.cases.back().binding_name,
+        "payload-free handle case unexpectedly has a binding");
+    expect(handle.cases.front().location.line == 2,
+        "handle case source location was not retained");
+}
+
+void test_nested_handle_and_function_context()
+{
+    const auto program = parse_program(
+        "function process(message: Message) {\n"
+        "    handle message {\n"
+        "        wrapped(value) {\n"
+        "            handle value {\n"
+        "                text(contents) {\n"
+        "                    print(contents)\n"
+        "                }\n"
+        "            }\n"
+        "        }\n"
+        "    }\n"
+        "}\n");
+    const auto& function = static_cast<const toro::FunctionDeclarationStmt&>(
+        *program.statements.front());
+    const auto& outer = static_cast<const toro::HandleStmt&>(
+        *function.body->statements.front());
+    expect(outer.cases.front().body->statements.front()->kind == toro::StmtKind::Handle,
+        "nested handle was not retained in its case body");
+}
+
+void test_handle_preserves_loop_context()
+{
+    const auto program = parse_program(
+        "while running {\n"
+        "    handle message {\n"
+        "        quit {\n"
+        "            stop\n"
+        "        }\n"
+        "    }\n"
+        "}\n");
+    const auto& loop = static_cast<const toro::WhileStmt&>(*program.statements.front());
+    const auto& handle = static_cast<const toro::HandleStmt&>(*loop.body->statements.front());
+    expect(handle.cases.front().body->statements.front()->kind == toro::StmtKind::Stop,
+        "handle case body did not preserve loop context");
+}
+
 void expect_parse_error(std::string_view source, std::string_view expected_message)
 {
     try {
@@ -680,6 +806,51 @@ void test_loop_failures()
         "'stop' is only valid inside a loop");
 }
 
+void test_enum_failures()
+{
+    expect_program_error("enum {\n value\n}\n", "expected enum name");
+    expect_program_error("enum Empty {\n}\n", "enum must declare at least one variant");
+    expect_program_error(
+        "enum Message {\n text()\n}\n",
+        "expected payload type after '('");
+    expect_program_error(
+        "enum Message {\n text(string\n}\n",
+        "expected ')' after payload type");
+    expect_program_error(
+        "enum Message {\n text(string) quit\n}\n",
+        "unexpected token after statement");
+    expect_program_error(
+        "enum Message {\n text(string)\n",
+        "expected '}' after enum body");
+}
+
+void test_handle_failures()
+{
+    expect_program_error("handle {\n case {}\n}\n", "expected expression after 'handle'");
+    expect_program_error(
+        "handle message\n text(value) {}\n",
+        "expected '{' after handle expression");
+    expect_program_error("handle message {\n}\n", "handle must declare at least one case");
+    expect_program_error(
+        "handle message {\n return {}\n}\n",
+        "expected handle case variant name");
+    expect_program_error(
+        "handle message {\n text() {}\n}\n",
+        "expected binding name after '('");
+    expect_program_error(
+        "handle message {\n text(value {\n}\n}\n",
+        "expected ')' after binding name");
+    expect_program_error(
+        "handle message {\n text(value)\n}\n",
+        "expected '{' before handle case body");
+    expect_program_error(
+        "handle message {\n text(value) {\n print(value)\n}\n",
+        "expected '}' after handle cases");
+    expect_program_error(
+        "handle message {\n quit {\n stop\n }\n}\n",
+        "'stop' is only valid inside a loop");
+}
+
 } // namespace
 
 int main()
@@ -717,11 +888,18 @@ int main()
         test_basic_for_in();
         test_nested_loops_and_loop_control();
         test_loop_control_inside_conditionals();
+        test_simple_enum();
+        test_enum_payload_variants();
+        test_handle_cases();
+        test_nested_handle_and_function_context();
+        test_handle_preserves_loop_context();
         test_failures();
         test_statement_failures();
         test_function_failures();
         test_if_failures();
         test_loop_failures();
+        test_enum_failures();
+        test_handle_failures();
     } catch (const std::exception& error) {
         std::cerr << "parser test failure: " << error.what() << '\n';
         return 1;

@@ -163,6 +163,35 @@ void append_statement_dump(const Stmt& statement, std::size_t depth, std::string
     case StmtKind::Continue:
         output += indentation + "Continue\n";
         return;
+    case StmtKind::EnumDeclaration: {
+        const auto& declaration = static_cast<const EnumDeclarationStmt&>(statement);
+        output += indentation + "EnumDeclaration(" + declaration.name + ")\n";
+        for (const auto& variant : declaration.variants) {
+            output += std::string((depth + 1) * 2, ' ')
+                + "Variant(" + variant.name + ")\n";
+            if (variant.payload_type) {
+                output += std::string((depth + 2) * 2, ' ')
+                    + "PayloadType(" + *variant.payload_type + ")\n";
+            }
+        }
+        return;
+    }
+    case StmtKind::Handle: {
+        const auto& handle = static_cast<const HandleStmt&>(statement);
+        output += indentation + "Handle\n";
+        output += std::string((depth + 1) * 2, ' ') + "Expression\n";
+        append_dump(*handle.expression, depth + 2, output);
+        for (const auto& handle_case : handle.cases) {
+            output += std::string((depth + 1) * 2, ' ')
+                + "Case(" + handle_case.variant_name + ")\n";
+            if (handle_case.binding_name) {
+                output += std::string((depth + 2) * 2, ' ')
+                    + "Binding(" + *handle_case.binding_name + ")\n";
+            }
+            append_statement_dump(*handle_case.body, depth + 2, output);
+        }
+        return;
+    }
     }
 }
 
@@ -202,6 +231,9 @@ std::unique_ptr<Stmt> Parser::parse_statement()
     if (check(TokenType::Function)) {
         return parse_function_declaration();
     }
+    if (check(TokenType::Enum)) {
+        return parse_enum_declaration();
+    }
     if (check(TokenType::Return)) {
         return parse_return_statement();
     }
@@ -213,6 +245,9 @@ std::unique_ptr<Stmt> Parser::parse_statement()
     }
     if (check(TokenType::For)) {
         return parse_for_in_statement();
+    }
+    if (check(TokenType::Handle)) {
+        return parse_handle_statement();
     }
     if (check(TokenType::Stop) || check(TokenType::Continue)) {
         return parse_loop_control_statement();
@@ -446,6 +481,109 @@ std::unique_ptr<Stmt> Parser::parse_loop_control_statement()
         return std::make_unique<StopStmt>(location);
     }
     return std::make_unique<ContinueStmt>(location);
+}
+
+std::unique_ptr<Stmt> Parser::parse_enum_declaration()
+{
+    Token enum_token = advance();
+    const Token& name = consume(TokenType::Identifier, "expected enum name");
+    const std::string enum_name = name.lexeme;
+    consume(TokenType::LeftBrace, "expected '{' before enum body");
+
+    std::vector<EnumVariant> variants;
+    while (!at_end() && peek().type != TokenType::RightBrace) {
+        statement_line_ = peek().line;
+        const Token& variant_name = consume(
+            TokenType::Identifier, "expected enum variant name");
+        EnumVariant variant{
+            variant_name.lexeme,
+            std::nullopt,
+            SourceLocation{variant_name.line, variant_name.column},
+        };
+
+        if (match({TokenType::LeftParen})) {
+            const Token& payload_type = consume(
+                TokenType::Identifier, "expected payload type after '('");
+            variant.payload_type = payload_type.lexeme;
+            consume(TokenType::RightParen, "expected ')' after payload type");
+        }
+
+        require_statement_end();
+        variants.push_back(std::move(variant));
+    }
+
+    if (at_end()) {
+        throw_parse_error(peek(), "expected '}' after enum body");
+    }
+    if (variants.empty()) {
+        throw_parse_error(peek(), "enum must declare at least one variant");
+    }
+
+    Token right_brace = advance();
+    statement_line_ = right_brace.line;
+    require_statement_end();
+    return std::make_unique<EnumDeclarationStmt>(
+        SourceLocation{enum_token.line, enum_token.column},
+        enum_name,
+        std::move(variants));
+}
+
+std::unique_ptr<Stmt> Parser::parse_handle_statement()
+{
+    Token handle_token = advance();
+    if (at_end()
+        || peek().line != handle_token.line
+        || peek().type == TokenType::LeftBrace) {
+        throw_parse_error(peek(), "expected expression after 'handle'");
+    }
+
+    auto expression = parse_or();
+    if (!check(TokenType::LeftBrace)) {
+        throw_parse_error(peek(), "expected '{' after handle expression");
+    }
+    advance();
+
+    std::vector<HandleCase> cases;
+    while (!at_end() && peek().type != TokenType::RightBrace) {
+        statement_line_ = peek().line;
+        const Token& variant = consume(
+            TokenType::Identifier, "expected handle case variant name");
+        HandleCase handle_case{
+            variant.lexeme,
+            std::nullopt,
+            nullptr,
+            SourceLocation{variant.line, variant.column},
+        };
+
+        if (match({TokenType::LeftParen})) {
+            const Token& binding = consume(
+                TokenType::Identifier, "expected binding name after '('");
+            handle_case.binding_name = binding.lexeme;
+            consume(TokenType::RightParen, "expected ')' after binding name");
+        }
+
+        if (!check(TokenType::LeftBrace)) {
+            throw_parse_error(peek(), "expected '{' before handle case body");
+        }
+        handle_case.body = parse_block_statement();
+        require_statement_end();
+        cases.push_back(std::move(handle_case));
+    }
+
+    if (at_end()) {
+        throw_parse_error(peek(), "expected '}' after handle cases");
+    }
+    if (cases.empty()) {
+        throw_parse_error(peek(), "handle must declare at least one case");
+    }
+
+    Token right_brace = advance();
+    statement_line_ = right_brace.line;
+    require_statement_end();
+    return std::make_unique<HandleStmt>(
+        SourceLocation{handle_token.line, handle_token.column},
+        std::move(expression),
+        std::move(cases));
 }
 
 std::unique_ptr<BlockStmt> Parser::parse_block_statement()

@@ -160,6 +160,8 @@ enum class StmtKind {
     ForIn,
     Stop,
     Continue,
+    EnumDeclaration,
+    Handle,
 };
 
 struct Stmt {
@@ -328,6 +330,49 @@ struct ContinueStmt final : Stmt {
         : Stmt(StmtKind::Continue, location)
     {
     }
+};
+
+struct EnumVariant {
+    std::string name;
+    std::optional<std::string> payload_type;
+    SourceLocation location;
+};
+
+struct EnumDeclarationStmt final : Stmt {
+    EnumDeclarationStmt(
+        SourceLocation location,
+        std::string name,
+        std::vector<EnumVariant> variants)
+        : Stmt(StmtKind::EnumDeclaration, location)
+        , name(std::move(name))
+        , variants(std::move(variants))
+    {
+    }
+
+    std::string name;
+    std::vector<EnumVariant> variants;
+};
+
+struct HandleCase {
+    std::string variant_name;
+    std::optional<std::string> binding_name;
+    std::unique_ptr<BlockStmt> body;
+    SourceLocation location;
+};
+
+struct HandleStmt final : Stmt {
+    HandleStmt(
+        SourceLocation location,
+        std::unique_ptr<Expr> expression,
+        std::vector<HandleCase> cases)
+        : Stmt(StmtKind::Handle, location)
+        , expression(std::move(expression))
+        , cases(std::move(cases))
+    {
+    }
+
+    std::unique_ptr<Expr> expression;
+    std::vector<HandleCase> cases;
 };
 
 struct Program {

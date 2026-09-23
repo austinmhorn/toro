@@ -1,0 +1,16 @@
+enum Message {
+    text(string)
+    quit
+}
+
+function process(message: Message) {
+    handle message {
+        text(value) {
+            print(value)
+        }
+
+        quit {
+            return
+        }
+    }
+}

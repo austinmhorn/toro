@@ -58,3 +58,31 @@ These operators will short-circuit when execution and code generation are implem
 Collection iteration uses `for item in collection`, and conditional loops use
 `while condition`. `stop` exits the nearest enclosing loop; `continue` skips to
 its next iteration.
+
+### Enums and `handle`
+
+Enums may contain payload-free variants or variants carrying one value type:
+
+```toro
+enum Message {
+    text(string)
+    quit
+}
+```
+
+The general-purpose `handle` statement matches an expression against ordered
+variant cases. A payload-bearing case may bind the payload for use in its block:
+
+```toro
+handle message {
+    text(value) {
+        print(value)
+    }
+
+    quit {
+        return
+    }
+}
+```
+
+Wildcard cases and exhaustiveness checking are not defined yet.
