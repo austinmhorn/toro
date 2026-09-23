@@ -110,9 +110,11 @@ conditions and returns, bad construction fields, invalid member access, method
 argument errors, and visibility violations. Construction supplies zero values
 for primitive and nullable fields, honors explicit field defaults, and requires
 non-null named fields that cannot be safely defaulted. Generic member
-specialization, runtime virtual dispatch, function overload resolution, and
-flow-sensitive null narrowing are not implemented yet. Explicit `as` casts
-support numeric conversions and user-defined class or struct conversions.
+specialization, runtime virtual dispatch, and flow-sensitive null narrowing are
+not implemented yet. Functions and methods may overload by parameter types and
+arity; resolution prefers exact matches over base/interface compatibility and
+reports missing or ambiguous matches. Explicit `as` casts support numeric
+conversions and user-defined class or struct conversions.
 
 ## Logical operators
 

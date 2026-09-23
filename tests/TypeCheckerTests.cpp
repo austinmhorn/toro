@@ -632,6 +632,116 @@ void test_interface_conformance()
         "does not match interface");
 }
 
+void test_function_overloads()
+{
+    expect_valid(
+        "function describe(value: int) -> string { return \"int\" }\n"
+        "function describe(value: string) -> int { return 1 }\n"
+        "text: string = describe(10)\n"
+        "number: int = describe(\"hello\")\n");
+    expect_valid(
+        "function choose(value: int) -> int { return value }\n"
+        "function choose(text: string) -> string { return text }\n"
+        "function choose(first: int, second: int) -> bool { return true }\n"
+        "text: string = choose(text: \"toro\")\n"
+        "flag: bool = choose(1, 2)\n");
+    expect_error(
+        "function choose(value: int) {}\n"
+        "function choose(value: string) {}\n"
+        "choose(true)\n",
+        "no matching overload for 'choose'");
+    expect_error(
+        "function test(x: int) {}\n"
+        "function test(value: int) {}\n",
+        "duplicate callable signature for function 'test'");
+    expect_error(
+        "function test(x: int) -> int { return x }\n"
+        "function test(x: int) -> string { return \"x\" }\n",
+        "duplicate callable signature for function 'test'");
+    expect_error(
+        "function inspect(value: dec) {}\n"
+        "inspect(10)\n",
+        "no matching overload for 'inspect'");
+    expect_valid(
+        "function inspect(value: int) -> int { return 1 }\n"
+        "function inspect(value: dec) -> string { return \"dec\" }\n"
+        "value := 10\n"
+        "selected: string = inspect(value as dec)\n");
+}
+
+void test_method_overloads()
+{
+    expect_valid(
+        "class Formatter {\n"
+        "    public function format(value: int) -> string { return \"int\" }\n"
+        "    public function format(value: string) -> int { return 1 }\n"
+        "    public function format(left: int, right: int) -> bool { return true }\n"
+        "}\n"
+        "formatter := Formatter()\n"
+        "text: string = formatter.format(10)\n"
+        "number: int = formatter.format(value: \"hello\")\n"
+        "flag: bool = formatter.format(1, 2)\n");
+    expect_error(
+        "class Formatter {\n"
+        "    public function format(value: int) {}\n"
+        "    public function format(other: int) -> string { return \"x\" }\n"
+        "}\n",
+        "duplicate callable signature for method 'Formatter.format'");
+    expect_error(
+        "class Formatter { public function format(value: int) {} }\n"
+        "formatter := Formatter()\n"
+        "formatter.format(true)\n",
+        "no matching overload for 'Formatter.format'");
+}
+
+void test_overload_ranking_and_inheritance()
+{
+    expect_valid(
+        "class Animal {}\n"
+        "class Dog : Animal {}\n"
+        "function select(value: Animal) -> int { return 1 }\n"
+        "function select(value: Dog) -> string { return \"dog\" }\n"
+        "selected: string = select(Dog())\n");
+    expect_valid(
+        "interface Named { function name() -> string }\n"
+        "class Player implements Named {\n"
+        "    public function name() -> string { return \"player\" }\n"
+        "}\n"
+        "function select(value: Named) -> int { return 1 }\n"
+        "function select(value: Player) -> string { return \"player\" }\n"
+        "selected: string = select(Player())\n");
+    expect_error(
+        "interface First {}\n"
+        "interface Second {}\n"
+        "class Both implements First, Second {}\n"
+        "function select(value: First) {}\n"
+        "function select(value: Second) {}\n"
+        "select(Both())\n",
+        "ambiguous overload for 'select'");
+    expect_valid(
+        "class Base {\n"
+        "    public function convert(value: int) -> string { return \"int\" }\n"
+        "    public virtual function convert(value: bool) -> bool { return value }\n"
+        "}\n"
+        "class Derived : Base {\n"
+        "    public function convert(value: string) -> int { return 1 }\n"
+        "    public override function convert(value: bool) -> bool { return value }\n"
+        "}\n"
+        "derived := Derived()\n"
+        "text: string = derived.convert(10)\n"
+        "number: int = derived.convert(\"value\")\n"
+        "flag: bool = derived.convert(true)\n");
+}
+
+void test_generic_overload_fallback()
+{
+    expect_valid(
+        "function choose<T>(value: T) -> string { return \"generic\" }\n"
+        "function choose(value: int) -> int { return value }\n"
+        "selected: int = choose(10)\n"
+        "fallback: string = choose<string>(\"hello\")\n");
+}
+
 void test_existing_language_features_remain_checkable()
 {
     expect_valid(
@@ -685,6 +795,10 @@ int main()
         test_virtual_and_override_validation();
         test_abstract_classes();
         test_interface_conformance();
+        test_function_overloads();
+        test_method_overloads();
+        test_overload_ranking_and_inheritance();
+        test_generic_overload_fallback();
         test_existing_language_features_remain_checkable();
     } catch (const std::exception& error) {
         std::cerr << "type checker test failure: " << error.what() << '\n';

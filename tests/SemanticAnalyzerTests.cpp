@@ -168,10 +168,9 @@ void test_self_context()
 
 void test_duplicate_declared_symbols()
 {
-    expect_error(
+    expect_valid(
         "function duplicate() {}\n"
-        "function duplicate() {}\n",
-        "duplicate declaration 'duplicate' in this scope");
+        "function duplicate() {}\n");
     expect_error(
         "struct Item {}\n"
         "class Item {}\n",

@@ -24,6 +24,8 @@ private:
     struct FunctionSignature {
         std::vector<FunctionParameterType> parameters;
         Type return_type;
+        bool is_generic;
+        SourceLocation location;
     };
 
     struct FieldInfo {
@@ -51,13 +53,13 @@ private:
         std::vector<std::string> interfaces;
         std::vector<std::string> field_order;
         std::unordered_map<std::string, FieldInfo> fields;
-        std::unordered_map<std::string, MethodInfo> methods;
+        std::unordered_map<std::string, std::vector<MethodInfo>> methods;
         SourceLocation location;
     };
 
     struct Scope {
         std::unordered_map<std::string, Type> values;
-        std::unordered_map<std::string, FunctionSignature> functions;
+        std::unordered_map<std::string, std::vector<FunctionSignature>> functions;
         std::unordered_map<std::string, NominalTypeInfo> nominal_types;
         std::unordered_map<std::string, std::unordered_set<std::string>> conversions;
     };
@@ -80,9 +82,13 @@ private:
         const MemberAccessExpr& callee,
         const CallExpr& call,
         const std::vector<Type>& arguments);
-    void check_arguments(
+    [[nodiscard]] const FunctionSignature& resolve_overload(
         const std::string& callable_kind,
         const std::string& callable_name,
+        const std::vector<CallArgument>& call_arguments,
+        const std::vector<Type>& arguments,
+        const std::vector<const FunctionSignature*>& candidates) const;
+    [[nodiscard]] std::optional<int> overload_score(
         const std::vector<CallArgument>& call_arguments,
         const std::vector<Type>& arguments,
         const FunctionSignature& signature) const;
@@ -104,6 +110,9 @@ private:
     [[nodiscard]] bool signatures_match(
         const FunctionSignature& left,
         const FunctionSignature& right) const;
+    [[nodiscard]] bool parameter_types_match(
+        const FunctionSignature& left,
+        const FunctionSignature& right) const;
     void require_condition(Type type, SourceLocation location) const;
 
     void push_scope();
@@ -113,15 +122,15 @@ private:
     void declare_value(const std::string& name, Type type);
     void declare_conversion(const std::string& source_name, const Type& target_type);
     [[nodiscard]] std::optional<Type> find_value(const std::string& name) const;
-    [[nodiscard]] const FunctionSignature* find_function(const std::string& name) const;
+    [[nodiscard]] std::vector<const FunctionSignature*> find_functions(
+        const std::string& name) const;
     [[nodiscard]] const NominalTypeInfo* find_nominal_type(const std::string& name) const;
     [[nodiscard]] const FieldInfo* find_field(
         const std::string& type_name,
         const std::string& field_name) const;
-    [[nodiscard]] const MethodInfo* find_method(
+    [[nodiscard]] std::vector<const MethodInfo*> find_methods(
         const std::string& type_name,
-        const std::string& method_name,
-        bool include_private = true) const;
+        const std::string& method_name) const;
     [[nodiscard]] bool can_access(Visibility visibility, const std::string& owner) const;
     [[nodiscard]] bool find_conversion(
         const Type& source_type,

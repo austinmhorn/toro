@@ -205,8 +205,8 @@ their corresponding scope.
 Functions and declared types are registered as symbols, and `print` is a
 predefined symbol. `self` is available in class and struct methods. The current
 passes validate inheritance, abstract methods, overrides, and interface
-conformance, but do not perform function overload resolution or generic
-constraint validation.
+conformance, and callable overloads, but do not perform generic constraint
+validation.
 
 ### Primitive type checking
 
@@ -220,9 +220,27 @@ Equality requires compatible operands, logical operators require `bool`, and
 argument counts and types, and returns are checked against the function's
 declared return type.
 
-Generic specialization and overloads remain deferred. Concrete struct and class
-fields and methods are type checked, including inherited members and interface
-method signatures.
+Generic specialization remains deferred. Concrete struct and class fields and
+methods are type checked, including inherited members and interface method
+signatures.
+
+### Function and method overloads
+
+Functions and methods may share a name when their ordered parameter types or
+arity differ. Parameter names and return types do not distinguish overloads, so
+declarations that differ only in either respect are duplicate signatures.
+
+Calls first filter candidates by arity and named-argument compatibility, then by
+parameter assignability. Exact concrete matches rank ahead of base-class or
+interface-compatible matches. Equally ranked candidates are ambiguous, and no
+implicit `int`/`dec` conversion is performed. An explicit `as` cast contributes
+its concrete result type and can disambiguate a call. Inherited methods join the
+derived overload set, while an identical derived signature remains subject to
+`virtual` and `override` validation.
+
+Generic candidates remain a deferred fallback beneath concrete overloads;
+generic inference and specialization are not implemented. The built-in
+`print(...)` behavior is unchanged.
 
 ### Construction and members
 
@@ -238,8 +256,9 @@ members are accessible only while checking the declaring class.
 Member access returns the declared field type and may be chained. Member
 assignment checks the field type. Method calls validate positional or named
 arguments and return the declared result type; a method without a return type
-cannot be used as a value. `self` is typed as its containing class or struct, so method
-bodies receive the same field, method, and visibility checks as external code.
+cannot be used as a value. `self` is typed as its containing class or struct, so
+method bodies receive the same field, method, and visibility checks as external
+code.
 
 Public inherited fields and methods participate in lookup. Private members remain
 accessible only within their declaring type. Derived values are assignable to

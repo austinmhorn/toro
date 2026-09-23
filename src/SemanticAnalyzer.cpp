@@ -308,7 +308,11 @@ void SemanticAnalyzer::declare(
     SourceLocation location)
 {
     auto& scope = scopes_.back();
-    if (scope.contains(name)) {
+    if (const auto existing = scope.find(name); existing != scope.end()) {
+        if (kind == SymbolKind::Function
+            && existing->second.kind == SymbolKind::Function) {
+            return;
+        }
         throw_semantic_error(location, "duplicate declaration '" + name + "' in this scope");
     }
     scope.emplace(name, Symbol{kind, location});

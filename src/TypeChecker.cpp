@@ -139,6 +139,8 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
             FunctionSignature signature{
                 {},
                 function.return_type ? resolve_type(*function.return_type) : void_type,
+                !function.generic_parameters.empty(),
+                function.location,
             };
             signature.parameters.reserve(function.parameters.size());
             for (const auto& parameter : function.parameters) {
@@ -147,8 +149,16 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                     resolve_type(parameter.type),
                 });
             }
-            scopes_.back().functions.emplace(function.name, std::move(signature));
             pop_generic_parameters();
+            auto& overloads = scopes_.back().functions[function.name];
+            if (std::any_of(overloads.begin(), overloads.end(),
+                    [&](const FunctionSignature& candidate) {
+                        return parameter_types_match(candidate, signature);
+                    })) {
+                throw_type_error(function.location,
+                    "duplicate callable signature for function '" + function.name + "'");
+            }
+            overloads.push_back(std::move(signature));
             continue;
         }
 
@@ -182,19 +192,26 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                     {},
                     method_declaration.return_type
                         ? resolve_type(*method_declaration.return_type) : void_type,
+                    !method_declaration.generic_parameters.empty(),
+                    method_declaration.location,
                 };
                 for (const auto& parameter : method_declaration.parameters) {
                     signature.parameters.push_back(FunctionParameterType{
                         parameter.name, resolve_type(parameter.type)});
                 }
                 pop_generic_parameters();
-                if (!type_info.methods.emplace(method_declaration.name, MethodInfo{
-                        std::move(signature), Visibility::Public, declaration.name,
-                        false, false, false}).second) {
+                auto& overloads = type_info.methods[method_declaration.name];
+                if (std::any_of(overloads.begin(), overloads.end(),
+                        [&](const MethodInfo& candidate) {
+                            return parameter_types_match(candidate.signature, signature);
+                        })) {
                     throw_type_error(method_declaration.location,
-                        "duplicate method '" + method_declaration.name + "' in struct '"
-                            + declaration.name + "'");
+                        "duplicate callable signature for method '" + declaration.name
+                            + "." + method_declaration.name + "'");
                 }
+                overloads.push_back(MethodInfo{
+                    std::move(signature), Visibility::Public, declaration.name,
+                    false, false, false});
             }
             for (const auto& conversion : declaration.conversions) {
                 declare_conversion(declaration.name, resolve_type(conversion->target_type));
@@ -235,6 +252,8 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                     FunctionSignature signature{
                         {},
                         method.return_type ? resolve_type(*method.return_type) : void_type,
+                        !method.generic_parameters.empty(),
+                        method.location,
                     };
                     signature.parameters.reserve(method.parameters.size());
                     for (const auto& parameter : method.parameters) {
@@ -244,18 +263,19 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                         });
                     }
                     pop_generic_parameters();
-                    if (!type_info.methods.emplace(method.name, MethodInfo{
-                        std::move(signature),
-                        method.visibility,
-                        declaration.name,
-                        method.is_virtual || method.is_override,
-                        method.body == nullptr,
-                        method.is_override,
-                    }).second) {
+                    auto& overloads = type_info.methods[method.name];
+                    if (std::any_of(overloads.begin(), overloads.end(),
+                            [&](const MethodInfo& candidate) {
+                                return parameter_types_match(candidate.signature, signature);
+                            })) {
                         throw_type_error(method.location,
-                            "duplicate method '" + method.name + "' in class '"
-                                + declaration.name + "'");
+                            "duplicate callable signature for method '" + declaration.name
+                                + "." + method.name + "'");
                     }
+                    overloads.push_back(MethodInfo{
+                        std::move(signature), method.visibility, declaration.name,
+                        method.is_virtual || method.is_override,
+                        method.body == nullptr, method.is_override});
                 } else {
                     const auto& conversion = static_cast<const ConversionOverload&>(*member);
                     declare_conversion(
@@ -280,19 +300,26 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                 FunctionSignature signature{
                     {},
                     method.return_type ? resolve_type(*method.return_type) : void_type,
+                    !method.generic_parameters.empty(),
+                    method.location,
                 };
                 for (const auto& parameter : method.parameters) {
                     signature.parameters.push_back(FunctionParameterType{
                         parameter.name, resolve_type(parameter.type)});
                 }
                 pop_generic_parameters();
-                if (!type_info.methods.emplace(method.name, MethodInfo{
-                        std::move(signature), Visibility::Public, declaration.name,
-                        false, true, false}).second) {
+                auto& overloads = type_info.methods[method.name];
+                if (std::any_of(overloads.begin(), overloads.end(),
+                        [&](const MethodInfo& candidate) {
+                            return parameter_types_match(candidate.signature, signature);
+                        })) {
                     throw_type_error(method.location,
-                        "duplicate method '" + method.name + "' in interface '"
-                            + declaration.name + "'");
+                        "duplicate callable signature for interface method '"
+                            + declaration.name + "." + method.name + "'");
                 }
+                overloads.push_back(MethodInfo{
+                    std::move(signature), Visibility::Public, declaration.name,
+                    false, true, false});
             }
             scopes_.back().nominal_types.emplace(declaration.name, std::move(type_info));
             pop_generic_parameters();
@@ -372,30 +399,43 @@ void TypeChecker::validate_class(
     const std::string& name,
     const NominalTypeInfo& type_info) const
 {
-    for (const auto& [method_name, method] : type_info.methods) {
-        const MethodInfo* inherited = type_info.base
-            ? find_method(*type_info.base, method_name)
-            : nullptr;
-        if (method.is_override) {
-            if (!inherited) {
+    for (const auto& [method_name, overloads] : type_info.methods) {
+        const auto inherited = type_info.base
+            ? find_methods(*type_info.base, method_name)
+            : std::vector<const MethodInfo*>{};
+        for (const auto& method : overloads) {
+            const auto matching = std::find_if(
+                inherited.begin(), inherited.end(), [&](const MethodInfo* candidate) {
+                    return parameter_types_match(
+                        method.signature, candidate->signature);
+                });
+            if (method.is_override && inherited.empty()) {
                 throw_type_error(type_info.location,
                     "method '" + name + "." + method_name
                         + "' is marked override but no inherited method exists");
             }
-            if (!inherited->is_virtual) {
-                throw_type_error(type_info.location,
-                    "method '" + name + "." + method_name
-                        + "' cannot override non-virtual method");
-            }
-            if (!signatures_match(method.signature, inherited->signature)) {
+            if (method.is_override && matching == inherited.end()) {
                 throw_type_error(type_info.location,
                     "override '" + name + "." + method_name
                         + "' does not match the inherited signature");
             }
-        } else if (inherited && inherited->is_virtual) {
-            throw_type_error(type_info.location,
-                "method '" + name + "." + method_name
-                    + "' must use override for an inherited virtual method");
+            if (method.is_override && !(*matching)->is_virtual) {
+                throw_type_error(type_info.location,
+                    "method '" + name + "." + method_name
+                        + "' cannot override non-virtual method");
+            }
+            if (method.is_override
+                && !signatures_match(method.signature, (*matching)->signature)) {
+                throw_type_error(type_info.location,
+                    "override '" + name + "." + method_name
+                        + "' does not match the inherited signature");
+            }
+            if (!method.is_override && matching != inherited.end()
+                && (*matching)->is_virtual) {
+                throw_type_error(type_info.location,
+                    "method '" + name + "." + method_name
+                        + "' must use override for an inherited virtual method");
+            }
         }
     }
 
@@ -410,11 +450,13 @@ void TypeChecker::validate_class(
             current = current->base ? find_nominal_type(*current->base) : nullptr;
         }
         for (const auto& method_name : candidate_names) {
-            const auto* method = find_method(name, method_name);
-            if (method && method->is_abstract) {
-                throw_type_error(type_info.location,
-                    "concrete class '" + name + "' does not implement abstract method '"
-                        + method_name + "'");
+            for (const auto* method : find_methods(name, method_name)) {
+                if (method->is_abstract) {
+                    throw_type_error(type_info.location,
+                        "concrete class '" + name
+                            + "' does not implement abstract method '"
+                            + method_name + "'");
+                }
             }
         }
     }
@@ -429,17 +471,28 @@ void TypeChecker::validate_interfaces(
         if (!interface_type) {
             continue;
         }
-        for (const auto& [method_name, requirement] : interface_type->methods) {
-            const auto* implementation = find_method(name, method_name);
-            if (!implementation || implementation->visibility != Visibility::Public) {
-                throw_type_error(type_info.location,
-                    "type '" + name + "' does not provide public interface method '"
-                        + interface_name + "." + method_name + "'");
-            }
-            if (!signatures_match(implementation->signature, requirement.signature)) {
-                throw_type_error(type_info.location,
-                    "method '" + name + "." + method_name
-                        + "' does not match interface '" + interface_name + "'");
+        for (const auto& [method_name, requirements] : interface_type->methods) {
+            const auto implementations = find_methods(name, method_name);
+            for (const auto& requirement : requirements) {
+                const auto implementation = std::find_if(
+                    implementations.begin(), implementations.end(),
+                    [&](const MethodInfo* candidate) {
+                        return parameter_types_match(
+                            candidate->signature, requirement.signature);
+                    });
+                if (implementation == implementations.end()
+                    || (*implementation)->visibility != Visibility::Public) {
+                    throw_type_error(type_info.location,
+                        "type '" + name
+                            + "' does not provide public interface method '"
+                            + interface_name + "." + method_name + "'");
+                }
+                if (!signatures_match(
+                        (*implementation)->signature, requirement.signature)) {
+                    throw_type_error(type_info.location,
+                        "method '" + name + "." + method_name
+                            + "' does not match interface '" + interface_name + "'");
+                }
             }
         }
     }
@@ -633,7 +686,7 @@ Type TypeChecker::check_expression(const Expr& expression)
         if (const auto type = find_value(identifier.name)) {
             return *type;
         }
-        if (find_function(identifier.name) || identifier.name == "print") {
+        if (!find_functions(identifier.name).empty() || identifier.name == "print") {
             return unknown_type;
         }
         return unknown_type;
@@ -691,10 +744,17 @@ Type TypeChecker::check_call(const CallExpr& call)
             return void_type;
         }
 
-        if (const auto* signature = find_function(callee.name)) {
-            check_arguments(
-                "function", callee.name, call.arguments, arguments, *signature);
-            return signature->return_type;
+        auto candidates = find_functions(callee.name);
+        const bool has_function_candidates = !candidates.empty();
+        if (!call.generic_arguments.empty()) {
+            std::erase_if(candidates, [](const FunctionSignature* signature) {
+                return !signature->is_generic;
+            });
+        }
+        if (has_function_candidates) {
+            return resolve_overload(
+                "function", callee.name, call.arguments, arguments, candidates)
+                .return_type;
         }
 
         if (const auto* type_info = find_nominal_type(callee.name)) {
@@ -847,8 +907,8 @@ Type TypeChecker::check_method_call(
         throw_type_error(
             current_location_, "cannot resolve members of type '" + type_name(object) + "'");
     }
-    const auto* method = find_method(object.name, callee.member);
-    if (!method) {
+    const auto methods = find_methods(object.name, callee.member);
+    if (methods.empty()) {
         if (find_field(object.name, callee.member)) {
             throw_type_error(
                 current_location_, "field '" + object.name + "." + callee.member
@@ -858,31 +918,117 @@ Type TypeChecker::check_method_call(
             current_location_, "type '" + object.name + "' has no method named '"
                 + callee.member + "'");
     }
+    std::vector<const FunctionSignature*> candidates;
+    candidates.reserve(methods.size());
+    for (const auto* method : methods) {
+        if (call.generic_arguments.empty() || method->signature.is_generic) {
+            candidates.push_back(&method->signature);
+        }
+    }
+    const auto& signature = resolve_overload(
+        "method", object.name + "." + callee.member,
+        call.arguments, arguments, candidates);
+    const auto selected = std::find_if(
+        methods.begin(), methods.end(), [&](const MethodInfo* method) {
+            return &method->signature == &signature;
+        });
+    const auto* method = *selected;
     if (!can_access(method->visibility, method->owner)) {
         throw_type_error(
             current_location_, "method '" + method->owner + "." + callee.member
                 + "' is private");
     }
-    check_arguments(
-        "method", object.name + "." + callee.member,
-        call.arguments, arguments, method->signature);
     return method->signature.return_type;
 }
 
-void TypeChecker::check_arguments(
+const TypeChecker::FunctionSignature& TypeChecker::resolve_overload(
     const std::string& callable_kind,
     const std::string& callable_name,
+    const std::vector<CallArgument>& call_arguments,
+    const std::vector<Type>& arguments,
+    const std::vector<const FunctionSignature*>& candidates) const
+{
+    int best_score = 0;
+    std::vector<const FunctionSignature*> best;
+    for (const auto* candidate : candidates) {
+        const auto score = overload_score(call_arguments, arguments, *candidate);
+        if (!score) {
+            continue;
+        }
+        if (best.empty() || *score < best_score) {
+            best_score = *score;
+            best = {candidate};
+        } else if (*score == best_score) {
+            best.push_back(candidate);
+        }
+    }
+    if (best.empty()) {
+        if (candidates.size() == 1) {
+            const auto& signature = *candidates.front();
+            const std::string prefix = "no matching overload for '" + callable_name
+                + "': " + callable_kind + " '" + callable_name + "' ";
+            if (arguments.size() != signature.parameters.size()) {
+                throw_type_error(
+                    current_location_, prefix + "expects "
+                        + std::to_string(signature.parameters.size())
+                        + " arguments, got " + std::to_string(arguments.size()));
+            }
+            std::vector<bool> supplied(signature.parameters.size(), false);
+            for (std::size_t index = 0; index < arguments.size(); ++index) {
+                std::size_t parameter_index = index;
+                if (call_arguments[index].name) {
+                    const auto& argument_name = *call_arguments[index].name;
+                    const auto parameter = std::find_if(
+                        signature.parameters.begin(), signature.parameters.end(),
+                        [&argument_name](const FunctionParameterType& candidate) {
+                            return candidate.name == argument_name;
+                        });
+                    if (parameter == signature.parameters.end()) {
+                        throw_type_error(
+                            current_location_, prefix + "has no parameter named '"
+                                + argument_name + "'");
+                    }
+                    parameter_index = static_cast<std::size_t>(
+                        parameter - signature.parameters.begin());
+                }
+                if (supplied[parameter_index]) {
+                    throw_type_error(
+                        current_location_, "no matching overload for '" + callable_name
+                            + "': parameter '"
+                            + signature.parameters[parameter_index].name
+                            + "' is supplied more than once");
+                }
+                supplied[parameter_index] = true;
+                const Type& expected = signature.parameters[parameter_index].type;
+                if (!expected.deferred && !arguments[index].deferred
+                    && !is_assignable(expected, arguments[index])) {
+                    throw_type_error(
+                        current_location_, "no matching overload for '" + callable_name
+                            + "': argument " + std::to_string(index + 1) + " to '"
+                            + callable_name + "' expects '" + type_name(expected)
+                            + "', got '" + type_name(arguments[index]) + "'");
+                }
+            }
+        }
+        throw_type_error(
+            current_location_, "no matching overload for '" + callable_name + "'");
+    }
+    if (best.size() != 1) {
+        throw_type_error(
+            current_location_, "ambiguous overload for '" + callable_name + "'");
+    }
+    return *best.front();
+}
+
+std::optional<int> TypeChecker::overload_score(
     const std::vector<CallArgument>& call_arguments,
     const std::vector<Type>& arguments,
     const FunctionSignature& signature) const
 {
     if (arguments.size() != signature.parameters.size()) {
-        throw_type_error(
-            current_location_, callable_kind + " '" + callable_name + "' expects "
-                + std::to_string(signature.parameters.size()) + " arguments, got "
-                + std::to_string(arguments.size()));
+        return std::nullopt;
     }
-
+    int score = signature.is_generic ? 100 : 0;
     std::vector<bool> supplied(signature.parameters.size(), false);
     for (std::size_t index = 0; index < arguments.size(); ++index) {
         std::size_t parameter_index = index;
@@ -894,28 +1040,32 @@ void TypeChecker::check_arguments(
                     return candidate.name == name;
                 });
             if (parameter == signature.parameters.end()) {
-                throw_type_error(
-                    current_location_, callable_kind + " '" + callable_name
-                        + "' has no parameter named '" + name + "'");
+                return std::nullopt;
             }
             parameter_index = static_cast<std::size_t>(
                 parameter - signature.parameters.begin());
         }
         if (supplied[parameter_index]) {
-            throw_type_error(
-                current_location_, "parameter '" + signature.parameters[parameter_index].name
-                    + "' is supplied more than once");
+            return std::nullopt;
         }
         supplied[parameter_index] = true;
 
-        const Type expected = signature.parameters[parameter_index].type;
-        if (!is_assignable(expected, arguments[index])) {
-            throw_type_error(
-                current_location_, "argument " + std::to_string(index + 1) + " to '"
-                    + callable_name + "' expects '" + type_name(expected) + "', got '"
-                    + type_name(arguments[index]) + "'");
+        const Type& expected = signature.parameters[parameter_index].type;
+        const Type& actual = arguments[index];
+        if (expected == actual && !expected.deferred && !actual.deferred) {
+            continue;
         }
+        if (expected.deferred || actual.deferred) {
+            score += 2;
+            continue;
+        }
+        if (is_assignable(expected, actual)) {
+            ++score;
+            continue;
+        }
+        return std::nullopt;
     }
+    return score;
 }
 
 Type TypeChecker::check_member_access(const MemberAccessExpr& member)
@@ -948,8 +1098,14 @@ Type TypeChecker::check_member_access(const MemberAccessExpr& member)
         }
         return field->type;
     }
-    if (const auto* method = find_method(object.name, member.member)) {
-        if (!can_access(method->visibility, method->owner)) {
+    const auto methods = find_methods(object.name, member.member);
+    if (!methods.empty()) {
+        const auto accessible = std::find_if(
+            methods.begin(), methods.end(), [&](const MethodInfo* method) {
+                return can_access(method->visibility, method->owner);
+            });
+        if (accessible == methods.end()) {
+            const auto* method = methods.front();
             throw_type_error(
                 current_location_, "method '" + method->owner + "." + member.member
                     + "' is private");
@@ -1311,8 +1467,15 @@ bool TypeChecker::signatures_match(
     const FunctionSignature& left,
     const FunctionSignature& right) const
 {
-    if (left.parameters.size() != right.parameters.size()
-        || left.return_type != right.return_type) {
+    return parameter_types_match(left, right)
+        && left.return_type == right.return_type;
+}
+
+bool TypeChecker::parameter_types_match(
+    const FunctionSignature& left,
+    const FunctionSignature& right) const
+{
+    if (left.parameters.size() != right.parameters.size()) {
         return false;
     }
     for (std::size_t index = 0; index < left.parameters.size(); ++index) {
@@ -1387,19 +1550,24 @@ std::optional<Type> TypeChecker::find_value(const std::string& name) const
     return std::nullopt;
 }
 
-const TypeChecker::FunctionSignature* TypeChecker::find_function(
+std::vector<const TypeChecker::FunctionSignature*> TypeChecker::find_functions(
     const std::string& name) const
 {
     for (auto scope = scopes_.rbegin(); scope != scopes_.rend(); ++scope) {
         if (scope->values.contains(name)) {
-            return nullptr;
+            return {};
         }
         if (const auto function = scope->functions.find(name);
             function != scope->functions.end()) {
-            return &function->second;
+            std::vector<const FunctionSignature*> result;
+            result.reserve(function->second.size());
+            for (const auto& signature : function->second) {
+                result.push_back(&signature);
+            }
+            return result;
         }
     }
-    return nullptr;
+    return {};
 }
 
 const TypeChecker::NominalTypeInfo* TypeChecker::find_nominal_type(
@@ -1432,23 +1600,34 @@ const TypeChecker::FieldInfo* TypeChecker::find_field(
     return type_info->base ? find_field(*type_info->base, field_name) : nullptr;
 }
 
-const TypeChecker::MethodInfo* TypeChecker::find_method(
+std::vector<const TypeChecker::MethodInfo*> TypeChecker::find_methods(
     const std::string& type_name_value,
-    const std::string& method_name,
-    bool include_private) const
+    const std::string& method_name) const
 {
     const auto* type_info = find_nominal_type(type_name_value);
     if (!type_info) {
-        return nullptr;
+        return {};
     }
+    std::vector<const MethodInfo*> result;
     if (const auto method = type_info->methods.find(method_name);
-        method != type_info->methods.end()
-        && (include_private || method->second.visibility == Visibility::Public)) {
-        return &method->second;
+        method != type_info->methods.end()) {
+        for (const auto& overload : method->second) {
+            result.push_back(&overload);
+        }
     }
-    return type_info->base
-        ? find_method(*type_info->base, method_name, include_private)
-        : nullptr;
+    if (type_info->base) {
+        for (const auto* inherited : find_methods(*type_info->base, method_name)) {
+            const bool replaced = std::any_of(
+                result.begin(), result.end(), [&](const MethodInfo* candidate) {
+                    return parameter_types_match(
+                        candidate->signature, inherited->signature);
+                });
+            if (!replaced) {
+                result.push_back(inherited);
+            }
+        }
+    }
+    return result;
 }
 
 bool TypeChecker::can_access(
