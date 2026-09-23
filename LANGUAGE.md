@@ -187,3 +187,16 @@ value := max<int>(10, 20)
 
 Generic inference, constraint validation, and specialization belong to later
 semantic and code-generation phases.
+
+### Name resolution
+
+Semantic analysis uses lexical scopes for the program, functions, blocks,
+conditional branches, loops, and `handle` cases. Declarations must be unique in
+their scope, while nested scopes may shadow enclosing declarations. Function
+parameters, loop variables, and `handle` payload bindings are visible only in
+their corresponding scope.
+
+Functions and declared types are registered as symbols, and `print` is a
+predefined symbol. `self` is available only in class methods. The current pass
+does not perform type checking, member lookup, overload resolution, interface
+conformance, inheritance validation, or generic constraint validation.

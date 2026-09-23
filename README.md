@@ -12,6 +12,8 @@ variable declarations, assignments, calls, functions, returns, blocks, condition
 control flow, loops, enums, `handle` statements, structs, named calls, and member
 access and assignment, classes, single inheritance, interfaces, virtual or
 override methods, and generic declarations and type references into an AST.
+The semantic analysis pass provides lexical scopes, symbol registration, and
+basic name resolution before type checking.
 
 ## Build
 
@@ -93,6 +95,16 @@ Parse generic declarations, constraints, types, and calls:
 ```bash
 ./build/toro ast examples/generics.toro
 ```
+
+Run semantic name resolution on a source file:
+
+```bash
+./build/toro check examples/hello.toro
+```
+
+The `check` command currently reports duplicate declarations in the same scope,
+unknown identifiers, and invalid uses of `self`. Type checking and member lookup
+are not implemented yet.
 
 ## Logical operators
 

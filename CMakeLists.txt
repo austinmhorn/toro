@@ -16,6 +16,7 @@ include(CTest)
 add_library(toro_core
     src/Lexer.cpp
     src/Parser.cpp
+    src/SemanticAnalyzer.cpp
     src/SourceFile.cpp
 )
 
@@ -48,4 +49,9 @@ if(BUILD_TESTING)
     target_link_libraries(toro_parser_tests PRIVATE toro_core)
     toro_enable_warnings(toro_parser_tests)
     add_test(NAME parser COMMAND toro_parser_tests)
+
+    add_executable(toro_semantic_tests tests/SemanticAnalyzerTests.cpp)
+    target_link_libraries(toro_semantic_tests PRIVATE toro_core)
+    toro_enable_warnings(toro_semantic_tests)
+    add_test(NAME semantic COMMAND toro_semantic_tests)
 endif()

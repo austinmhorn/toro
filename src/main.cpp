@@ -1,5 +1,6 @@
 #include "toro/Lexer.hpp"
 #include "toro/Parser.hpp"
+#include "toro/SemanticAnalyzer.hpp"
 #include "toro/SourceFile.hpp"
 #include "toro/Token.hpp"
 
@@ -16,12 +17,14 @@ void print_usage(std::ostream& output)
               "       toro tokens <source.toro>\n"
               "       toro ast-expression <source.toro>\n"
               "       toro ast <source.toro>\n"
+              "       toro check <source.toro>\n"
               "       toro --version\n";
 }
 
 bool is_source_command(std::string_view command)
 {
-    return command == "tokens" || command == "ast-expression" || command == "ast";
+    return command == "tokens" || command == "ast-expression"
+        || command == "ast" || command == "check";
 }
 
 void print_tokens(std::string_view source)
@@ -48,6 +51,14 @@ void print_ast(std::string_view source)
     auto tokens = toro::Lexer(source).tokenize();
     const auto program = toro::Parser(std::move(tokens)).parse_program();
     std::cout << toro::dump_program(program);
+}
+
+void check_source(std::string_view source)
+{
+    auto tokens = toro::Lexer(source).tokenize();
+    const auto program = toro::Parser(std::move(tokens)).parse_program();
+    toro::SemanticAnalyzer().analyze(program);
+    std::cout << "semantic check passed\n";
 }
 
 } // namespace
@@ -78,6 +89,8 @@ int main(int argc, char* argv[])
                 print_tokens(source.contents);
             } else if (std::string_view(argv[1]) == "ast-expression") {
                 print_expression_ast(source.contents);
+            } else if (std::string_view(argv[1]) == "check") {
+                check_source(source.contents);
             } else {
                 print_ast(source.contents);
             }
