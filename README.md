@@ -23,7 +23,7 @@ substituted field and method types, including recursively nested generic types.
 Enum variants are typed constructors, and `handle` validates case payload
 bindings, variant identity, duplicate cases, and exhaustive coverage.
 A minimal backend can emit portable C for the currently supported primitive
-procedural subset.
+procedural subset and non-generic value structs.
 
 ## Build
 
@@ -116,6 +116,7 @@ Generate C after parsing and checking a source file:
 
 ```bash
 ./build/toro emit-c examples/hello.toro
+./build/toro emit-c examples/structs.toro
 ```
 
 Build a native executable with the host C compiler:
@@ -133,6 +134,7 @@ Build and run through temporary artifacts:
 
 ```bash
 ./build/toro run examples/hello.toro
+./build/toro run examples/structs.toro
 ```
 
 `run` forwards program output and returns its exit status. Its temporary C source
@@ -161,10 +163,15 @@ reachable path. Complete `if`/`else` trees and exhaustive returning `handle`
 statements satisfy this requirement; loops are not assumed to execute.
 
 The initial C backend lowers primitive variables, expressions, functions,
-returns, calls, `if`/`else`, `while`, and primitive `print(...)` calls. It uses
+returns, calls, `if`/`else`, `while`, primitive `print(...)` calls, and
+non-generic structs. Struct construction emits every field explicitly, applying
+source defaults or toro primitive zero values. Field access, chained access,
+assignment, value copies, and struct methods use native C value semantics;
+methods lower to prefixed functions with an internal receiver pointer. It uses
 deterministically prefixed C identifiers and emits a C entry-point wrapper for a
-toro `main`. Valid toro features outside this subset fail with a backend
-diagnostic instead of producing partial or incorrect C.
+toro `main`. Generic structs, interfaces, conversion overloads, nullable fields,
+and other runtime types outside this subset fail with a backend diagnostic
+instead of producing partial or incorrect C.
 
 ## Logical operators
 

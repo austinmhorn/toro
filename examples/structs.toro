@@ -7,6 +7,18 @@ struct Player {
     name: string = ""
     health: int = 100
     position: Vec2
+
+    function rename(name: string) {
+        self.name = name
+    }
+
+    function damage(amount: int) {
+        self.health = self.health - amount
+    }
+
+    function get_health() -> int {
+        return self.health
+    }
 }
 
 function main() {
@@ -18,9 +30,11 @@ function main() {
         )
     )
 
-    player.health = 75
+    player.rename("toro")
+    player.damage(25)
     player.position.x = 15.0
 
     print(player.name)
+    print(player.get_health())
     print(player.position.x)
 }

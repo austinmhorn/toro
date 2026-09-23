@@ -301,7 +301,11 @@ The initial backend emits C only after parsing, semantic analysis, and type
 checking succeed. Its current subset includes primitive variables and
 reassignment, arithmetic, comparisons, equality, logical expressions, unary
 minus, functions, parameters, returns, calls, `if`/`else`, `while`, and
-primitive `print(...)` calls.
+primitive `print(...)` calls. Non-generic structs may contain supported
+primitive or non-generic struct fields and method signatures. Construction,
+field access and assignment, nested field access, struct value copies, and
+method calls are lowered to C. Methods receive an internal pointer to their
+struct value so mutations through `self` update the source receiver.
 
 Primitive types map directly to C:
 
@@ -313,10 +317,16 @@ string  -> const char*
 ```
 
 Generated names are deterministically prefixed to avoid collisions with C
-keywords and backend helpers. Classes, structs, enums, Result, generics,
-overloads, conversions, interfaces, inheritance, collections, and ARC are not
-lowered yet. Encountering one of these otherwise valid features produces a
-backend diagnostic.
+keywords and backend helpers. Every struct compound literal initializes every
+field: explicit source defaults take priority, while omitted `int`, `dec`,
+`bool`, and `string` fields use `0`, `0.0`, `false`, and `""`. Omitted nested
+struct values remain unsupported unless explicitly supplied.
+
+Classes, enums, Result, generic structs, method overloads, conversions,
+interfaces, inheritance, nullable fields, collections, and ARC are not lowered
+yet. Encountering one of these otherwise valid features produces a backend
+diagnostic. Method receivers that cannot safely be addressed are rejected
+rather than lowered to invalid C.
 
 The native toolchain can compile this generated source as C11. `toro build`
 writes a persistent executable, defaulting to the source filename stem in the

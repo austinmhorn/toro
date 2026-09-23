@@ -162,6 +162,42 @@ void test_nonzero_exit_status()
     expect(toro::NativeCompiler().run(c_source) == 7, "program exit status was not forwarded");
 }
 
+void test_struct_runtime_behavior()
+{
+    const auto c_source = generate(
+        "struct Point {\n"
+        "    x: dec\n"
+        "    y: dec\n"
+        "}\n"
+        "struct Player {\n"
+        "    name: string\n"
+        "    age: int = 28\n"
+        "    active: bool\n"
+        "    position: Point\n"
+        "    function rename(name: string) { self.name = name }\n"
+        "    function birthday() { self.age = self.age + 1 }\n"
+        "    function get_age() -> int { return self.age }\n"
+        "}\n"
+        "function main() {\n"
+        "    player := Player(\"Austin\", position: Point(10.0, 20.0))\n"
+        "    copy := player\n"
+        "    copy.age = 99\n"
+        "    player.rename(\"toro\")\n"
+        "    player.birthday()\n"
+        "    player.position.x = 15.0\n"
+        "    print(player.name)\n"
+        "    print(player.get_age())\n"
+        "    print(player.active)\n"
+        "    print(player.position.x)\n"
+        "    print(copy.age)\n"
+        "}\n");
+    const auto [status, output] = capture_run(toro::NativeCompiler(), c_source);
+    expect(status == 0, "generated struct program did not exit successfully");
+    expect(
+        output == "toro\n29\nfalse\n15\n99\n",
+        "generated struct program produced unexpected output");
+}
+
 void test_compile_failure_reporting()
 {
     const auto directory = make_test_directory();
@@ -215,6 +251,7 @@ int main()
         test_build_executable();
         test_run_output_and_control_flow();
         test_nonzero_exit_status();
+        test_struct_runtime_behavior();
         test_compile_failure_reporting();
         test_unsupported_backend_feature();
         test_temporary_cleanup();

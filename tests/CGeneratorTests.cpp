@@ -141,11 +141,113 @@ void test_string_equality()
     expect_contains(output, "strcmp(toro_arg_left, toro_arg_right) == 0", "string equality");
 }
 
+void test_struct_definition_construction_and_members()
+{
+    const auto output = generate(
+        "struct Player {\n"
+        "    name: string\n"
+        "    age: int = 28\n"
+        "    active: bool\n"
+        "    score: dec\n"
+        "}\n"
+        "function main() {\n"
+        "    player := Player(name: \"Austin\")\n"
+        "    player.age = 29\n"
+        "    print(player.name)\n"
+        "}\n");
+
+    expect_contains(
+        output,
+        "typedef struct toro_struct_Player toro_struct_Player;",
+        "struct forward declaration");
+    expect_contains(output, "struct toro_struct_Player", "struct definition");
+    expect_contains(output, "const char* toro_field_name;", "string field");
+    expect_contains(output, "int64_t toro_field_age;", "integer field");
+    expect_contains(
+        output,
+        "(toro_struct_Player){.toro_field_name = \"Austin\", "
+        ".toro_field_age = 28, .toro_field_active = false, "
+        ".toro_field_score = 0.0}",
+        "explicit construction values and defaults");
+    expect_contains(
+        output, "(toro_var_player).toro_field_age = 29;", "field assignment");
+    expect_contains(
+        output,
+        "printf(\"%s\\n\", (toro_var_player).toro_field_name)",
+        "field access");
+}
+
+void test_nested_structs_and_value_copy()
+{
+    const auto output = generate(
+        "struct Point {\n"
+        "    x: dec\n"
+        "    y: dec\n"
+        "}\n"
+        "struct Sprite {\n"
+        "    position: Point\n"
+        "    label: string\n"
+        "}\n"
+        "function main() {\n"
+        "    sprite := Sprite(Point(1.0, 2.0), \"hero\")\n"
+        "    copy := sprite\n"
+        "    copy.position.x = 3.0\n"
+        "    print(sprite.position.x)\n"
+        "}\n");
+
+    expect_contains(
+        output,
+        "toro_struct_Point toro_field_position;",
+        "nested struct field");
+    expect_contains(
+        output,
+        "toro_struct_Sprite toro_var_copy = toro_var_sprite;",
+        "struct value copy");
+    expect_contains(
+        output,
+        "((toro_var_copy).toro_field_position).toro_field_x = 3.0;",
+        "chained field assignment");
+}
+
+void test_struct_methods()
+{
+    const auto output = generate(
+        "struct Counter {\n"
+        "    value: int\n"
+        "    function add(amount: int) { self.value = self.value + amount }\n"
+        "    function get() -> int { return self.value }\n"
+        "}\n"
+        "function main() {\n"
+        "    counter := Counter()\n"
+        "    counter.add(amount: 4)\n"
+        "    print(counter.get())\n"
+        "}\n");
+
+    expect_contains(
+        output,
+        "static void toro_method_7_Counter_add(toro_struct_Counter* toro_self, "
+        "int64_t toro_arg_amount);",
+        "method prototype with receiver");
+    expect_contains(
+        output,
+        "(toro_self)->toro_field_value = "
+        "((toro_self)->toro_field_value + toro_arg_amount);",
+        "self mutation");
+    expect_contains(
+        output,
+        "toro_method_7_Counter_add(&(toro_var_counter), 4);",
+        "method call receiver");
+    expect_contains(
+        output,
+        "toro_method_7_Counter_get(&(toro_var_counter))",
+        "method result call");
+}
+
 void test_unsupported_features()
 {
     expect_backend_error(
-        "struct Point {\n"
-        "    x: int\n"
+        "class Point {\n"
+        "    public x: int\n"
         "}\n",
         "top-level statements are not supported by the C backend");
     expect_backend_error(
@@ -155,6 +257,25 @@ void test_unsupported_features()
         "function convert(value: int) -> int { return value }\n"
         "function convert(value: string) -> string { return value }\n",
         "function overloads are not supported by the C backend");
+    expect_backend_error(
+        "struct Box<T> { value: T }\n",
+        "generic structs are not supported by the C backend");
+    expect_backend_error(
+        "struct MaybeOwner { owner: string? }\n",
+        "type 'string' is not supported by the C backend");
+    expect_backend_error(
+        "struct Named {\n"
+        "    name: string\n"
+        "    overload as string { return self.name }\n"
+        "}\n",
+        "conversion overloads are not supported by the C backend");
+    expect_backend_error(
+        "struct Counter {\n"
+        "    value: int\n"
+        "    function increment() { self.value = self.value + 1 }\n"
+        "}\n"
+        "function main() { Counter().increment() }\n",
+        "receiver must be an addressable value");
 }
 
 void test_generated_c_compiles()
@@ -200,6 +321,9 @@ int main()
         test_functions_calls_and_returns();
         test_control_flow_and_boolean_expressions();
         test_string_equality();
+        test_struct_definition_construction_and_members();
+        test_nested_structs_and_value_copy();
+        test_struct_methods();
         test_unsupported_features();
         test_generated_c_compiles();
     } catch (const std::exception& error) {
