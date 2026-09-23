@@ -1,18 +1,26 @@
 #include "toro/Lexer.hpp"
+#include "toro/Parser.hpp"
 #include "toro/SourceFile.hpp"
 #include "toro/Token.hpp"
 
 #include <exception>
 #include <iostream>
 #include <string_view>
+#include <utility>
 
 namespace {
 
 void print_usage(std::ostream& output)
 {
-    output << "Usage: toro <source.to>\n"
-              "       toro tokens <source.to>\n"
+    output << "Usage: toro <source.toro>\n"
+              "       toro tokens <source.toro>\n"
+              "       toro ast-expression <source.toro>\n"
               "       toro --version\n";
+}
+
+bool is_source_command(std::string_view command)
+{
+    return command == "tokens" || command == "ast-expression";
 }
 
 void print_tokens(std::string_view source)
@@ -27,6 +35,13 @@ void print_tokens(std::string_view source)
     }
 }
 
+void print_expression_ast(std::string_view source)
+{
+    auto tokens = toro::Lexer(source).tokenize();
+    auto expression = toro::Parser(std::move(tokens)).parse_expression();
+    std::cout << toro::dump_expression(*expression);
+}
+
 } // namespace
 
 int main(int argc, char* argv[])
@@ -36,13 +51,13 @@ int main(int argc, char* argv[])
         return 0;
     }
 
-    if (argc == 2 && std::string_view(argv[1]) == "tokens") {
-        std::cerr << "error: tokens requires a source file\n";
+    if (argc == 2 && is_source_command(argv[1])) {
+        std::cerr << "error: " << argv[1] << " requires a source file\n";
         print_usage(std::cerr);
         return 1;
     }
 
-    if (argc != 2 && !(argc == 3 && std::string_view(argv[1]) == "tokens")) {
+    if (argc != 2 && !(argc == 3 && is_source_command(argv[1]))) {
         std::cerr << "error: invalid arguments\n";
         print_usage(std::cerr);
         return 1;
@@ -51,7 +66,11 @@ int main(int argc, char* argv[])
     try {
         if (argc == 3) {
             const auto source = toro::load_source_file(argv[2]);
-            print_tokens(source.contents);
+            if (std::string_view(argv[1]) == "tokens") {
+                print_tokens(source.contents);
+            } else {
+                print_expression_ast(source.contents);
+            }
         } else {
             const auto source = toro::load_source_file(argv[1]);
             std::cout << source.contents;

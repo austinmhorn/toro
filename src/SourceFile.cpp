@@ -9,8 +9,8 @@ namespace toro {
 
 SourceFile load_source_file(const std::filesystem::path& path)
 {
-    if (path.extension() != ".to") {
-        throw std::invalid_argument("toro source files must use the .to extension");
+    if (path.extension() != ".toro") {
+        throw std::invalid_argument("toro source files must use the .toro extension");
     }
 
     if (!std::filesystem::exists(path)) {

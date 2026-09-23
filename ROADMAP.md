@@ -306,9 +306,9 @@ Avoid fragile relative-import chains as the primary module model.
 Initial command set:
 
 ```bash
-toro run main.to
-toro build main.to
-toro check main.to
+toro run main.toro
+toro build main.toro
+toro check main.toro
 ```
 
 ### Exit criteria
@@ -332,7 +332,7 @@ function main() {
 And:
 
 ```bash
-toro run main.to
+toro run main.toro
 ```
 
 prints:
@@ -666,7 +666,7 @@ my-project/
 ├── toro.toml
 ├── toro.lock
 ├── src/
-│   └── main.to
+│   └── main.toro
 ├── tests/
 └── examples/
 ```
@@ -1138,7 +1138,7 @@ toro should eventually make these costs inspectable rather than mysterious.
 Before worrying about v0.2 through v1.0, toro has one job:
 
 ```bash
-toro run main.to
+toro run main.toro
 ```
 
 must successfully compile and execute a real toro program.
