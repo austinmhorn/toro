@@ -282,6 +282,14 @@ Equality requires compatible operands, logical operators require `bool`, and
 argument counts and types, and returns are checked against the function's
 declared return type.
 
+A function or concrete method with a declared return type must return a value on
+every reachable path. A complete `if`/`else` tree guarantees a return only when
+both branches do, and an exhaustive `handle` guarantees one only when every case
+does. Nested blocks propagate this result. Loops are never assumed to execute,
+even when their bodies return. Conversion overload bodies obey the same rule for
+their target type. Functions without a return type have no completeness
+requirement.
+
 Concrete generic struct and class instances substitute their type arguments
 through fields and methods. Runtime specialization remains deferred. Concrete
 struct and class fields and methods are type checked, including inherited

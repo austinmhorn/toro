@@ -156,8 +156,10 @@ void test_function_returns()
 {
     expect_valid(
         "function value() -> int { return 10 }\n"
-        "function action() { return }\n"
-        "function unchecked_path() -> bool {}\n");
+        "function action() { return }\n");
+    expect_error(
+        "function unchecked_path() -> bool {}\n",
+        "function 'unchecked_path' does not return a value on every reachable path");
     expect_error(
         "function value() -> int { return }\n",
         "return requires a value of type 'int'");
@@ -167,6 +169,113 @@ void test_function_returns()
     expect_error(
         "function value() -> int { return \"wrong\" }\n",
         "cannot assign value of type 'string' to type 'int'");
+}
+
+void test_control_flow_return_analysis()
+{
+    expect_valid(
+        "function value(flag: bool) -> int {\n"
+        "    if flag {\n"
+        "        return 1\n"
+        "    } else {\n"
+        "        return 2\n"
+        "    }\n"
+        "}\n");
+    expect_error(
+        "function value(flag: bool) -> int {\n"
+        "    if flag {\n"
+        "        return 1\n"
+        "    }\n"
+        "}\n",
+        "function 'value' does not return a value on every reachable path");
+    expect_valid(
+        "function nested(first: bool, second: bool) -> int {\n"
+        "    if first {\n"
+        "        if second {\n"
+        "            return 1\n"
+        "        } else {\n"
+        "            return 2\n"
+        "        }\n"
+        "    } else {\n"
+        "        return 3\n"
+        "    }\n"
+        "}\n");
+    expect_valid(
+        "function nested_block() -> int {\n"
+        "    {\n"
+        "        return 1\n"
+        "    }\n"
+        "}\n");
+    expect_valid(
+        "enum Choice {\n"
+        "    first\n"
+        "    second\n"
+        "}\n"
+        "function choose(value: Choice) -> int {\n"
+        "    handle value {\n"
+        "        first { return 1 }\n"
+        "        second { return 2 }\n"
+        "    }\n"
+        "}\n");
+    expect_error(
+        "enum Choice {\n"
+        "    first\n"
+        "    second\n"
+        "}\n"
+        "function choose(value: Choice) -> int {\n"
+        "    handle value {\n"
+        "        first { return 1 }\n"
+        "        second { print(2) }\n"
+        "    }\n"
+        "}\n",
+        "function 'choose' does not return a value on every reachable path");
+    expect_valid(
+        "function action(flag: bool) {\n"
+        "    if flag { return }\n"
+        "}\n");
+    expect_error(
+        "function loop_only(flag: bool) -> int {\n"
+        "    while flag { return 1 }\n"
+        "}\n",
+        "function 'loop_only' does not return a value on every reachable path");
+}
+
+void test_conversion_return_analysis()
+{
+    expect_valid(
+        "struct Value {\n"
+        "    overload as string {\n"
+        "        return \"value\"\n"
+        "    }\n"
+        "}\n");
+    expect_error(
+        "struct Value {\n"
+        "    overload as string {\n"
+        "        print(\"missing\")\n"
+        "    }\n"
+        "}\n",
+        "conversion from 'Value' to 'string' does not return a value on every reachable path");
+}
+
+void test_result_return_analysis()
+{
+    expect_valid(
+        "function operation() -> Result<int, string> { return ok(10) }\n"
+        "function execute(flag: bool) -> Result<int, string> {\n"
+        "    value := operation()?\n"
+        "    if flag {\n"
+        "        return ok(value)\n"
+        "    } else {\n"
+        "        return error(\"failed\")\n"
+        "    }\n"
+        "}\n");
+    expect_error(
+        "function operation() -> Result<int, string> { return ok(10) }\n"
+        "function execute() -> Result<int, string> {\n"
+        "    value := operation()?\n"
+        "    print(value)\n"
+        "}\n",
+        "function 'execute' does not return a value on every reachable path");
 }
 
 void test_null_restrictions()
@@ -757,8 +866,10 @@ void test_generic_function_inference()
         "integer: int = first(10, \"ignored\")\n"
         "text: string = first(\"value\", false)\n");
     expect_valid(
-        "function make_list<T>(value: T) -> List<T> {}\n"
-        "items: List<int> = make_list(10)\n");
+        "function keep_list<T>(items: List<T>) -> List<T> { return items }\n"
+        "function verify(items: List<int>) {\n"
+        "    result: List<int> = keep_list(items)\n"
+        "}\n");
     expect_error(
         "function choose<T>(a: T, b: T) -> T { return a }\n"
         "value := choose(10, \"hello\")\n",
@@ -906,13 +1017,14 @@ void test_generic_member_substitution()
         "no matching overload for 'Box.replace'");
     expect_valid(
         "class User {}\n"
-        "function users() -> List<User> {}\n"
         "class Store<T> {\n"
         "    public values: List<T>\n"
         "    public function get_values() -> List<T> { return self.values }\n"
         "}\n"
-        "store: Store<User> = Store(values: users())\n"
-        "values: List<User> = store.get_values()\n");
+        "function verify(users: List<User>) {\n"
+        "    store: Store<User> = Store(values: users)\n"
+        "    values: List<User> = store.get_values()\n"
+        "}\n");
     expect_error(
         "class Box<T> { public value: T }\n"
         "integer: Box<int> = Box(value: 10)\n"
@@ -945,32 +1057,41 @@ void test_recursive_structural_inference()
 {
     expect_valid(
         "class User {}\n"
-        "function users() -> List<User> {}\n"
-        "function first<T>(items: List<T>) -> T {}\n"
-        "user: User = first(users())\n");
+        "function first<T>(items: List<T>, fallback: T) -> T { return fallback }\n"
+        "function verify(users: List<User>) {\n"
+        "    user: User = first(users, User())\n"
+        "}\n");
     expect_valid(
         "class User {}\n"
-        "function users_by_name() -> Map<string, User> {}\n"
-        "function first_value<T>(items: Map<string, T>) -> T {}\n"
-        "user: User = first_value(users_by_name())\n");
+        "function first_value<T>(items: Map<string, T>, fallback: T) -> T {\n"
+        "    return fallback\n"
+        "}\n"
+        "function verify(users: Map<string, User>) {\n"
+        "    user: User = first_value(users, User())\n"
+        "}\n");
     expect_valid(
         "class User {}\n"
         "struct Pair<A, B> {\n"
         "    first: A\n"
         "    second: B\n"
         "}\n"
-        "function integers() -> List<int> {}\n"
-        "function nested<A, B>(value: Pair<A, List<B>>) -> B {}\n"
-        "pair: Pair<User, List<int>> = Pair(\n"
-        "    first: User(),\n"
-        "    second: integers()\n"
-        ")\n"
-        "number: int = nested(pair)\n");
+        "function nested<A, B>(value: Pair<A, List<B>>, fallback: B) -> B {\n"
+        "    return fallback\n"
+        "}\n"
+        "function verify(integers: List<int>) {\n"
+        "    pair: Pair<User, List<int>> = Pair(\n"
+        "        first: User(),\n"
+        "        second: integers\n"
+        "    )\n"
+        "    number: int = nested(pair, 0)\n"
+        "}\n");
     expect_error(
-        "function integers() -> List<int> {}\n"
-        "function strings() -> List<string> {}\n"
-        "function combine<T>(a: List<T>, b: List<T>) -> T {}\n"
-        "value := combine(integers(), strings())\n",
+        "function combine<T>(a: List<T>, b: List<T>, fallback: T) -> T {\n"
+        "    return fallback\n"
+        "}\n"
+        "function verify(integers: List<int>, strings: List<string>) {\n"
+        "    value := combine(integers, strings, 0)\n"
+        "}\n",
         "conflicting inference for generic parameter 'T'");
 }
 
@@ -1172,7 +1293,7 @@ void test_nested_handle_and_result()
         "    }\n"
         "}\n");
     expect_valid(
-        "function result() -> Result<int, string> {}\n"
+        "function result() -> Result<int, string> { return ok(10) }\n"
         "function inspect() {\n"
         "    value := result()\n"
         "    handle value {\n"
@@ -1185,7 +1306,7 @@ void test_nested_handle_and_result()
         "    }\n"
         "}\n");
     expect_error(
-        "function result() -> Result<int, string> {}\n"
+        "function result() -> Result<int, string> { return ok(10) }\n"
         "function inspect() {\n"
         "    value := result()\n"
         "    handle value {\n"
@@ -1250,11 +1371,11 @@ void test_result_propagation()
         "}\n",
         "operator '?' requires Result<T, E>, got 'int?'");
     expect_error(
-        "function operation() -> Result<int, string> {}\n"
+        "function operation() -> Result<int, string> { return ok(10) }\n"
         "value := operation()?\n",
         "operator '?' is only valid inside a function returning Result<T, E>");
     expect_error(
-        "function operation() -> Result<int, string> {}\n"
+        "function operation() -> Result<int, string> { return ok(10) }\n"
         "function execute() -> int {\n"
         "    return operation()?\n"
         "}\n",
@@ -1262,13 +1383,13 @@ void test_result_propagation()
     expect_valid(
         "class Problem {}\n"
         "class SpecificProblem : Problem {}\n"
-        "function operation() -> Result<int, SpecificProblem> {}\n"
+        "function operation() -> Result<int, SpecificProblem> { return ok(10) }\n"
         "function execute() -> Result<int, Problem> {\n"
         "    value := operation()?\n"
         "    return ok(value)\n"
         "}\n");
     expect_error(
-        "function operation() -> Result<int, string> {}\n"
+        "function operation() -> Result<int, string> { return ok(10) }\n"
         "function execute() -> Result<int, bool> {\n"
         "    value := operation()?\n"
         "    return ok(value)\n"
@@ -1328,6 +1449,9 @@ int main()
         test_logical_operators_and_conditions();
         test_function_arguments();
         test_function_returns();
+        test_control_flow_return_analysis();
+        test_conversion_return_analysis();
+        test_result_return_analysis();
         test_null_restrictions();
         test_nullable_declarations_and_assignments();
         test_nullable_functions_and_equality();

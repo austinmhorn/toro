@@ -41,10 +41,13 @@ function max<T: Serializable + Comparable>(a: T, b: T) -> T {
     return a
 }
 
-function collect<T>(items: Map<string, List<T>>) -> List<T> {
+function preserve<T>(items: Map<string, List<T>>) -> Map<string, List<T>> {
+    return items
 }
 
-function value_lists() -> Map<string, List<Value>> {
+function verify_collections(items: Map<string, List<Value>>) {
+    values: Map<string, List<Value>> = preserve(items)
+    print(values)
 }
 
 function main() {
@@ -54,12 +57,10 @@ function main() {
     box.replace(20)
     number: int = box.get()
     sorted := SortedBox(value: Value())
-    values: List<Value> = collect(value_lists())
     value := max<Value>(Value(), Value())
     print(explicit_pair)
     print(inferred_pair)
     print(number)
     print(sorted)
-    print(values)
     print(value)
 }

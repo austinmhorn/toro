@@ -136,6 +136,9 @@ private:
     void check_method(const MethodDeclaration& method, const Type& containing_type);
     void check_conversion(const ConversionOverload& conversion, const Type& source_type);
     void check_block(const BlockStmt& block);
+    [[nodiscard]] bool statements_guarantee_return(
+        const std::vector<std::unique_ptr<Stmt>>& statements) const;
+    [[nodiscard]] bool statement_guarantees_return(const Stmt& statement) const;
 
     [[nodiscard]] Type resolve_type(const TypeReference& reference) const;
     [[nodiscard]] Type substitute_type(

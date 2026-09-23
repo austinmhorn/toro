@@ -128,6 +128,9 @@ Enum construction and exhaustive `handle` checking are also part of this pass.
 `ok(value)` and `error(value)` construct an expected `Result<T, E>`, while
 postfix `?` extracts the success type and propagates a compatible error from a
 function returning `Result`.
+Functions and concrete methods with declared return types must return on every
+reachable path. Complete `if`/`else` trees and exhaustive returning `handle`
+statements satisfy this requirement; loops are not assumed to execute.
 
 ## Logical operators
 

@@ -1709,9 +1709,16 @@ void TypeChecker::check_function(const FunctionDeclarationStmt& function)
         declare_value(parameter.name, type);
     }
     check_statement_list(function.body->statements);
+    const bool returns_on_all_paths = !function.return_type
+        || statements_guarantee_return(function.body->statements);
     pop_scope();
     pop_generic_parameters();
     current_return_type_ = enclosing_return_type;
+    if (!returns_on_all_paths) {
+        throw_type_error(
+            function.location, "function '" + function.name
+                + "' does not return a value on every reachable path");
+    }
 }
 
 void TypeChecker::check_method(
@@ -1736,10 +1743,17 @@ void TypeChecker::check_method(
     if (method.body) {
         check_statement_list(method.body->statements);
     }
+    const bool returns_on_all_paths = !method.return_type || !method.body
+        || statements_guarantee_return(method.body->statements);
     pop_scope();
     pop_generic_parameters();
     current_return_type_ = enclosing_return_type;
     current_type_name_ = enclosing_type_name;
+    if (!returns_on_all_paths) {
+        throw_type_error(
+            method.location, "method '" + containing_type.name + "." + method.name
+                + "' does not return a value on every reachable path");
+    }
 }
 
 void TypeChecker::check_conversion(
@@ -1755,9 +1769,17 @@ void TypeChecker::check_conversion(
     push_scope();
     declare_value("self", source_type);
     check_statement_list(conversion.body->statements);
+    const bool returns_on_all_paths =
+        statements_guarantee_return(conversion.body->statements);
     pop_scope();
     current_return_type_ = enclosing_return_type;
     current_type_name_ = enclosing_type_name;
+    if (!returns_on_all_paths) {
+        throw_type_error(
+            conversion.location, "conversion from '" + source_type.name + "' to '"
+                + format_type_reference(conversion.target_type)
+                + "' does not return a value on every reachable path");
+    }
 }
 
 void TypeChecker::check_block(const BlockStmt& block)
@@ -1765,6 +1787,58 @@ void TypeChecker::check_block(const BlockStmt& block)
     push_scope();
     check_statement_list(block.statements);
     pop_scope();
+}
+
+bool TypeChecker::statements_guarantee_return(
+    const std::vector<std::unique_ptr<Stmt>>& statements) const
+{
+    return std::any_of(
+        statements.begin(), statements.end(),
+        [&](const std::unique_ptr<Stmt>& statement) {
+            return statement_guarantees_return(*statement);
+        });
+}
+
+bool TypeChecker::statement_guarantees_return(const Stmt& statement) const
+{
+    switch (statement.kind) {
+    case StmtKind::Return:
+        return true;
+    case StmtKind::Block:
+        return statements_guarantee_return(
+            static_cast<const BlockStmt&>(statement).statements);
+    case StmtKind::If: {
+        const auto& conditional = static_cast<const IfStmt&>(statement);
+        return conditional.else_branch
+            && statements_guarantee_return(conditional.then_block->statements)
+            && statement_guarantees_return(*conditional.else_branch);
+    }
+    case StmtKind::Handle: {
+        const auto& handle = static_cast<const HandleStmt&>(statement);
+        return !handle.cases.empty()
+            && std::all_of(
+                handle.cases.begin(), handle.cases.end(),
+                [&](const HandleCase& handle_case) {
+                    return statements_guarantee_return(
+                        handle_case.body->statements);
+                });
+    }
+    case StmtKind::VariableDeclaration:
+    case StmtKind::Assignment:
+    case StmtKind::MemberAssignment:
+    case StmtKind::Expression:
+    case StmtKind::FunctionDeclaration:
+    case StmtKind::While:
+    case StmtKind::ForIn:
+    case StmtKind::Stop:
+    case StmtKind::Continue:
+    case StmtKind::EnumDeclaration:
+    case StmtKind::StructDeclaration:
+    case StmtKind::ClassDeclaration:
+    case StmtKind::InterfaceDeclaration:
+        return false;
+    }
+    return false;
 }
 
 Type TypeChecker::resolve_type(const TypeReference& reference) const
