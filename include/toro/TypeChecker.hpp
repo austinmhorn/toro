@@ -27,6 +27,7 @@ private:
         Type return_type;
         std::optional<TypeReference> return_type_reference;
         std::vector<GenericParameter> generic_parameters;
+        std::unordered_map<std::string, Type> containing_substitutions;
         SourceLocation location;
     };
 
@@ -39,7 +40,9 @@ private:
         Type type;
         Visibility visibility;
         bool required;
+        bool has_explicit_default;
         std::string owner;
+        TypeReference type_reference;
     };
 
     struct MethodInfo {
@@ -58,6 +61,7 @@ private:
         bool is_abstract{false};
         std::optional<std::string> base;
         std::vector<std::string> interfaces;
+        std::vector<GenericParameter> generic_parameters;
         std::vector<std::string> field_order;
         std::unordered_map<std::string, FieldInfo> fields;
         std::unordered_map<std::string, std::vector<MethodInfo>> methods;
@@ -115,6 +119,17 @@ private:
     [[nodiscard]] Type substitute_type(
         const TypeReference& reference,
         const std::unordered_map<std::string, Type>& substitutions) const;
+    [[nodiscard]] bool infer_type_arguments(
+        const TypeReference& pattern,
+        const Type& actual,
+        const std::vector<GenericParameter>& generic_parameters,
+        std::unordered_map<std::string, Type>& substitutions,
+        const std::unordered_set<std::string>& explicit_parameters,
+        std::string& failure_reason) const;
+    [[nodiscard]] bool validate_constraints(
+        const std::vector<GenericParameter>& generic_parameters,
+        const std::unordered_map<std::string, Type>& substitutions,
+        std::string& failure_reason) const;
     [[nodiscard]] bool is_generic_parameter(const std::string& name) const;
     [[nodiscard]] bool contains_generic_parameter(const TypeReference& reference) const;
     [[nodiscard]] Type require_value(Type type, SourceLocation location) const;

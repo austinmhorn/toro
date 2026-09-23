@@ -3,6 +3,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace toro {
 
@@ -21,11 +22,13 @@ struct Type {
         TypeKind kind,
         bool nullable = false,
         bool deferred = false,
-        std::string name = {})
+        std::string name = {},
+        std::vector<Type> arguments = {})
         : kind(kind)
         , nullable(nullable)
         , deferred(deferred)
         , name(std::move(name))
+        , arguments(std::move(arguments))
     {
     }
 
@@ -33,6 +36,7 @@ struct Type {
     bool nullable{false};
     bool deferred{false};
     std::string name;
+    std::vector<Type> arguments;
 
     bool operator==(const Type&) const = default;
 };
@@ -67,6 +71,16 @@ struct Type {
     std::string result = is_unknown(type) && !type.name.empty()
         ? type.name
         : std::string(base_type_name(type));
+    if (!type.arguments.empty()) {
+        result += '<';
+        for (std::size_t index = 0; index < type.arguments.size(); ++index) {
+            if (index != 0) {
+                result += ", ";
+            }
+            result += type_name(type.arguments[index]);
+        }
+        result += '>';
+    }
     if (type.nullable) {
         result += '?';
     }

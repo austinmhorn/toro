@@ -45,7 +45,9 @@ bool is_directly_assignable(const Type& expected, const Type& actual)
     }
     if (is_unknown(expected) || is_unknown(actual)) {
         if (is_unknown(expected) && is_unknown(actual)) {
-            return expected.name.empty() || actual.name.empty() || expected.name == actual.name;
+            return expected.name.empty() || actual.name.empty()
+                || (expected.name == actual.name
+                    && expected.arguments == actual.arguments);
         }
         const Type& unknown = is_unknown(expected) ? expected : actual;
         return unknown.name.empty();
@@ -57,7 +59,8 @@ bool has_same_base_type(const Type& left, const Type& right)
 {
     if (is_unknown(left) || is_unknown(right)) {
         if (is_unknown(left) && is_unknown(right)) {
-            return left.name.empty() || right.name.empty() || left.name == right.name;
+            return left.name.empty() || right.name.empty()
+                || (left.name == right.name && left.arguments == right.arguments);
         }
         const Type& unknown = is_unknown(left) ? left : right;
         return unknown.name.empty();
@@ -141,6 +144,7 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                 function.return_type ? resolve_type(*function.return_type) : void_type,
                 function.return_type,
                 function.generic_parameters,
+                {},
                 function.location,
             };
             signature.parameters.reserve(function.parameters.size());
@@ -173,6 +177,7 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
             NominalTypeInfo type_info;
             type_info.kind = NominalKind::Struct;
             type_info.location = declaration.location;
+            type_info.generic_parameters = declaration.generic_parameters;
             for (const auto& interface_name : declaration.interfaces) {
                 type_info.interfaces.push_back(interface_name.name);
             }
@@ -183,7 +188,9 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                     field_type,
                     Visibility::Public,
                     field.default_value == nullptr && !has_zero_value(field_type),
+                    field.default_value != nullptr,
                     declaration.name,
+                    field.type,
                 });
             }
             for (const auto& method : declaration.methods) {
@@ -196,6 +203,7 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                         ? resolve_type(*method_declaration.return_type) : void_type,
                     method_declaration.return_type,
                     method_declaration.generic_parameters,
+                    {},
                     method_declaration.location,
                 };
                 for (const auto& parameter : method_declaration.parameters) {
@@ -232,6 +240,7 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
             type_info.kind = NominalKind::Class;
             type_info.is_abstract = declaration.is_abstract;
             type_info.location = declaration.location;
+            type_info.generic_parameters = declaration.generic_parameters;
             if (declaration.base_type) {
                 type_info.base = declaration.base_type->name;
             }
@@ -247,7 +256,9 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                         field_type,
                         field.visibility,
                         field.default_value == nullptr && !has_zero_value(field_type),
+                        field.default_value != nullptr,
                         declaration.name,
+                        field.type,
                     });
                 } else if (member->kind == ClassMemberKind::Method) {
                     const auto& method = static_cast<const MethodDeclaration&>(*member);
@@ -257,6 +268,7 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                         method.return_type ? resolve_type(*method.return_type) : void_type,
                         method.return_type,
                         method.generic_parameters,
+                        {},
                         method.location,
                     };
                     signature.parameters.reserve(method.parameters.size());
@@ -300,6 +312,7 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
             type_info.kind = NominalKind::Interface;
             type_info.is_abstract = true;
             type_info.location = declaration.location;
+            type_info.generic_parameters = declaration.generic_parameters;
             for (const auto& method : declaration.methods) {
                 push_generic_parameters(method.generic_parameters);
                 FunctionSignature signature{
@@ -307,6 +320,7 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                     method.return_type ? resolve_type(*method.return_type) : void_type,
                     method.return_type,
                     method.generic_parameters,
+                    {},
                     method.location,
                 };
                 for (const auto& parameter : method.parameters) {
@@ -816,6 +830,21 @@ Type TypeChecker::check_construction(
         throw_type_error(
             current_location_, "abstract class '" + name + "' cannot be constructed");
     }
+    if (!call.generic_arguments.empty()
+        && call.generic_arguments.size() != type_info.generic_parameters.size()) {
+        throw_type_error(
+            current_location_, "type '" + name + "' expects "
+                + std::to_string(type_info.generic_parameters.size())
+                + " generic arguments, got "
+                + std::to_string(call.generic_arguments.size()));
+    }
+    std::unordered_map<std::string, Type> substitutions;
+    std::unordered_set<std::string> explicit_parameters;
+    for (std::size_t index = 0; index < call.generic_arguments.size(); ++index) {
+        const auto& parameter = type_info.generic_parameters[index];
+        substitutions.emplace(parameter.name, resolve_type(call.generic_arguments[index]));
+        explicit_parameters.insert(parameter.name);
+    }
     std::vector<std::string> field_order;
     std::unordered_map<std::string, const FieldInfo*> fields;
     std::function<void(const NominalTypeInfo&)> collect_fields =
@@ -869,19 +898,53 @@ Type TypeChecker::check_construction(
                 current_location_, "field '" + field->second->owner + "."
                     + field_name + "' is private");
         }
-        if (!field->second->type.deferred
-            && !is_assignable(field->second->type, arguments[index])) {
+        std::string failure_reason;
+        const bool own_generic_field = field->second->owner == name
+            && !type_info.generic_parameters.empty();
+        if (own_generic_field
+            && !infer_type_arguments(
+                field->second->type_reference, arguments[index],
+                type_info.generic_parameters, substitutions, explicit_parameters,
+                failure_reason)) {
+            throw_type_error(
+                current_location_, "field '" + name + "." + field_name
+                    + "' cannot accept '" + type_name(arguments[index])
+                    + "': " + failure_reason);
+        }
+        const Type expected = own_generic_field
+            ? substitute_type(field->second->type_reference, substitutions)
+            : field->second->type;
+        if (!expected.deferred && !is_assignable(expected, arguments[index])) {
             throw_type_error(
                 current_location_,
                 "field '" + name + "." + field_name + "' expects '"
-                    + type_name(field->second->type) + "', got '"
+                    + type_name(expected) + "', got '"
                     + type_name(arguments[index]) + "'");
         }
     }
 
+    for (const auto& parameter : type_info.generic_parameters) {
+        if (!substitutions.contains(parameter.name)) {
+            throw_type_error(
+                current_location_, "cannot infer generic parameter '" + parameter.name
+                    + "' while constructing '" + name + "'");
+        }
+    }
+    std::string constraint_failure;
+    if (!validate_constraints(
+            type_info.generic_parameters, substitutions, constraint_failure)) {
+        throw_type_error(current_location_, constraint_failure);
+    }
+
     for (const auto& field_name : field_order) {
         const auto* field = fields.at(field_name);
-        if (field->required && !supplied.contains(field_name)) {
+        const Type field_type = field->owner == name
+                && !type_info.generic_parameters.empty()
+            ? substitute_type(field->type_reference, substitutions)
+            : field->type;
+        const bool required = !field->has_explicit_default
+            && !has_zero_value(field_type);
+        if (required && !supplied.contains(field_name)) {
             throw_type_error(
                 current_location_,
                 "construction of '" + name + "' is missing required field '"
@@ -889,7 +952,13 @@ Type TypeChecker::check_construction(
         }
     }
 
-    return Type{TypeKind::Unknown, false, false, name};
+    std::vector<Type> type_arguments;
+    type_arguments.reserve(type_info.generic_parameters.size());
+    for (const auto& parameter : type_info.generic_parameters) {
+        type_arguments.push_back(substitutions.at(parameter.name));
+    }
+    return Type{
+        TypeKind::Unknown, false, false, name, std::move(type_arguments)};
 }
 
 Type TypeChecker::check_method_call(
@@ -927,19 +996,34 @@ Type TypeChecker::check_method_call(
             current_location_, "type '" + object.name + "' has no method named '"
                 + callee.member + "'");
     }
+    std::unordered_map<std::string, Type> containing_substitutions;
+    if (object.arguments.size() == type_info->generic_parameters.size()) {
+        for (std::size_t index = 0; index < object.arguments.size(); ++index) {
+            containing_substitutions.emplace(
+                type_info->generic_parameters[index].name, object.arguments[index]);
+        }
+    }
+    std::vector<FunctionSignature> instantiated_signatures;
+    instantiated_signatures.reserve(methods.size());
     std::vector<const FunctionSignature*> candidates;
     candidates.reserve(methods.size());
     for (const auto* method : methods) {
-        candidates.push_back(&method->signature);
+        instantiated_signatures.push_back(method->signature);
+        if (method->owner == object.name) {
+            instantiated_signatures.back().containing_substitutions =
+                containing_substitutions;
+        }
+        candidates.push_back(&instantiated_signatures.back());
     }
     const auto resolution = resolve_overload(
         "method", object.name + "." + callee.member,
         call.arguments, arguments, call.generic_arguments, candidates);
     const auto selected = std::find_if(
-        methods.begin(), methods.end(), [&](const MethodInfo* method) {
-            return &method->signature == resolution.signature;
+        candidates.begin(), candidates.end(), [&](const FunctionSignature* signature) {
+            return signature == resolution.signature;
         });
-    const auto* method = *selected;
+    const auto method_index = static_cast<std::size_t>(selected - candidates.begin());
+    const auto* method = methods[method_index];
     if (!can_access(method->visibility, method->owner)) {
         throw_type_error(
             current_location_, "method '" + method->owner + "." + callee.member
@@ -1066,11 +1150,13 @@ std::optional<int> TypeChecker::overload_score(
         return std::nullopt;
     }
 
-    std::unordered_map<std::string, Type> substitutions;
+    std::unordered_map<std::string, Type> substitutions =
+        signature.containing_substitutions;
     std::unordered_set<std::string> explicit_parameters;
     for (std::size_t index = 0; index < generic_arguments.size(); ++index) {
         const auto& parameter = signature.generic_parameters[index];
-        substitutions.emplace(parameter.name, resolve_type(generic_arguments[index]));
+        substitutions.insert_or_assign(
+            parameter.name, resolve_type(generic_arguments[index]));
         explicit_parameters.insert(parameter.name);
     }
 
@@ -1110,48 +1196,6 @@ std::optional<int> TypeChecker::overload_score(
 
         const auto& parameter = signature.parameters[parameter_index];
         const Type& actual = arguments[index];
-        const auto generic_parameter = std::find_if(
-            signature.generic_parameters.begin(), signature.generic_parameters.end(),
-            [&](const GenericParameter& candidate) {
-                return candidate.name == parameter.type_reference.name
-                    && parameter.type_reference.arguments.empty();
-            });
-        if (generic_parameter != signature.generic_parameters.end()) {
-            const std::string& generic_name = generic_parameter->name;
-            if (actual.kind == TypeKind::Null && !substitutions.contains(generic_name)) {
-                failure_reason = "cannot infer generic parameter '" + generic_name
-                    + "' from null";
-                return std::nullopt;
-            }
-            auto substitution = substitutions.find(generic_name);
-            if (substitution == substitutions.end()) {
-                Type inferred = actual;
-                if (parameter.type_reference.nullable) {
-                    inferred.nullable = false;
-                }
-                substitutions.emplace(generic_name, inferred);
-            } else {
-                Type expected = substitution->second;
-                if (parameter.type_reference.nullable) {
-                    expected.nullable = true;
-                }
-                if (!is_assignable(expected, actual)) {
-                    if (!explicit_parameters.contains(generic_name)
-                        && is_assignable(actual, substitution->second)) {
-                        substitution->second = actual;
-                    } else {
-                        failure_reason = "conflicting inference for generic parameter '"
-                            + generic_name + "': '" + type_name(substitution->second)
-                            + "' and '" + type_name(actual) + "'";
-                        return std::nullopt;
-                    }
-                }
-            }
-            score += 2;
-            continue;
-        }
-
-        Type expected = parameter.type;
         const bool has_generic_reference = std::any_of(
             signature.generic_parameters.begin(), signature.generic_parameters.end(),
             [&](const GenericParameter& generic) {
@@ -1159,21 +1203,15 @@ std::optional<int> TypeChecker::overload_score(
                     parameter.type_reference, generic.name, reference_contains);
             });
         if (has_generic_reference) {
-            bool complete = true;
-            for (const auto& generic : signature.generic_parameters) {
-                if (reference_contains(
-                        parameter.type_reference, generic.name, reference_contains)
-                    && !substitutions.contains(generic.name)) {
-                    complete = false;
-                    break;
-                }
-            }
-            if (!complete) {
-                failure_reason = "cannot infer nested generic parameter types";
+            if (!infer_type_arguments(
+                    parameter.type_reference, actual, signature.generic_parameters,
+                    substitutions, explicit_parameters, failure_reason)) {
                 return std::nullopt;
             }
-            expected = substitute_type(parameter.type_reference, substitutions);
+            score += 2;
+            continue;
         }
+        const Type expected = substitute_type(parameter.type_reference, substitutions);
         if (expected == actual && !expected.deferred && !actual.deferred) {
             continue;
         }
@@ -1188,30 +1226,9 @@ std::optional<int> TypeChecker::overload_score(
         return std::nullopt;
     }
 
-    for (const auto& parameter : signature.generic_parameters) {
-        const auto substitution = substitutions.find(parameter.name);
-        if (substitution == substitutions.end()) {
-            failure_reason = "could not infer generic parameter '" + parameter.name + "'";
-            return std::nullopt;
-        }
-        for (const auto& constraint : parameter.constraints) {
-            const Type constraint_type = substitute_type(constraint, substitutions);
-            const auto* constraint_info = find_nominal_type(constraint_type.name);
-            if (!constraint_info || constraint_info->kind != NominalKind::Interface) {
-                failure_reason = "generic constraint '" + type_name(constraint_type)
-                    + "' must name an existing interface";
-                return std::nullopt;
-            }
-            const Type& concrete = substitution->second;
-            if (!concrete.deferred
-                && (concrete.name.empty()
-                    || !is_subtype(concrete.name, constraint_type.name))) {
-                failure_reason = "type '" + type_name(concrete)
-                    + "' does not satisfy constraint '" + type_name(constraint_type)
-                    + "' for generic parameter '" + parameter.name + "'";
-                return std::nullopt;
-            }
-        }
+    if (!validate_constraints(
+            signature.generic_parameters, substitutions, failure_reason)) {
+        return std::nullopt;
     }
     return_type = signature.return_type_reference
         ? substitute_type(*signature.return_type_reference, substitutions)
@@ -1246,6 +1263,16 @@ Type TypeChecker::check_member_access(const MemberAccessExpr& member)
             throw_type_error(
                 current_location_, "field '" + field->owner + "." + member.member
                     + "' is private");
+        }
+        if (field->owner == object.name
+            && object.arguments.size() == type_info->generic_parameters.size()) {
+            std::unordered_map<std::string, Type> substitutions;
+            for (std::size_t index = 0; index < object.arguments.size(); ++index) {
+                substitutions.emplace(
+                    type_info->generic_parameters[index].name,
+                    object.arguments[index]);
+            }
+            return substitute_type(field->type_reference, substitutions);
         }
         return field->type;
     }
@@ -1508,24 +1535,28 @@ void TypeChecker::check_block(const BlockStmt& block)
 
 Type TypeChecker::resolve_type(const TypeReference& reference) const
 {
-    if (contains_generic_parameter(reference)) {
-        TypeReference base = reference;
-        base.nullable = false;
+    if (is_generic_parameter(reference.name) && reference.arguments.empty()) {
         return Type{
             TypeKind::Unknown,
             reference.nullable,
             true,
-            format_type_reference(base),
+            reference.name,
         };
     }
     if (!reference.arguments.empty()) {
-        TypeReference base = reference;
-        base.nullable = false;
+        std::vector<Type> arguments;
+        arguments.reserve(reference.arguments.size());
+        bool deferred = false;
+        for (const auto& argument : reference.arguments) {
+            arguments.push_back(resolve_type(argument));
+            deferred = deferred || arguments.back().deferred;
+        }
         return Type{
             TypeKind::Unknown,
             reference.nullable,
-            false,
-            format_type_reference(base),
+            deferred,
+            reference.name,
+            std::move(arguments),
         };
     }
     if (reference.name == "int") {
@@ -1562,15 +1593,128 @@ Type TypeChecker::substitute_type(
         return resolve_type(reference);
     }
 
-    std::string name = reference.name + '<';
-    for (std::size_t index = 0; index < reference.arguments.size(); ++index) {
-        if (index != 0) {
-            name += ", ";
-        }
-        name += type_name(substitute_type(reference.arguments[index], substitutions));
+    std::vector<Type> arguments;
+    arguments.reserve(reference.arguments.size());
+    bool deferred = false;
+    for (const auto& argument : reference.arguments) {
+        arguments.push_back(substitute_type(argument, substitutions));
+        deferred = deferred || arguments.back().deferred;
     }
-    name += '>';
-    return Type{TypeKind::Unknown, reference.nullable, false, std::move(name)};
+    return Type{
+        TypeKind::Unknown,
+        reference.nullable,
+        deferred,
+        reference.name,
+        std::move(arguments),
+    };
+}
+
+bool TypeChecker::infer_type_arguments(
+    const TypeReference& pattern,
+    const Type& actual,
+    const std::vector<GenericParameter>& generic_parameters,
+    std::unordered_map<std::string, Type>& substitutions,
+    const std::unordered_set<std::string>& explicit_parameters,
+    std::string& failure_reason) const
+{
+    const auto generic = std::find_if(
+        generic_parameters.begin(), generic_parameters.end(),
+        [&](const GenericParameter& parameter) {
+            return parameter.name == pattern.name && pattern.arguments.empty();
+        });
+    if (generic != generic_parameters.end()) {
+        if (actual.kind == TypeKind::Null && !substitutions.contains(generic->name)) {
+            failure_reason = "cannot infer generic parameter '" + generic->name
+                + "' from null";
+            return false;
+        }
+        auto substitution = substitutions.find(generic->name);
+        if (substitution == substitutions.end()) {
+            Type inferred = actual;
+            if (pattern.nullable) {
+                inferred.nullable = false;
+            }
+            substitutions.emplace(generic->name, std::move(inferred));
+            return true;
+        }
+
+        Type expected = substitution->second;
+        if (pattern.nullable) {
+            expected.nullable = true;
+        }
+        if (is_assignable(expected, actual)) {
+            return true;
+        }
+        if (!explicit_parameters.contains(generic->name)
+            && is_assignable(actual, substitution->second)) {
+            substitution->second = actual;
+            return true;
+        }
+        failure_reason = "conflicting inference for generic parameter '"
+            + generic->name + "': '" + type_name(substitution->second)
+            + "' and '" + type_name(actual) + "'";
+        return false;
+    }
+
+    if (!pattern.arguments.empty()) {
+        if (!is_unknown(actual) || actual.name != pattern.name
+            || actual.arguments.size() != pattern.arguments.size()
+            || (actual.nullable && !pattern.nullable)) {
+            failure_reason = "type '" + type_name(actual)
+                + "' does not match generic structure '"
+                + format_type_reference(pattern) + "'";
+            return false;
+        }
+        for (std::size_t index = 0; index < pattern.arguments.size(); ++index) {
+            if (!infer_type_arguments(
+                    pattern.arguments[index], actual.arguments[index], generic_parameters,
+                    substitutions, explicit_parameters, failure_reason)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    const Type expected = substitute_type(pattern, substitutions);
+    if (!is_assignable(expected, actual)) {
+        failure_reason = "cannot use argument of type '" + type_name(actual)
+            + "' where '" + type_name(expected) + "' is required";
+        return false;
+    }
+    return true;
+}
+
+bool TypeChecker::validate_constraints(
+    const std::vector<GenericParameter>& generic_parameters,
+    const std::unordered_map<std::string, Type>& substitutions,
+    std::string& failure_reason) const
+{
+    for (const auto& parameter : generic_parameters) {
+        const auto substitution = substitutions.find(parameter.name);
+        if (substitution == substitutions.end()) {
+            failure_reason = "could not infer generic parameter '" + parameter.name + "'";
+            return false;
+        }
+        for (const auto& constraint : parameter.constraints) {
+            const Type constraint_type = substitute_type(constraint, substitutions);
+            const auto* constraint_info = find_nominal_type(constraint_type.name);
+            if (!constraint_info || constraint_info->kind != NominalKind::Interface) {
+                failure_reason = "generic constraint '" + type_name(constraint_type)
+                    + "' must name an existing interface";
+                return false;
+            }
+            const Type& concrete = substitution->second;
+            if (!concrete.deferred
+                && (concrete.name.empty()
+                    || !is_subtype(concrete.name, constraint_type.name))) {
+                failure_reason = "type '" + type_name(concrete)
+                    + "' does not satisfy constraint '" + type_name(constraint_type)
+                    + "' for generic parameter '" + parameter.name + "'";
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 bool TypeChecker::is_generic_parameter(const std::string& name) const
@@ -1631,6 +1775,9 @@ bool TypeChecker::is_assignable(const Type& expected, const Type& actual) const
     }
     if (!is_unknown(expected) || !is_unknown(actual)
         || expected.name.empty() || actual.name.empty()) {
+        return false;
+    }
+    if (expected.name == actual.name) {
         return false;
     }
     return is_subtype(actual.name, expected.name);

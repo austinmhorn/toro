@@ -201,7 +201,26 @@ Each interface constraint is checked after substitution. A concrete class or
 struct satisfies a constraint by implementing that interface. Multiple
 constraints separated by `+` must all be satisfied. Operations on an
 unconstrained type parameter are rejected when the checker cannot prove them
-valid. Generic struct/class specialization and monomorphization remain deferred.
+valid.
+
+Generic structs and classes form concrete, invariant instance types. Construction
+may supply arguments explicitly or infer them by recursively matching field
+types:
+
+```toro
+pair := Pair<int, string>(first: 10, second: "hello")
+inferred := Pair(first: 10, second: "hello")
+box: Box<int> = Box(value: 10)
+```
+
+The checker substitutes containing-type parameters through fields, method
+parameters, method returns, and nested generic types. Thus `Box<int>.get()` has
+type `int`, and `Store<User>.get_values()` may have type `List<User>`.
+`Box<int>` and `Box<string>` are distinct and are not assignable to one another.
+Constructor inference rejects conflicting or insufficient bindings, and generic
+type constraints are checked after inference. Function inference uses the same
+recursive matching for shapes such as `List<T>`, `Map<string, T>`, and
+`Pair<A, List<B>>`. Monomorphization and runtime specialization remain deferred.
 
 ### Name resolution
 
@@ -228,9 +247,10 @@ Equality requires compatible operands, logical operators require `bool`, and
 argument counts and types, and returns are checked against the function's
 declared return type.
 
-Generic specialization remains deferred. Concrete struct and class fields and
-methods are type checked, including inherited members and interface method
-signatures.
+Concrete generic struct and class instances substitute their type arguments
+through fields and methods. Runtime specialization remains deferred. Concrete
+struct and class fields and methods are type checked, including inherited
+members and interface method signatures.
 
 ### Function and method overloads
 
@@ -274,8 +294,8 @@ accessible only within their declaring type. Derived values are assignable to
 their base class and implemented interfaces, but assignment in the opposite
 direction is rejected.
 
-Constructor-specific `init` behavior, generic member specialization, virtual
-dispatch, and runtime construction are not implemented yet.
+Constructor-specific `init` behavior, virtual dispatch, monomorphization, and
+runtime construction are not implemented yet.
 
 ### Nullable types
 

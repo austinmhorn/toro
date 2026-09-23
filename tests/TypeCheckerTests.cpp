@@ -841,6 +841,139 @@ void test_unconstrained_generic_operations()
         "cannot use unconstrained generic type 'T'");
 }
 
+void test_generic_type_construction()
+{
+    expect_valid(
+        "struct Pair<A, B> {\n"
+        "    first: A\n"
+        "    second: B\n"
+        "}\n"
+        "pair: Pair<int, string> = Pair<int, string>(\n"
+        "    first: 10,\n"
+        "    second: \"hello\"\n"
+        ")\n"
+        "first: int = pair.first\n"
+        "second: string = pair.second\n");
+    expect_valid(
+        "struct Pair<A, B> {\n"
+        "    first: A\n"
+        "    second: B\n"
+        "}\n"
+        "pair: Pair<int, string> = Pair(first: 10, second: \"hello\")\n");
+    expect_valid(
+        "class Box<T> { public value: T }\n"
+        "box: Box<int> = Box<int>(value: 10)\n"
+        "zeroed: Box<int> = Box<int>()\n");
+    expect_error(
+        "struct Pair<A, B> {\n"
+        "    first: A\n"
+        "    second: B\n"
+        "}\n"
+        "pair := Pair<int>(first: 10, second: \"hello\")\n",
+        "type 'Pair' expects 2 generic arguments, got 1");
+    expect_error(
+        "struct Pair<A, B> {\n"
+        "    first: A\n"
+        "    second: B\n"
+        "}\n"
+        "pair := Pair<int, string>(first: \"wrong\", second: \"hello\")\n",
+        "conflicting inference for generic parameter 'A'");
+    expect_error(
+        "struct Phantom<T> { value: int }\n"
+        "phantom := Phantom(value: 1)\n",
+        "cannot infer generic parameter 'T' while constructing 'Phantom'");
+}
+
+void test_generic_member_substitution()
+{
+    expect_valid(
+        "class Box<T> {\n"
+        "    public value: T\n"
+        "    public function get() -> T { return self.value }\n"
+        "    public function replace(value: T) { self.value = value }\n"
+        "}\n"
+        "box: Box<int> = Box(value: 10)\n"
+        "field: int = box.value\n"
+        "result: int = box.get()\n"
+        "box.replace(20)\n");
+    expect_error(
+        "class Box<T> {\n"
+        "    public value: T\n"
+        "    public function replace(value: T) { self.value = value }\n"
+        "}\n"
+        "box: Box<int> = Box(value: 10)\n"
+        "box.replace(\"wrong\")\n",
+        "no matching overload for 'Box.replace'");
+    expect_valid(
+        "class User {}\n"
+        "function users() -> List<User> {}\n"
+        "class Store<T> {\n"
+        "    public values: List<T>\n"
+        "    public function get_values() -> List<T> { return self.values }\n"
+        "}\n"
+        "store: Store<User> = Store(values: users())\n"
+        "values: List<User> = store.get_values()\n");
+    expect_error(
+        "class Box<T> { public value: T }\n"
+        "integer: Box<int> = Box(value: 10)\n"
+        "text: Box<string> = integer\n",
+        "cannot assign value of type 'Box<int>' to type 'Box<string>'");
+}
+
+void test_generic_type_constraints()
+{
+    expect_valid(
+        "interface Comparable {}\n"
+        "class Item implements Comparable {}\n"
+        "class SortedBox<T: Comparable> { public value: T }\n"
+        "box: SortedBox<Item> = SortedBox(value: Item())\n");
+    expect_valid(
+        "interface Comparable {}\n"
+        "interface Serializable {}\n"
+        "struct Item implements Comparable, Serializable {}\n"
+        "struct Container<T: Comparable + Serializable> { value: T }\n"
+        "container := Container(value: Item())\n");
+    expect_error(
+        "interface Comparable {}\n"
+        "class Plain {}\n"
+        "class SortedBox<T: Comparable> { public value: T }\n"
+        "box := SortedBox(value: Plain())\n",
+        "type 'Plain' does not satisfy constraint 'Comparable'");
+}
+
+void test_recursive_structural_inference()
+{
+    expect_valid(
+        "class User {}\n"
+        "function users() -> List<User> {}\n"
+        "function first<T>(items: List<T>) -> T {}\n"
+        "user: User = first(users())\n");
+    expect_valid(
+        "class User {}\n"
+        "function users_by_name() -> Map<string, User> {}\n"
+        "function first_value<T>(items: Map<string, T>) -> T {}\n"
+        "user: User = first_value(users_by_name())\n");
+    expect_valid(
+        "class User {}\n"
+        "struct Pair<A, B> {\n"
+        "    first: A\n"
+        "    second: B\n"
+        "}\n"
+        "function integers() -> List<int> {}\n"
+        "function nested<A, B>(value: Pair<A, List<B>>) -> B {}\n"
+        "pair: Pair<User, List<int>> = Pair(\n"
+        "    first: User(),\n"
+        "    second: integers()\n"
+        ")\n"
+        "number: int = nested(pair)\n");
+    expect_error(
+        "function integers() -> List<int> {}\n"
+        "function strings() -> List<string> {}\n"
+        "function combine<T>(a: List<T>, b: List<T>) -> T {}\n"
+        "value := combine(integers(), strings())\n",
+        "conflicting inference for generic parameter 'T'");
+}
+
 void test_existing_language_features_remain_checkable()
 {
     expect_valid(
@@ -903,6 +1036,10 @@ int main()
         test_generic_constraints();
         test_generic_overload_resolution();
         test_unconstrained_generic_operations();
+        test_generic_type_construction();
+        test_generic_member_substitution();
+        test_generic_type_constraints();
+        test_recursive_structural_inference();
         test_existing_language_features_remain_checkable();
     } catch (const std::exception& error) {
         std::cerr << "type checker test failure: " << error.what() << '\n';

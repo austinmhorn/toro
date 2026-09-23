@@ -22,7 +22,19 @@ struct Pair<A, B> {
 }
 
 class Box<T> {
-    value: T
+    public value: T
+
+    public function get() -> T {
+        return self.value
+    }
+
+    public function replace(value: T) {
+        self.value = value
+    }
+}
+
+class SortedBox<T: Serializable + Comparable> {
+    public value: T
 }
 
 function max<T: Serializable + Comparable>(a: T, b: T) -> T {
@@ -32,9 +44,22 @@ function max<T: Serializable + Comparable>(a: T, b: T) -> T {
 function collect<T>(items: Map<string, List<T>>) -> List<T> {
 }
 
+function value_lists() -> Map<string, List<Value>> {
+}
+
 function main() {
-    pair := Pair<int, string>(first: 1, second: "one")
+    explicit_pair := Pair<int, string>(first: 1, second: "one")
+    inferred_pair := Pair(first: 2, second: "two")
+    box: Box<int> = Box(value: 10)
+    box.replace(20)
+    number: int = box.get()
+    sorted := SortedBox(value: Value())
+    values: List<Value> = collect(value_lists())
     value := max<Value>(Value(), Value())
-    print(pair)
+    print(explicit_pair)
+    print(inferred_pair)
+    print(number)
+    print(sorted)
+    print(values)
     print(value)
 }

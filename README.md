@@ -17,6 +17,9 @@ basic name resolution. A separate type-checking pass infers primitive local
 types and validates expressions, assignments, functions, struct/class
 construction, fields, methods, visibility, inheritance, interface conformance,
 abstract classes, nullable types, and explicit casts.
+Generic struct and class instances retain their concrete type arguments. The
+checker validates explicit or inferred generic construction, constraints, and
+substituted field and method types, including recursively nested generic types.
 
 ## Build
 
@@ -109,14 +112,16 @@ The `check` command reports name-resolution errors, type mismatches, invalid
 conditions and returns, bad construction fields, invalid member access, method
 argument errors, and visibility violations. Construction supplies zero values
 for primitive and nullable fields, honors explicit field defaults, and requires
-non-null named fields that cannot be safely defaulted. Generic member
-specialization, runtime virtual dispatch, and flow-sensitive null narrowing are
-not implemented yet. Functions and methods may overload by parameter types and
+non-null named fields that cannot be safely defaulted. Generic instances are
+invariant, so different concrete argument lists are distinct types. Runtime
+virtual dispatch and flow-sensitive null narrowing are not implemented yet.
+Functions and methods may overload by parameter types and
 arity; resolution prefers exact matches over base/interface compatibility and
 reports missing or ambiguous matches. Explicit `as` casts support numeric
 conversions and user-defined class or struct conversions. Generic function calls
 infer type arguments, accept validated explicit type arguments, substitute return
-types, and enforce interface constraints.
+types, and enforce interface constraints. Inference recursively matches nested
+types such as `List<T>` and `Map<string, List<T>>`.
 
 ## Logical operators
 
