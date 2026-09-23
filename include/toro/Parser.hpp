@@ -32,7 +32,10 @@ private:
     [[nodiscard]] std::unique_ptr<Stmt> parse_struct_declaration();
     [[nodiscard]] std::unique_ptr<Stmt> parse_class_declaration(bool is_abstract);
     [[nodiscard]] std::unique_ptr<Stmt> parse_interface_declaration();
-    [[nodiscard]] std::vector<std::string> parse_interface_list();
+    [[nodiscard]] std::vector<TypeReference> parse_interface_list();
+    [[nodiscard]] std::vector<GenericParameter> parse_generic_parameters();
+    [[nodiscard]] TypeReference parse_type_reference(
+        const char* message = "expected type name");
     [[nodiscard]] std::unique_ptr<ClassMember> parse_class_field(Visibility visibility);
     [[nodiscard]] std::unique_ptr<ClassMember> parse_method_declaration(
         Visibility visibility,
@@ -49,7 +52,11 @@ private:
     [[nodiscard]] std::unique_ptr<Expr> parse_unary();
     [[nodiscard]] std::unique_ptr<Expr> parse_call();
     [[nodiscard]] std::unique_ptr<Expr> parse_primary();
-    [[nodiscard]] std::unique_ptr<Expr> finish_call(std::unique_ptr<Expr> callee);
+    [[nodiscard]] std::unique_ptr<Expr> finish_call(
+        std::unique_ptr<Expr> callee,
+        std::vector<TypeReference> generic_arguments = {});
+    [[nodiscard]] bool looks_like_generic_call() const;
+    [[nodiscard]] bool scan_type_reference(std::size_t& index) const;
 
     [[nodiscard]] bool at_end() const;
     [[nodiscard]] bool check(TokenType type) const;

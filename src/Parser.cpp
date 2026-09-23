@@ -20,6 +20,40 @@ const char* visibility_name(Visibility visibility)
     return visibility == Visibility::Public ? "public" : "private";
 }
 
+std::string format_type(const TypeReference& type)
+{
+    std::string output = type.name;
+    if (!type.arguments.empty()) {
+        output += '<';
+        for (std::size_t index = 0; index < type.arguments.size(); ++index) {
+            if (index != 0) {
+                output += ", ";
+            }
+            output += format_type(type.arguments[index]);
+        }
+        output += '>';
+    }
+    return output;
+}
+
+void append_generic_parameters(
+    const std::vector<GenericParameter>& parameters,
+    std::size_t depth,
+    std::string& output)
+{
+    if (parameters.empty()) {
+        return;
+    }
+    output += std::string(depth * 2, ' ') + "GenericParameters\n";
+    for (const auto& parameter : parameters) {
+        output += std::string((depth + 1) * 2, ' ') + parameter.name + "\n";
+        for (const auto& constraint : parameter.constraints) {
+            output += std::string((depth + 2) * 2, ' ')
+                + "Constraint(" + format_type(constraint) + ")\n";
+        }
+    }
+}
+
 void append_dump(const Expr& expression, std::size_t depth, std::string& output)
 {
     output.append(depth * 2, ' ');
@@ -60,6 +94,13 @@ void append_dump(const Expr& expression, std::size_t depth, std::string& output)
         const auto& call = static_cast<const CallExpr&>(expression);
         output += "Call\n";
         append_dump(*call.callee, depth + 1, output);
+        if (!call.generic_arguments.empty()) {
+            output += std::string((depth + 1) * 2, ' ') + "GenericArguments\n";
+            for (const auto& argument : call.generic_arguments) {
+                output += std::string((depth + 2) * 2, ' ')
+                    + format_type(argument) + "\n";
+            }
+        }
         for (const auto& argument : call.arguments) {
             if (argument.name) {
                 output += std::string((depth + 1) * 2, ' ')
@@ -97,7 +138,7 @@ void append_statement_dump(const Stmt& statement, std::size_t depth, std::string
         output += indentation + "VariableDeclaration(" + declaration.name + ")\n";
         output.append((depth + 1) * 2, ' ');
         if (declaration.explicit_type) {
-            output += "type: " + *declaration.explicit_type + "\n";
+            output += "type: " + format_type(*declaration.explicit_type) + "\n";
         } else {
             output += "inferred\n";
         }
@@ -126,14 +167,15 @@ void append_statement_dump(const Stmt& statement, std::size_t depth, std::string
     case StmtKind::FunctionDeclaration: {
         const auto& function = static_cast<const FunctionDeclarationStmt&>(statement);
         output += indentation + "FunctionDeclaration(" + function.name + ")\n";
+        append_generic_parameters(function.generic_parameters, depth + 1, output);
         output += std::string((depth + 1) * 2, ' ') + "Parameters\n";
         for (const auto& parameter : function.parameters) {
             output += std::string((depth + 2) * 2, ' ')
-                + "Parameter(" + parameter.name + ": " + parameter.type + ")\n";
+                + "Parameter(" + parameter.name + ": " + format_type(parameter.type) + ")\n";
         }
         if (function.return_type) {
             output += std::string((depth + 1) * 2, ' ')
-                + "return type: " + *function.return_type + "\n";
+                + "return type: " + format_type(*function.return_type) + "\n";
         }
         append_statement_dump(*function.body, depth + 1, output);
         return;
@@ -197,7 +239,7 @@ void append_statement_dump(const Stmt& statement, std::size_t depth, std::string
                 + "Variant(" + variant.name + ")\n";
             if (variant.payload_type) {
                 output += std::string((depth + 2) * 2, ' ')
-                    + "PayloadType(" + *variant.payload_type + ")\n";
+                    + "PayloadType(" + format_type(*variant.payload_type) + ")\n";
             }
         }
         return;
@@ -221,15 +263,17 @@ void append_statement_dump(const Stmt& statement, std::size_t depth, std::string
     case StmtKind::StructDeclaration: {
         const auto& declaration = static_cast<const StructDeclarationStmt&>(statement);
         output += indentation + "StructDeclaration(" + declaration.name + ")\n";
+        append_generic_parameters(declaration.generic_parameters, depth + 1, output);
         if (!declaration.interfaces.empty()) {
             output += std::string((depth + 1) * 2, ' ') + "Implements\n";
             for (const auto& interface_name : declaration.interfaces) {
-                output += std::string((depth + 2) * 2, ' ') + interface_name + "\n";
+                output += std::string((depth + 2) * 2, ' ')
+                    + format_type(interface_name) + "\n";
             }
         }
         for (const auto& field : declaration.fields) {
             output += std::string((depth + 1) * 2, ' ')
-                + "Field(" + field.name + ": " + field.type + ")\n";
+                + "Field(" + field.name + ": " + format_type(field.type) + ")\n";
             if (field.default_value) {
                 output += std::string((depth + 2) * 2, ' ') + "Default\n";
                 append_dump(*field.default_value, depth + 3, output);
@@ -240,17 +284,19 @@ void append_statement_dump(const Stmt& statement, std::size_t depth, std::string
     case StmtKind::ClassDeclaration: {
         const auto& declaration = static_cast<const ClassDeclarationStmt&>(statement);
         output += indentation + "ClassDeclaration(" + declaration.name + ")\n";
+        append_generic_parameters(declaration.generic_parameters, depth + 1, output);
         if (declaration.is_abstract) {
             output += std::string((depth + 1) * 2, ' ') + "abstract\n";
         }
         if (declaration.base_type) {
             output += std::string((depth + 1) * 2, ' ')
-                + "Base(" + *declaration.base_type + ")\n";
+                + "Base(" + format_type(*declaration.base_type) + ")\n";
         }
         if (!declaration.interfaces.empty()) {
             output += std::string((depth + 1) * 2, ' ') + "Implements\n";
             for (const auto& interface_name : declaration.interfaces) {
-                output += std::string((depth + 2) * 2, ' ') + interface_name + "\n";
+                output += std::string((depth + 2) * 2, ' ')
+                    + format_type(interface_name) + "\n";
             }
         }
         for (const auto& member : declaration.members) {
@@ -258,7 +304,7 @@ void append_statement_dump(const Stmt& statement, std::size_t depth, std::string
             if (member->kind == ClassMemberKind::Field) {
                 const auto& field = static_cast<const ClassField&>(*member);
                 output += member_indentation + visibility_name(field.visibility)
-                    + " Field(" + field.name + ": " + field.type + ")\n";
+                    + " Field(" + field.name + ": " + format_type(field.type) + ")\n";
                 if (field.default_value) {
                     output += std::string((depth + 2) * 2, ' ') + "Default\n";
                     append_dump(*field.default_value, depth + 3, output);
@@ -274,14 +320,16 @@ void append_statement_dump(const Stmt& statement, std::size_t depth, std::string
                 output += "override ";
             }
             output += "Method(" + method.name + ")\n";
+            append_generic_parameters(method.generic_parameters, depth + 2, output);
             output += std::string((depth + 2) * 2, ' ') + "Parameters\n";
             for (const auto& parameter : method.parameters) {
                 output += std::string((depth + 3) * 2, ' ')
-                    + "Parameter(" + parameter.name + ": " + parameter.type + ")\n";
+                    + "Parameter(" + parameter.name + ": "
+                    + format_type(parameter.type) + ")\n";
             }
             if (method.return_type) {
                 output += std::string((depth + 2) * 2, ' ')
-                    + "return type: " + *method.return_type + "\n";
+                    + "return type: " + format_type(*method.return_type) + "\n";
             }
             if (method.body) {
                 append_statement_dump(*method.body, depth + 2, output);
@@ -294,17 +342,20 @@ void append_statement_dump(const Stmt& statement, std::size_t depth, std::string
     case StmtKind::InterfaceDeclaration: {
         const auto& declaration = static_cast<const InterfaceDeclarationStmt&>(statement);
         output += indentation + "InterfaceDeclaration(" + declaration.name + ")\n";
+        append_generic_parameters(declaration.generic_parameters, depth + 1, output);
         for (const auto& method : declaration.methods) {
             output += std::string((depth + 1) * 2, ' ')
                 + "Method(" + method.name + ")\n";
+            append_generic_parameters(method.generic_parameters, depth + 2, output);
             output += std::string((depth + 2) * 2, ' ') + "Parameters\n";
             for (const auto& parameter : method.parameters) {
                 output += std::string((depth + 3) * 2, ' ')
-                    + "Parameter(" + parameter.name + ": " + parameter.type + ")\n";
+                    + "Parameter(" + parameter.name + ": "
+                    + format_type(parameter.type) + ")\n";
             }
             if (method.return_type) {
                 output += std::string((depth + 2) * 2, ' ')
-                    + "return type: " + *method.return_type + "\n";
+                    + "return type: " + format_type(*method.return_type) + "\n";
             }
         }
         return;
@@ -429,12 +480,11 @@ std::unique_ptr<Stmt> Parser::parse_variable_declaration()
 {
     Token name = advance();
     const SourceLocation location{name.line, name.column};
-    std::optional<std::string> explicit_type;
+    std::optional<TypeReference> explicit_type;
 
     if (!match({TokenType::Declare})) {
         consume(TokenType::Colon, "expected ':' after variable name");
-        const Token& type_name = consume(TokenType::Identifier, "expected type name after ':'");
-        explicit_type = type_name.lexeme;
+        explicit_type = parse_type_reference("expected type name after ':'");
         consume(TokenType::Assign, "expected '=' and initializer after type name");
     }
 
@@ -451,6 +501,7 @@ std::unique_ptr<Stmt> Parser::parse_function_declaration()
     Token function_token = advance();
     const Token& name = consume(TokenType::Identifier, "expected function name");
     const std::string function_name = name.lexeme;
+    auto generic_parameters = parse_generic_parameters();
     consume(TokenType::LeftParen, "expected '(' after function name");
 
     std::vector<Parameter> parameters;
@@ -458,25 +509,21 @@ std::unique_ptr<Stmt> Parser::parse_function_declaration()
         do {
             const Token& parameter_name = consume(
                 TokenType::Identifier, "expected parameter name");
-            Parameter parameter{
-                parameter_name.lexeme,
-                {},
-                SourceLocation{parameter_name.line, parameter_name.column},
-            };
             consume(TokenType::Colon, "expected ':' after parameter name");
-            const Token& parameter_type = consume(
-                TokenType::Identifier, "expected parameter type after ':'");
-            parameter.type = parameter_type.lexeme;
-            parameters.push_back(std::move(parameter));
+            auto parameter_type = parse_type_reference("expected parameter type after ':'");
+            parameters.push_back(Parameter{
+                parameter_name.lexeme,
+                std::move(parameter_type),
+                SourceLocation{parameter_name.line, parameter_name.column},
+            });
         } while (match({TokenType::Comma}));
     }
 
     consume(TokenType::RightParen, "expected ')' after parameters");
 
-    std::optional<std::string> return_type;
+    std::optional<TypeReference> return_type;
     if (match({TokenType::Arrow})) {
-        const Token& type = consume(TokenType::Identifier, "expected return type after '->'");
-        return_type = type.lexeme;
+        return_type = parse_type_reference("expected return type after '->'");
     }
 
     if (!check(TokenType::LeftBrace)) {
@@ -491,6 +538,7 @@ std::unique_ptr<Stmt> Parser::parse_function_declaration()
     return std::make_unique<FunctionDeclarationStmt>(
         SourceLocation{function_token.line, function_token.column},
         function_name,
+        std::move(generic_parameters),
         std::move(parameters),
         std::move(return_type),
         std::move(body));
@@ -641,9 +689,7 @@ std::unique_ptr<Stmt> Parser::parse_enum_declaration()
         };
 
         if (match({TokenType::LeftParen})) {
-            const Token& payload_type = consume(
-                TokenType::Identifier, "expected payload type after '('");
-            variant.payload_type = payload_type.lexeme;
+            variant.payload_type = parse_type_reference("expected payload type after '('");
             consume(TokenType::RightParen, "expected ')' after payload type");
         }
 
@@ -730,10 +776,11 @@ std::unique_ptr<Stmt> Parser::parse_struct_declaration()
     Token struct_token = advance();
     const Token& name = consume(TokenType::Identifier, "expected struct name");
     const std::string struct_name = name.lexeme;
+    auto generic_parameters = parse_generic_parameters();
     if (check(TokenType::Colon)) {
         throw_parse_error(peek(), "structs cannot inherit from a base type");
     }
-    std::vector<std::string> interfaces;
+    std::vector<TypeReference> interfaces;
     if (match({TokenType::Implements})) {
         interfaces = parse_interface_list();
     }
@@ -751,9 +798,7 @@ std::unique_ptr<Stmt> Parser::parse_struct_declaration()
             SourceLocation{field_name.line, field_name.column},
         };
         consume(TokenType::Colon, "expected ':' after struct field name");
-        const Token& field_type = consume(
-            TokenType::Identifier, "expected struct field type after ':'");
-        field.type = field_type.lexeme;
+        field.type = parse_type_reference("expected struct field type after ':'");
 
         if (match({TokenType::Assign})) {
             require_expression("expected default value after '='");
@@ -774,6 +819,7 @@ std::unique_ptr<Stmt> Parser::parse_struct_declaration()
     return std::make_unique<StructDeclarationStmt>(
         SourceLocation{struct_token.line, struct_token.column},
         struct_name,
+        std::move(generic_parameters),
         std::move(interfaces),
         std::move(fields));
 }
@@ -786,16 +832,16 @@ std::unique_ptr<Stmt> Parser::parse_class_declaration(bool is_abstract)
     }
     const Token& name = consume(TokenType::Identifier, "expected class name");
     const std::string class_name = name.lexeme;
-    std::optional<std::string> base_type;
+    auto generic_parameters = parse_generic_parameters();
+    std::optional<TypeReference> base_type;
     if (match({TokenType::Colon})) {
-        const Token& base = consume(TokenType::Identifier, "expected base class after ':'");
-        base_type = base.lexeme;
+        base_type = parse_type_reference("expected base class after ':'");
         if (match({TokenType::Comma})) {
             throw_parse_error(previous(), "multiple class inheritance is not supported");
         }
     }
 
-    std::vector<std::string> interfaces;
+    std::vector<TypeReference> interfaces;
     if (match({TokenType::Implements})) {
         interfaces = parse_interface_list();
     }
@@ -844,6 +890,7 @@ std::unique_ptr<Stmt> Parser::parse_class_declaration(bool is_abstract)
         SourceLocation{class_token.line, class_token.column},
         class_name,
         is_abstract,
+        std::move(generic_parameters),
         std::move(base_type),
         std::move(interfaces),
         std::move(members));
@@ -854,6 +901,7 @@ std::unique_ptr<Stmt> Parser::parse_interface_declaration()
     Token interface_token = advance();
     const Token& name = consume(TokenType::Identifier, "expected interface name");
     const std::string interface_name = name.lexeme;
+    auto generic_parameters = parse_generic_parameters();
     consume(TokenType::LeftBrace, "expected '{' before interface body");
 
     std::vector<InterfaceMethod> methods;
@@ -866,31 +914,28 @@ std::unique_ptr<Stmt> Parser::parse_interface_declaration()
         InterfaceMethod method{
             method_name.lexeme,
             {},
+            {},
             std::nullopt,
             SourceLocation{function_token.line, function_token.column},
         };
+        method.generic_parameters = parse_generic_parameters();
         consume(TokenType::LeftParen, "expected '(' after interface method name");
         if (!check(TokenType::RightParen)) {
             do {
                 const Token& parameter_name = consume(
                     TokenType::Identifier, "expected parameter name");
-                Parameter parameter{
-                    parameter_name.lexeme,
-                    {},
-                    SourceLocation{parameter_name.line, parameter_name.column},
-                };
                 consume(TokenType::Colon, "expected ':' after parameter name");
-                const Token& parameter_type = consume(
-                    TokenType::Identifier, "expected parameter type after ':'");
-                parameter.type = parameter_type.lexeme;
-                method.parameters.push_back(std::move(parameter));
+                auto parameter_type = parse_type_reference("expected parameter type after ':'");
+                method.parameters.push_back(Parameter{
+                    parameter_name.lexeme,
+                    std::move(parameter_type),
+                    SourceLocation{parameter_name.line, parameter_name.column},
+                });
             } while (match({TokenType::Comma}));
         }
         consume(TokenType::RightParen, "expected ')' after parameters");
         if (match({TokenType::Arrow})) {
-            const Token& return_type = consume(
-                TokenType::Identifier, "expected return type after '->'");
-            method.return_type = return_type.lexeme;
+            method.return_type = parse_type_reference("expected return type after '->'");
         }
         if (check(TokenType::LeftBrace)) {
             throw_parse_error(peek(), "interface methods cannot declare a body");
@@ -908,27 +953,78 @@ std::unique_ptr<Stmt> Parser::parse_interface_declaration()
     return std::make_unique<InterfaceDeclarationStmt>(
         SourceLocation{interface_token.line, interface_token.column},
         interface_name,
+        std::move(generic_parameters),
         std::move(methods));
 }
 
-std::vector<std::string> Parser::parse_interface_list()
+std::vector<TypeReference> Parser::parse_interface_list()
 {
-    std::vector<std::string> interfaces;
+    std::vector<TypeReference> interfaces;
     do {
-        const Token& interface_name = consume(
-            TokenType::Identifier, "expected interface name after 'implements'");
-        interfaces.push_back(interface_name.lexeme);
+        interfaces.push_back(parse_type_reference(
+            "expected interface name after 'implements'"));
     } while (match({TokenType::Comma}));
     return interfaces;
+}
+
+std::vector<GenericParameter> Parser::parse_generic_parameters()
+{
+    std::vector<GenericParameter> parameters;
+    if (!match({TokenType::Less})) {
+        return parameters;
+    }
+    if (check(TokenType::Greater)) {
+        throw_parse_error(peek(), "generic parameter list cannot be empty");
+    }
+
+    do {
+        const Token& name = consume(
+            TokenType::Identifier, "expected generic parameter name");
+        GenericParameter parameter{
+            name.lexeme,
+            {},
+            SourceLocation{name.line, name.column},
+        };
+        if (match({TokenType::Colon})) {
+            parameter.constraints.push_back(parse_type_reference(
+                "expected interface constraint after ':'"));
+            while (match({TokenType::Plus})) {
+                parameter.constraints.push_back(parse_type_reference(
+                    "expected interface constraint after '+'"));
+            }
+        }
+        parameters.push_back(std::move(parameter));
+    } while (match({TokenType::Comma}));
+
+    consume(TokenType::Greater, "expected '>' after generic parameters");
+    return parameters;
+}
+
+TypeReference Parser::parse_type_reference(const char* message)
+{
+    const Token& name = consume(TokenType::Identifier, message);
+    TypeReference type{
+        name.lexeme,
+        {},
+        SourceLocation{name.line, name.column},
+    };
+    if (match({TokenType::Less})) {
+        if (check(TokenType::Greater)) {
+            throw_parse_error(peek(), "generic type argument list cannot be empty");
+        }
+        do {
+            type.arguments.push_back(parse_type_reference("expected generic type argument"));
+        } while (match({TokenType::Comma}));
+        consume(TokenType::Greater, "expected '>' after generic type arguments");
+    }
+    return type;
 }
 
 std::unique_ptr<ClassMember> Parser::parse_class_field(Visibility visibility)
 {
     Token name = advance();
     consume(TokenType::Colon, "expected ':' after class field name");
-    const Token& type = consume(
-        TokenType::Identifier, "expected class field type after ':'");
-    const std::string type_name = type.lexeme;
+    auto type = parse_type_reference("expected class field type after ':'");
     std::unique_ptr<Expr> default_value;
 
     if (match({TokenType::Assign})) {
@@ -941,7 +1037,7 @@ std::unique_ptr<ClassMember> Parser::parse_class_field(Visibility visibility)
         visibility,
         SourceLocation{name.line, name.column},
         std::move(name.lexeme),
-        type_name,
+        std::move(type),
         std::move(default_value));
 }
 
@@ -954,6 +1050,7 @@ std::unique_ptr<ClassMember> Parser::parse_method_declaration(
     Token function_token = advance();
     const Token& name = consume(TokenType::Identifier, "expected method name");
     const std::string method_name = name.lexeme;
+    auto generic_parameters = parse_generic_parameters();
     const bool is_destroy = method_name == "destroy";
     if (is_destroy) {
         if (saw_destroy) {
@@ -972,27 +1069,23 @@ std::unique_ptr<ClassMember> Parser::parse_method_declaration(
         do {
             const Token& parameter_name = consume(
                 TokenType::Identifier, "expected parameter name");
-            Parameter parameter{
-                parameter_name.lexeme,
-                {},
-                SourceLocation{parameter_name.line, parameter_name.column},
-            };
             consume(TokenType::Colon, "expected ':' after parameter name");
-            const Token& parameter_type = consume(
-                TokenType::Identifier, "expected parameter type after ':'");
-            parameter.type = parameter_type.lexeme;
-            parameters.push_back(std::move(parameter));
+            auto parameter_type = parse_type_reference("expected parameter type after ':'");
+            parameters.push_back(Parameter{
+                parameter_name.lexeme,
+                std::move(parameter_type),
+                SourceLocation{parameter_name.line, parameter_name.column},
+            });
         } while (match({TokenType::Comma}));
     }
     consume(TokenType::RightParen, "expected ')' after parameters");
 
-    std::optional<std::string> return_type;
+    std::optional<TypeReference> return_type;
     if (match({TokenType::Arrow})) {
         if (is_destroy) {
             throw_parse_error(previous(), "destroy method cannot declare a return type");
         }
-        const Token& type = consume(TokenType::Identifier, "expected return type after '->'");
-        return_type = type.lexeme;
+        return_type = parse_type_reference("expected return type after '->'");
     }
 
     std::unique_ptr<BlockStmt> body;
@@ -1010,6 +1103,7 @@ std::unique_ptr<ClassMember> Parser::parse_method_declaration(
         visibility,
         SourceLocation{function_token.line, function_token.column},
         method_name,
+        std::move(generic_parameters),
         std::move(parameters),
         std::move(return_type),
         is_virtual,
@@ -1144,6 +1238,16 @@ std::unique_ptr<Expr> Parser::parse_call()
     while (true) {
         if (match({TokenType::LeftParen})) {
             expression = finish_call(std::move(expression));
+        } else if (check(TokenType::Less) && looks_like_generic_call()) {
+            advance();
+            std::vector<TypeReference> generic_arguments;
+            do {
+                generic_arguments.push_back(parse_type_reference(
+                    "expected explicit generic argument"));
+            } while (match({TokenType::Comma}));
+            consume(TokenType::Greater, "expected '>' after explicit generic arguments");
+            consume(TokenType::LeftParen, "expected '(' after explicit generic arguments");
+            expression = finish_call(std::move(expression), std::move(generic_arguments));
         } else if (match({TokenType::Dot})) {
             const Token& member = consume(
                 TokenType::Identifier, "expected member name after '.'");
@@ -1189,7 +1293,9 @@ std::unique_ptr<Expr> Parser::parse_primary()
     throw_parse_error(peek(), "expected expression");
 }
 
-std::unique_ptr<Expr> Parser::finish_call(std::unique_ptr<Expr> callee)
+std::unique_ptr<Expr> Parser::finish_call(
+    std::unique_ptr<Expr> callee,
+    std::vector<TypeReference> generic_arguments)
 {
     const auto enclosing_statement_line = statement_line_;
     statement_line_.reset();
@@ -1226,7 +1332,58 @@ std::unique_ptr<Expr> Parser::finish_call(std::unique_ptr<Expr> callee)
     } else {
         statement_line_.reset();
     }
-    return std::make_unique<CallExpr>(std::move(callee), std::move(arguments));
+    return std::make_unique<CallExpr>(
+        std::move(callee), std::move(generic_arguments), std::move(arguments));
+}
+
+bool Parser::looks_like_generic_call() const
+{
+    std::size_t index = current_;
+    if (index >= tokens_.size() || tokens_[index].type != TokenType::Less) {
+        return false;
+    }
+    ++index;
+    if (!scan_type_reference(index)) {
+        return false;
+    }
+    while (index < tokens_.size() && tokens_[index].type == TokenType::Comma) {
+        ++index;
+        if (!scan_type_reference(index)) {
+            return false;
+        }
+    }
+    if (index >= tokens_.size() || tokens_[index].type != TokenType::Greater) {
+        return false;
+    }
+    ++index;
+    return index < tokens_.size() && tokens_[index].type == TokenType::LeftParen;
+}
+
+bool Parser::scan_type_reference(std::size_t& index) const
+{
+    if (index >= tokens_.size() || tokens_[index].type != TokenType::Identifier) {
+        return false;
+    }
+    ++index;
+    if (index >= tokens_.size() || tokens_[index].type != TokenType::Less) {
+        return true;
+    }
+
+    ++index;
+    if (!scan_type_reference(index)) {
+        return false;
+    }
+    while (index < tokens_.size() && tokens_[index].type == TokenType::Comma) {
+        ++index;
+        if (!scan_type_reference(index)) {
+            return false;
+        }
+    }
+    if (index >= tokens_.size() || tokens_[index].type != TokenType::Greater) {
+        return false;
+    }
+    ++index;
+    return true;
 }
 
 bool Parser::at_end() const

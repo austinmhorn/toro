@@ -167,3 +167,23 @@ class Dog : Animal implements Drawable {
 Interface methods are signatures without bodies. `virtual` and `override` are
 explicit method modifiers. A virtual method may omit its body; dispatch,
 override validation, and interface conformance belong to later semantic phases.
+
+### Generics
+
+Functions, structs, classes, interfaces, and methods may declare generic type
+parameters. A parameter may list interface constraints separated by `+`:
+
+```toro
+function process<T: Serializable + Comparable>(value: T) {
+}
+```
+
+Type references may be nested, and calls may provide explicit type arguments:
+
+```toro
+index: Map<string, List<User>>
+value := max<int>(10, 20)
+```
+
+Generic inference, constraint validation, and specialization belong to later
+semantic and code-generation phases.

@@ -694,7 +694,8 @@ void test_enum_payload_variants()
     const auto& declaration = static_cast<const toro::EnumDeclarationStmt&>(
         *program.statements.front());
     expect(declaration.variants.size() == 2, "mixed enum variants were not retained");
-    expect(declaration.variants.front().payload_type == "int",
+    expect(declaration.variants.front().payload_type
+            && declaration.variants.front().payload_type->name == "int",
         "enum payload type was not retained");
     expect(!declaration.variants.back().payload_type,
         "payload-free enum variant unexpectedly has a payload");
@@ -914,7 +915,9 @@ void test_class_methods_init_and_destroy()
         *program.statements.front());
     const auto& method = static_cast<const toro::MethodDeclaration&>(
         *declaration.members.front());
-    expect(method.parameters.size() == 1 && method.return_type == "int",
+    expect(method.parameters.size() == 1
+            && method.return_type
+            && method.return_type->name == "int",
         "method parameters or return type were not retained");
     expect(method.location.line == 2, "method source location was not retained");
 }
@@ -1021,7 +1024,8 @@ void test_class_inheritance_and_interfaces()
         "}\n");
     const auto& declaration = static_cast<const toro::ClassDeclarationStmt&>(
         *program.statements.front());
-    expect(declaration.base_type == "Animal", "class base type was not retained");
+    expect(declaration.base_type && declaration.base_type->name == "Animal",
+        "class base type was not retained");
     expect(declaration.interfaces.size() == 2,
         "multiple implemented interfaces were not retained");
     const auto& method = static_cast<const toro::MethodDeclaration&>(
@@ -1048,6 +1052,161 @@ void test_struct_interfaces()
         *program.statements.front());
     expect(declaration.interfaces.size() == 2,
         "struct interface list was not retained");
+}
+
+void test_generic_function()
+{
+    expect_program_dump(
+        "function max<T>(a: T, b: T) -> T {\n"
+        "    return a\n"
+        "}\n",
+        "FunctionDeclaration(max)\n"
+        "  GenericParameters\n"
+        "    T\n"
+        "  Parameters\n"
+        "    Parameter(a: T)\n"
+        "    Parameter(b: T)\n"
+        "  return type: T\n"
+        "  Block\n"
+        "    Return\n"
+        "      Identifier(a)\n");
+
+    const auto program = parse_program(
+        "function identity<T>(value: T) -> T { return value }\n");
+    const auto& function = static_cast<const toro::FunctionDeclarationStmt&>(
+        *program.statements.front());
+    expect(function.generic_parameters.size() == 1,
+        "generic function parameter was not retained");
+    expect(function.generic_parameters.front().location.column == 19,
+        "generic parameter source location was not retained");
+}
+
+void test_generic_constraints()
+{
+    expect_program_dump(
+        "function process<T: Serializable + Comparable>(value: T) {\n}\n",
+        "FunctionDeclaration(process)\n"
+        "  GenericParameters\n"
+        "    T\n"
+        "      Constraint(Serializable)\n"
+        "      Constraint(Comparable)\n"
+        "  Parameters\n"
+        "    Parameter(value: T)\n"
+        "  Block\n");
+
+    const auto program = parse_program(
+        "function compare<T: Comparable, U: Serializable>(a: T, b: U) {}\n");
+    const auto& function = static_cast<const toro::FunctionDeclarationStmt&>(
+        *program.statements.front());
+    expect(function.generic_parameters.size() == 2,
+        "multiple generic parameters were not retained");
+    expect(function.generic_parameters.front().constraints.size() == 1,
+        "generic constraint was not retained");
+}
+
+void test_generic_struct_class_and_interface()
+{
+    expect_program_dump(
+        "struct Pair<A, B> {\n"
+        "    first: A\n"
+        "    second: B\n"
+        "}\n\n"
+        "class Box<T> {\n"
+        "    value: T\n"
+        "}\n\n"
+        "interface Mapper<Input, Output> {\n"
+        "    function map(value: Input) -> Output\n"
+        "}\n",
+        "StructDeclaration(Pair)\n"
+        "  GenericParameters\n"
+        "    A\n"
+        "    B\n"
+        "  Field(first: A)\n"
+        "  Field(second: B)\n"
+        "\n"
+        "ClassDeclaration(Box)\n"
+        "  GenericParameters\n"
+        "    T\n"
+        "  private Field(value: T)\n"
+        "\n"
+        "InterfaceDeclaration(Mapper)\n"
+        "  GenericParameters\n"
+        "    Input\n"
+        "    Output\n"
+        "  Method(map)\n"
+        "    Parameters\n"
+        "      Parameter(value: Input)\n"
+        "    return type: Output\n");
+}
+
+void test_generic_type_references()
+{
+    expect_program_dump(
+        "struct Store<T> {\n"
+        "    pair: Pair<int, string>\n"
+        "    items: List<User>\n"
+        "    index: Map<string, List<User>>\n"
+        "}\n",
+        "StructDeclaration(Store)\n"
+        "  GenericParameters\n"
+        "    T\n"
+        "  Field(pair: Pair<int, string>)\n"
+        "  Field(items: List<User>)\n"
+        "  Field(index: Map<string, List<User>>)\n");
+
+    const auto program = parse_program(
+        "function use(value: Map<string, List<User>>) {}\n");
+    const auto& function = static_cast<const toro::FunctionDeclarationStmt&>(
+        *program.statements.front());
+    const auto& type = function.parameters.front().type;
+    expect(type.name == "Map" && type.arguments.size() == 2,
+        "outer generic type reference was not retained");
+    expect(type.arguments[1].name == "List"
+            && type.arguments[1].arguments.front().name == "User",
+        "nested generic type reference was not retained");
+}
+
+void test_explicit_generic_calls()
+{
+    expect_program_dump(
+        "value := max<int>(10, 20)\n"
+        "other := max(10, 20)\n",
+        "VariableDeclaration(value)\n"
+        "  inferred\n"
+        "  Call\n"
+        "    Identifier(max)\n"
+        "    GenericArguments\n"
+        "      int\n"
+        "    Integer(10)\n"
+        "    Integer(20)\n"
+        "\n"
+        "VariableDeclaration(other)\n"
+        "  inferred\n"
+        "  Call\n"
+        "    Identifier(max)\n"
+        "    Integer(10)\n"
+        "    Integer(20)\n");
+
+    expect_dump(
+        "create<Map<string, List<User>>>()",
+        "Call\n"
+        "  Identifier(create)\n"
+        "  GenericArguments\n"
+        "    Map<string, List<User>>\n");
+}
+
+void test_generic_call_comparison_disambiguation()
+{
+    expect_dump("a < b", "Binary(<)\n  Identifier(a)\n  Identifier(b)\n");
+    expect_dump("a <= b", "Binary(<=)\n  Identifier(a)\n  Identifier(b)\n");
+    expect_dump("a > b", "Binary(>)\n  Identifier(a)\n  Identifier(b)\n");
+    expect_dump(
+        "a < b > c",
+        "Binary(>)\n"
+        "  Binary(<)\n"
+        "    Identifier(a)\n"
+        "    Identifier(b)\n"
+        "  Identifier(c)\n");
 }
 
 void expect_parse_error(std::string_view source, std::string_view expected_message)
@@ -1330,6 +1489,31 @@ void test_inheritance_and_interface_failures()
         "method may have only one virtual or override modifier");
 }
 
+void test_generic_failures()
+{
+    expect_program_error(
+        "function broken<>(value: int) {}\n",
+        "generic parameter list cannot be empty");
+    expect_program_error(
+        "function broken<T,>(value: T) {}\n",
+        "expected generic parameter name");
+    expect_program_error(
+        "function broken<T:>(value: T) {}\n",
+        "expected interface constraint after ':'");
+    expect_program_error(
+        "function broken<T: Serializable +>(value: T) {}\n",
+        "expected interface constraint after '+'");
+    expect_program_error(
+        "function broken<T(value: T) {}\n",
+        "expected '>' after generic parameters");
+    expect_program_error(
+        "struct Broken<T> {\n value: List<>\n}\n",
+        "generic type argument list cannot be empty");
+    expect_program_error(
+        "struct Broken<T> {\n value: Map<string, List<User>\n}\n",
+        "expected '>' after generic type arguments");
+}
+
 } // namespace
 
 int main()
@@ -1386,6 +1570,12 @@ int main()
         test_abstract_class_and_virtual_method();
         test_class_inheritance_and_interfaces();
         test_struct_interfaces();
+        test_generic_function();
+        test_generic_constraints();
+        test_generic_struct_class_and_interface();
+        test_generic_type_references();
+        test_explicit_generic_calls();
+        test_generic_call_comparison_disambiguation();
         test_failures();
         test_statement_failures();
         test_function_failures();
@@ -1398,6 +1588,7 @@ int main()
         test_class_failures();
         test_destroy_failures();
         test_inheritance_and_interface_failures();
+        test_generic_failures();
     } catch (const std::exception& error) {
         std::cerr << "parser test failure: " << error.what() << '\n';
         return 1;

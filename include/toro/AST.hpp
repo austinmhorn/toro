@@ -11,6 +11,23 @@
 
 namespace toro {
 
+struct SourceLocation {
+    std::size_t line;
+    std::size_t column;
+};
+
+struct TypeReference {
+    std::string name;
+    std::vector<TypeReference> arguments;
+    SourceLocation location;
+};
+
+struct GenericParameter {
+    std::string name;
+    std::vector<TypeReference> constraints;
+    SourceLocation location;
+};
+
 enum class ExprKind {
     Integer,
     Decimal,
@@ -128,14 +145,19 @@ struct CallArgument {
 };
 
 struct CallExpr final : Expr {
-    CallExpr(std::unique_ptr<Expr> callee, std::vector<CallArgument> arguments)
+    CallExpr(
+        std::unique_ptr<Expr> callee,
+        std::vector<TypeReference> generic_arguments,
+        std::vector<CallArgument> arguments)
         : Expr(ExprKind::Call)
         , callee(std::move(callee))
+        , generic_arguments(std::move(generic_arguments))
         , arguments(std::move(arguments))
     {
     }
 
     std::unique_ptr<Expr> callee;
+    std::vector<TypeReference> generic_arguments;
     std::vector<CallArgument> arguments;
 };
 
@@ -159,11 +181,6 @@ struct GroupingExpr final : Expr {
     }
 
     std::unique_ptr<Expr> expression;
-};
-
-struct SourceLocation {
-    std::size_t line;
-    std::size_t column;
 };
 
 enum class StmtKind {
@@ -203,7 +220,7 @@ struct VariableDeclarationStmt final : Stmt {
     VariableDeclarationStmt(
         SourceLocation location,
         std::string name,
-        std::optional<std::string> explicit_type,
+        std::optional<TypeReference> explicit_type,
         std::unique_ptr<Expr> initializer)
         : Stmt(StmtKind::VariableDeclaration, location)
         , name(std::move(name))
@@ -213,7 +230,7 @@ struct VariableDeclarationStmt final : Stmt {
     }
 
     std::string name;
-    std::optional<std::string> explicit_type;
+    std::optional<TypeReference> explicit_type;
     std::unique_ptr<Expr> initializer;
 };
 
@@ -259,7 +276,7 @@ struct ExpressionStmt final : Stmt {
 
 struct Parameter {
     std::string name;
-    std::string type;
+    TypeReference type;
     SourceLocation location;
 };
 
@@ -277,11 +294,13 @@ struct FunctionDeclarationStmt final : Stmt {
     FunctionDeclarationStmt(
         SourceLocation location,
         std::string name,
+        std::vector<GenericParameter> generic_parameters,
         std::vector<Parameter> parameters,
-        std::optional<std::string> return_type,
+        std::optional<TypeReference> return_type,
         std::unique_ptr<BlockStmt> body)
         : Stmt(StmtKind::FunctionDeclaration, location)
         , name(std::move(name))
+        , generic_parameters(std::move(generic_parameters))
         , parameters(std::move(parameters))
         , return_type(std::move(return_type))
         , body(std::move(body))
@@ -289,8 +308,9 @@ struct FunctionDeclarationStmt final : Stmt {
     }
 
     std::string name;
+    std::vector<GenericParameter> generic_parameters;
     std::vector<Parameter> parameters;
-    std::optional<std::string> return_type;
+    std::optional<TypeReference> return_type;
     std::unique_ptr<BlockStmt> body;
 };
 
@@ -371,7 +391,7 @@ struct ContinueStmt final : Stmt {
 
 struct EnumVariant {
     std::string name;
-    std::optional<std::string> payload_type;
+    std::optional<TypeReference> payload_type;
     SourceLocation location;
 };
 
@@ -414,7 +434,7 @@ struct HandleStmt final : Stmt {
 
 struct StructField {
     std::string name;
-    std::string type;
+    TypeReference type;
     std::unique_ptr<Expr> default_value;
     SourceLocation location;
 };
@@ -423,17 +443,20 @@ struct StructDeclarationStmt final : Stmt {
     StructDeclarationStmt(
         SourceLocation location,
         std::string name,
-        std::vector<std::string> interfaces,
+        std::vector<GenericParameter> generic_parameters,
+        std::vector<TypeReference> interfaces,
         std::vector<StructField> fields)
         : Stmt(StmtKind::StructDeclaration, location)
         , name(std::move(name))
+        , generic_parameters(std::move(generic_parameters))
         , interfaces(std::move(interfaces))
         , fields(std::move(fields))
     {
     }
 
     std::string name;
-    std::vector<std::string> interfaces;
+    std::vector<GenericParameter> generic_parameters;
+    std::vector<TypeReference> interfaces;
     std::vector<StructField> fields;
 };
 
@@ -467,7 +490,7 @@ struct ClassField final : ClassMember {
         Visibility visibility,
         SourceLocation location,
         std::string name,
-        std::string type,
+        TypeReference type,
         std::unique_ptr<Expr> default_value)
         : ClassMember(ClassMemberKind::Field, visibility, location)
         , name(std::move(name))
@@ -477,7 +500,7 @@ struct ClassField final : ClassMember {
     }
 
     std::string name;
-    std::string type;
+    TypeReference type;
     std::unique_ptr<Expr> default_value;
 };
 
@@ -486,13 +509,15 @@ struct MethodDeclaration final : ClassMember {
         Visibility visibility,
         SourceLocation location,
         std::string name,
+        std::vector<GenericParameter> generic_parameters,
         std::vector<Parameter> parameters,
-        std::optional<std::string> return_type,
+        std::optional<TypeReference> return_type,
         bool is_virtual,
         bool is_override,
         std::unique_ptr<BlockStmt> body)
         : ClassMember(ClassMemberKind::Method, visibility, location)
         , name(std::move(name))
+        , generic_parameters(std::move(generic_parameters))
         , parameters(std::move(parameters))
         , return_type(std::move(return_type))
         , is_virtual(is_virtual)
@@ -502,8 +527,9 @@ struct MethodDeclaration final : ClassMember {
     }
 
     std::string name;
+    std::vector<GenericParameter> generic_parameters;
     std::vector<Parameter> parameters;
-    std::optional<std::string> return_type;
+    std::optional<TypeReference> return_type;
     bool is_virtual;
     bool is_override;
     std::unique_ptr<BlockStmt> body;
@@ -514,12 +540,14 @@ struct ClassDeclarationStmt final : Stmt {
         SourceLocation location,
         std::string name,
         bool is_abstract,
-        std::optional<std::string> base_type,
-        std::vector<std::string> interfaces,
+        std::vector<GenericParameter> generic_parameters,
+        std::optional<TypeReference> base_type,
+        std::vector<TypeReference> interfaces,
         std::vector<std::unique_ptr<ClassMember>> members)
         : Stmt(StmtKind::ClassDeclaration, location)
         , name(std::move(name))
         , is_abstract(is_abstract)
+        , generic_parameters(std::move(generic_parameters))
         , base_type(std::move(base_type))
         , interfaces(std::move(interfaces))
         , members(std::move(members))
@@ -528,15 +556,17 @@ struct ClassDeclarationStmt final : Stmt {
 
     std::string name;
     bool is_abstract;
-    std::optional<std::string> base_type;
-    std::vector<std::string> interfaces;
+    std::vector<GenericParameter> generic_parameters;
+    std::optional<TypeReference> base_type;
+    std::vector<TypeReference> interfaces;
     std::vector<std::unique_ptr<ClassMember>> members;
 };
 
 struct InterfaceMethod {
     std::string name;
+    std::vector<GenericParameter> generic_parameters;
     std::vector<Parameter> parameters;
-    std::optional<std::string> return_type;
+    std::optional<TypeReference> return_type;
     SourceLocation location;
 };
 
@@ -544,14 +574,17 @@ struct InterfaceDeclarationStmt final : Stmt {
     InterfaceDeclarationStmt(
         SourceLocation location,
         std::string name,
+        std::vector<GenericParameter> generic_parameters,
         std::vector<InterfaceMethod> methods)
         : Stmt(StmtKind::InterfaceDeclaration, location)
         , name(std::move(name))
+        , generic_parameters(std::move(generic_parameters))
         , methods(std::move(methods))
     {
     }
 
     std::string name;
+    std::vector<GenericParameter> generic_parameters;
     std::vector<InterfaceMethod> methods;
 };
 

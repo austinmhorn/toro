@@ -10,8 +10,8 @@ The first compiler implementation is written in C++23.
 It currently loads and tokenizes `.toro` source files and can parse expressions,
 variable declarations, assignments, calls, functions, returns, blocks, conditional
 control flow, loops, enums, `handle` statements, structs, named calls, and member
-access and assignment, classes, single inheritance, interfaces, and virtual or
-override methods into an AST.
+access and assignment, classes, single inheritance, interfaces, virtual or
+override methods, and generic declarations and type references into an AST.
 
 ## Build
 
@@ -86,6 +86,12 @@ Parse interfaces and inheritance declarations:
 
 ```bash
 ./build/toro ast examples/inheritance.toro
+```
+
+Parse generic declarations, constraints, types, and calls:
+
+```bash
+./build/toro ast examples/generics.toro
 ```
 
 ## Logical operators

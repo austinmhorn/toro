@@ -1,0 +1,31 @@
+interface Serializable {
+    function serialize() -> string
+}
+
+interface Comparable {
+    function compare(other: Comparable) -> int
+}
+
+struct Pair<A, B> {
+    first: A
+    second: B
+}
+
+class Box<T> {
+    value: T
+}
+
+function max<T: Serializable + Comparable>(a: T, b: T) -> T {
+    return a
+}
+
+function collect<T>(items: Map<string, List<T>>) -> List<T> {
+    return items
+}
+
+function main() {
+    pair := Pair<int, string>(first: 1, second: "one")
+    value := max<int>(10, 20)
+    print(pair)
+    print(value)
+}
