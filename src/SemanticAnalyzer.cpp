@@ -164,6 +164,9 @@ void SemanticAnalyzer::analyze_statement(const Stmt& statement)
                 analyze_expression(*field.default_value);
             }
         }
+        for (const auto& conversion : declaration.conversions) {
+            analyze_conversion(*conversion);
+        }
         return;
     }
     case StmtKind::ClassDeclaration: {
@@ -175,8 +178,10 @@ void SemanticAnalyzer::analyze_statement(const Stmt& statement)
                 if (field.default_value) {
                     analyze_expression(*field.default_value);
                 }
-            } else {
+            } else if (member->kind == ClassMemberKind::Method) {
                 analyze_method(static_cast<const MethodDeclaration&>(*member));
+            } else {
+                analyze_conversion(static_cast<const ConversionOverload&>(*member));
             }
         }
         return;
@@ -228,6 +233,9 @@ void SemanticAnalyzer::analyze_expression(const Expr& expression)
     case ExprKind::MemberAccess:
         analyze_expression(*static_cast<const MemberAccessExpr&>(expression).object);
         return;
+    case ExprKind::Cast:
+        analyze_expression(*static_cast<const CastExpr&>(expression).expression);
+        return;
     case ExprKind::Grouping:
         analyze_expression(*static_cast<const GroupingExpr&>(expression).expression);
         return;
@@ -260,6 +268,16 @@ void SemanticAnalyzer::analyze_method(const MethodDeclaration& method)
         declare(parameter.name, SymbolKind::Parameter, parameter.location);
     }
     analyze_statement_list(method.body->statements);
+    pop_scope();
+    inside_class_method_ = enclosing_class_method;
+}
+
+void SemanticAnalyzer::analyze_conversion(const ConversionOverload& conversion)
+{
+    const bool enclosing_class_method = inside_class_method_;
+    inside_class_method_ = true;
+    push_scope();
+    analyze_statement_list(conversion.body->statements);
     pop_scope();
     inside_class_method_ = enclosing_class_method;
 }

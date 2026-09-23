@@ -269,6 +269,82 @@ void test_nullable_functions_and_equality()
         "condition must have type 'bool', got nullable type 'string?'");
 }
 
+void test_builtin_casts()
+{
+    expect_valid(
+        "decimal := 10 as dec\n"
+        "integer := 19.9 as int\n"
+        "same := integer as int\n"
+        "sum := integer as dec + 1.0\n"
+        "function accept(value: dec) {}\n"
+        "accept(10 as dec)\n");
+    expect_error(
+        "value := \"10\" as int\n",
+        "no conversion from 'string' to 'int'");
+    expect_error(
+        "value: int? = 10\n"
+        "required := value as int\n",
+        "does not unwrap the value");
+    expect_valid(
+        "value: int = 10\n"
+        "optional := value as int?\n");
+}
+
+void test_user_defined_conversions()
+{
+    expect_valid(
+        "class Player {\n"
+        "    name: string\n"
+        "    overload as string { return self.name }\n"
+        "}\n"
+        "function main() {\n"
+        "    player := Player()\n"
+        "    name := player as string\n"
+        "    print(name)\n"
+        "    print(player)\n"
+        "}\n");
+    expect_valid(
+        "struct Counter {\n"
+        "    value: int\n"
+        "    overload as int { return self.value }\n"
+        "}\n"
+        "counter := Counter()\n"
+        "value := counter as int\n");
+    expect_valid(
+        "class Label {}\n"
+        "class Player {\n"
+        "    overload as Label { return Label() }\n"
+        "}\n"
+        "player := Player()\n"
+        "label := player as Label\n");
+    expect_error(
+        "class Broken {\n"
+        "    overload as int { return \"wrong\" }\n"
+        "}\n",
+        "cannot assign value of type 'string' to type 'int'");
+    expect_error(
+        "class Player { overload as string { return \"player\" } }\n"
+        "player := Player()\n"
+        "name: string = player\n",
+        "cannot assign value of type 'Player' to type 'string'");
+    expect_error(
+        "class Player {}\n"
+        "player := Player()\n"
+        "name := player as string\n",
+        "no conversion from 'Player' to 'string'");
+    expect_error(
+        "class Player {}\n"
+        "class Team {}\n"
+        "player := Player()\n"
+        "team := player as Team\n",
+        "no conversion from 'Player' to 'Team'");
+    expect_error(
+        "class Player { overload as string { return \"player\" } }\n"
+        "player := Player()\n"
+        "value := player as int\n",
+        "no conversion from 'Player' to 'int'");
+}
+
 void test_existing_language_features_remain_checkable()
 {
     expect_valid(
@@ -313,6 +389,8 @@ int main()
         test_null_restrictions();
         test_nullable_declarations_and_assignments();
         test_nullable_functions_and_equality();
+        test_builtin_casts();
+        test_user_defined_conversions();
         test_existing_language_features_remain_checkable();
     } catch (const std::exception& error) {
         std::cerr << "type checker test failure: " << error.what() << '\n';

@@ -105,8 +105,10 @@ Run semantic name resolution and primitive type checking on a source file:
 
 The `check` command reports name-resolution errors, primitive type mismatches,
 invalid conditions, function argument errors, invalid returns, and nullable
-assignment errors. Generic type inference, member lookup, overload resolution,
-and flow-sensitive null narrowing are not implemented yet.
+assignment errors. Generic type inference, member lookup, function overload
+resolution, and flow-sensitive null narrowing are not implemented yet. Explicit
+`as` casts support numeric conversions and user-defined class or struct
+conversions.
 
 ## Logical operators
 

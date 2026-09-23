@@ -40,6 +40,7 @@ enum class ExprKind {
     Binary,
     Call,
     MemberAccess,
+    Cast,
     Grouping,
 };
 
@@ -172,6 +173,18 @@ struct MemberAccessExpr final : Expr {
 
     std::unique_ptr<Expr> object;
     std::string member;
+};
+
+struct CastExpr final : Expr {
+    CastExpr(std::unique_ptr<Expr> expression, TypeReference target_type)
+        : Expr(ExprKind::Cast)
+        , expression(std::move(expression))
+        , target_type(std::move(target_type))
+    {
+    }
+
+    std::unique_ptr<Expr> expression;
+    TypeReference target_type;
 };
 
 struct GroupingExpr final : Expr {
@@ -433,34 +446,6 @@ struct HandleStmt final : Stmt {
     std::vector<HandleCase> cases;
 };
 
-struct StructField {
-    std::string name;
-    TypeReference type;
-    std::unique_ptr<Expr> default_value;
-    SourceLocation location;
-};
-
-struct StructDeclarationStmt final : Stmt {
-    StructDeclarationStmt(
-        SourceLocation location,
-        std::string name,
-        std::vector<GenericParameter> generic_parameters,
-        std::vector<TypeReference> interfaces,
-        std::vector<StructField> fields)
-        : Stmt(StmtKind::StructDeclaration, location)
-        , name(std::move(name))
-        , generic_parameters(std::move(generic_parameters))
-        , interfaces(std::move(interfaces))
-        , fields(std::move(fields))
-    {
-    }
-
-    std::string name;
-    std::vector<GenericParameter> generic_parameters;
-    std::vector<TypeReference> interfaces;
-    std::vector<StructField> fields;
-};
-
 enum class Visibility {
     Private,
     Public,
@@ -469,6 +454,7 @@ enum class Visibility {
 enum class ClassMemberKind {
     Field,
     Method,
+    Conversion,
 };
 
 struct ClassMember {
@@ -484,6 +470,52 @@ struct ClassMember {
     ClassMemberKind kind;
     Visibility visibility;
     SourceLocation location;
+};
+
+struct ConversionOverload final : ClassMember {
+    ConversionOverload(
+        SourceLocation location,
+        TypeReference target_type,
+        std::unique_ptr<BlockStmt> body)
+        : ClassMember(ClassMemberKind::Conversion, Visibility::Private, location)
+        , target_type(std::move(target_type))
+        , body(std::move(body))
+    {
+    }
+
+    TypeReference target_type;
+    std::unique_ptr<BlockStmt> body;
+};
+
+struct StructField {
+    std::string name;
+    TypeReference type;
+    std::unique_ptr<Expr> default_value;
+    SourceLocation location;
+};
+
+struct StructDeclarationStmt final : Stmt {
+    StructDeclarationStmt(
+        SourceLocation location,
+        std::string name,
+        std::vector<GenericParameter> generic_parameters,
+        std::vector<TypeReference> interfaces,
+        std::vector<StructField> fields,
+        std::vector<std::unique_ptr<ConversionOverload>> conversions)
+        : Stmt(StmtKind::StructDeclaration, location)
+        , name(std::move(name))
+        , generic_parameters(std::move(generic_parameters))
+        , interfaces(std::move(interfaces))
+        , fields(std::move(fields))
+        , conversions(std::move(conversions))
+    {
+    }
+
+    std::string name;
+    std::vector<GenericParameter> generic_parameters;
+    std::vector<TypeReference> interfaces;
+    std::vector<StructField> fields;
+    std::vector<std::unique_ptr<ConversionOverload>> conversions;
 };
 
 struct ClassField final : ClassMember {

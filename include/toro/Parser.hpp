@@ -42,6 +42,7 @@ private:
         bool is_virtual,
         bool is_override,
         bool& saw_destroy);
+    [[nodiscard]] std::unique_ptr<ConversionOverload> parse_conversion_overload();
     [[nodiscard]] std::unique_ptr<BlockStmt> parse_block_statement();
     [[nodiscard]] std::unique_ptr<Expr> parse_or();
     [[nodiscard]] std::unique_ptr<Expr> parse_and();
@@ -50,6 +51,7 @@ private:
     [[nodiscard]] std::unique_ptr<Expr> parse_term();
     [[nodiscard]] std::unique_ptr<Expr> parse_factor();
     [[nodiscard]] std::unique_ptr<Expr> parse_unary();
+    [[nodiscard]] std::unique_ptr<Expr> parse_cast();
     [[nodiscard]] std::unique_ptr<Expr> parse_call();
     [[nodiscard]] std::unique_ptr<Expr> parse_primary();
     [[nodiscard]] std::unique_ptr<Expr> finish_call(

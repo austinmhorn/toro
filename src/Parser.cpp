@@ -122,6 +122,12 @@ void append_dump(const Expr& expression, std::size_t depth, std::string& output)
         output += std::string((depth + 1) * 2, ' ') + member.member + "\n";
         return;
     }
+    case ExprKind::Cast: {
+        const auto& cast = static_cast<const CastExpr&>(expression);
+        output += "Cast(" + format_type(cast.target_type) + ")\n";
+        append_dump(*cast.expression, depth + 1, output);
+        return;
+    }
     case ExprKind::Grouping: {
         const auto& grouping = static_cast<const GroupingExpr&>(expression);
         output += "Grouping\n";
@@ -282,6 +288,11 @@ void append_statement_dump(const Stmt& statement, std::size_t depth, std::string
                 append_dump(*field.default_value, depth + 3, output);
             }
         }
+        for (const auto& conversion : declaration.conversions) {
+            output += std::string((depth + 1) * 2, ' ')
+                + "Conversion(as " + format_type(conversion->target_type) + ")\n";
+            append_statement_dump(*conversion->body, depth + 2, output);
+        }
         return;
     }
     case StmtKind::ClassDeclaration: {
@@ -312,6 +323,14 @@ void append_statement_dump(const Stmt& statement, std::size_t depth, std::string
                     output += std::string((depth + 2) * 2, ' ') + "Default\n";
                     append_dump(*field.default_value, depth + 3, output);
                 }
+                continue;
+            }
+
+            if (member->kind == ClassMemberKind::Conversion) {
+                const auto& conversion = static_cast<const ConversionOverload&>(*member);
+                output += member_indentation + "Conversion(as "
+                    + format_type(conversion.target_type) + ")\n";
+                append_statement_dump(*conversion.body, depth + 2, output);
                 continue;
             }
 
@@ -790,10 +809,22 @@ std::unique_ptr<Stmt> Parser::parse_struct_declaration()
     consume(TokenType::LeftBrace, "expected '{' before struct body");
 
     std::vector<StructField> fields;
+    std::vector<std::unique_ptr<ConversionOverload>> conversions;
+    std::unordered_set<std::string> conversion_targets;
     while (!at_end() && peek().type != TokenType::RightBrace) {
         statement_line_ = peek().line;
+        if (check(TokenType::Overload)) {
+            const Token overload_token = peek();
+            auto conversion = parse_conversion_overload();
+            if (!conversion_targets.insert(format_type(conversion->target_type)).second) {
+                throw_parse_error(
+                    overload_token, "duplicate conversion overload target");
+            }
+            conversions.push_back(std::move(conversion));
+            continue;
+        }
         const Token& field_name = consume(
-            TokenType::Identifier, "expected struct field name");
+            TokenType::Identifier, "expected struct field or conversion overload");
         StructField field{
             field_name.lexeme,
             {},
@@ -824,7 +855,8 @@ std::unique_ptr<Stmt> Parser::parse_struct_declaration()
         struct_name,
         std::move(generic_parameters),
         std::move(interfaces),
-        std::move(fields));
+        std::move(fields),
+        std::move(conversions));
 }
 
 std::unique_ptr<Stmt> Parser::parse_class_declaration(bool is_abstract)
@@ -851,14 +883,18 @@ std::unique_ptr<Stmt> Parser::parse_class_declaration(bool is_abstract)
     consume(TokenType::LeftBrace, "expected '{' before class body");
 
     std::vector<std::unique_ptr<ClassMember>> members;
+    std::unordered_set<std::string> conversion_targets;
     bool saw_destroy = false;
     while (!at_end() && peek().type != TokenType::RightBrace) {
         statement_line_ = peek().line;
         Visibility visibility = Visibility::Private;
+        bool explicit_visibility = false;
         if (match({TokenType::Public})) {
             visibility = Visibility::Public;
+            explicit_visibility = true;
         } else if (match({TokenType::Private})) {
             visibility = Visibility::Private;
+            explicit_visibility = true;
         }
 
         bool is_virtual = false;
@@ -872,7 +908,19 @@ std::unique_ptr<Stmt> Parser::parse_class_declaration(bool is_abstract)
             throw_parse_error(peek(), "method may have only one virtual or override modifier");
         }
 
-        if (check(TokenType::Function)) {
+        if (check(TokenType::Overload)) {
+            if (explicit_visibility || is_virtual || is_override) {
+                throw_parse_error(
+                    peek(), "conversion overload syntax is exactly 'overload as Type'");
+            }
+            const Token overload_token = peek();
+            auto conversion = parse_conversion_overload();
+            if (!conversion_targets.insert(format_type(conversion->target_type)).second) {
+                throw_parse_error(
+                    overload_token, "duplicate conversion overload target");
+            }
+            members.push_back(std::move(conversion));
+        } else if (check(TokenType::Function)) {
             members.push_back(parse_method_declaration(
                 visibility, is_virtual, is_override, saw_destroy));
         } else if (!is_virtual && !is_override && check(TokenType::Identifier)) {
@@ -897,6 +945,32 @@ std::unique_ptr<Stmt> Parser::parse_class_declaration(bool is_abstract)
         std::move(base_type),
         std::move(interfaces),
         std::move(members));
+}
+
+std::unique_ptr<ConversionOverload> Parser::parse_conversion_overload()
+{
+    const Token overload_token = advance();
+    consume(TokenType::As, "expected 'as' after 'overload'");
+    auto target_type = parse_type_reference("expected conversion target type after 'as'");
+    if (check(TokenType::LeftParen)) {
+        throw_parse_error(peek(), "conversion overloads cannot declare parameters");
+    }
+    if (check(TokenType::Arrow)) {
+        throw_parse_error(peek(), "conversion overloads cannot declare a return type");
+    }
+    if (!check(TokenType::LeftBrace)) {
+        throw_parse_error(peek(), "expected '{' before conversion overload body");
+    }
+
+    const auto enclosing_loop_depth = loop_depth_;
+    loop_depth_ = 0;
+    auto body = parse_block_statement();
+    loop_depth_ = enclosing_loop_depth;
+    require_statement_end();
+    return std::make_unique<ConversionOverload>(
+        SourceLocation{overload_token.line, overload_token.column},
+        std::move(target_type),
+        std::move(body));
 }
 
 std::unique_ptr<Stmt> Parser::parse_interface_declaration()
@@ -1232,7 +1306,18 @@ std::unique_ptr<Expr> Parser::parse_unary()
             std::move(operator_token), parse_unary());
     }
 
-    return parse_call();
+    return parse_cast();
+}
+
+std::unique_ptr<Expr> Parser::parse_cast()
+{
+    auto expression = parse_call();
+    while (match({TokenType::As})) {
+        auto target_type = parse_type_reference("expected target type after 'as'");
+        expression = std::make_unique<CastExpr>(
+            std::move(expression), std::move(target_type));
+    }
+    return expression;
 }
 
 std::unique_ptr<Expr> Parser::parse_call()

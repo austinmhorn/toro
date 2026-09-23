@@ -32,6 +32,7 @@ enum class TokenType {
     Override,
     Abstract,
     Implements,
+    Overload,
     True,
     False,
     Null,
@@ -104,6 +105,7 @@ struct Token {
     case TokenType::Override: return "Override";
     case TokenType::Abstract: return "Abstract";
     case TokenType::Implements: return "Implements";
+    case TokenType::Overload: return "Overload";
     case TokenType::True: return "True";
     case TokenType::False: return "False";
     case TokenType::Null: return "Null";

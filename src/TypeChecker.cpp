@@ -52,6 +52,18 @@ bool is_assignable(const Type& expected, const Type& actual)
     return expected.kind == actual.kind;
 }
 
+bool has_same_base_type(const Type& left, const Type& right)
+{
+    if (is_unknown(left) || is_unknown(right)) {
+        if (is_unknown(left) && is_unknown(right)) {
+            return left.name.empty() || right.name.empty() || left.name == right.name;
+        }
+        const Type& unknown = is_unknown(left) ? left : right;
+        return unknown.name.empty();
+    }
+    return left.kind == right.kind;
+}
+
 std::string format_type_reference(const TypeReference& reference)
 {
     std::string result = reference.name;
@@ -116,16 +128,32 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
         }
 
         switch (statement->kind) {
-        case StmtKind::StructDeclaration:
-            declare_value(static_cast<const StructDeclarationStmt&>(*statement).name,
-                Type{TypeKind::Unknown, false, false,
-                    static_cast<const StructDeclarationStmt&>(*statement).name});
+        case StmtKind::StructDeclaration: {
+            const auto& declaration = static_cast<const StructDeclarationStmt&>(*statement);
+            declare_value(declaration.name,
+                Type{TypeKind::Unknown, false, false, declaration.name});
+            push_generic_parameters(declaration.generic_parameters);
+            for (const auto& conversion : declaration.conversions) {
+                declare_conversion(declaration.name, resolve_type(conversion->target_type));
+            }
+            pop_generic_parameters();
             break;
-        case StmtKind::ClassDeclaration:
-            declare_value(static_cast<const ClassDeclarationStmt&>(*statement).name,
-                Type{TypeKind::Unknown, false, false,
-                    static_cast<const ClassDeclarationStmt&>(*statement).name});
+        }
+        case StmtKind::ClassDeclaration: {
+            const auto& declaration = static_cast<const ClassDeclarationStmt&>(*statement);
+            declare_value(declaration.name,
+                Type{TypeKind::Unknown, false, false, declaration.name});
+            push_generic_parameters(declaration.generic_parameters);
+            for (const auto& member : declaration.members) {
+                if (member->kind == ClassMemberKind::Conversion) {
+                    const auto& conversion = static_cast<const ConversionOverload&>(*member);
+                    declare_conversion(
+                        declaration.name, resolve_type(conversion.target_type));
+                }
+            }
+            pop_generic_parameters();
             break;
+        }
         case StmtKind::InterfaceDeclaration:
             declare_value(static_cast<const InterfaceDeclarationStmt&>(*statement).name,
                 Type{TypeKind::Unknown, false, false,
@@ -274,6 +302,10 @@ void TypeChecker::check_statement(const Stmt& statement)
                 require_assignable(declared, actual, field.location);
             }
         }
+        const Type source_type{TypeKind::Unknown, false, false, declaration.name};
+        for (const auto& conversion : declaration.conversions) {
+            check_conversion(*conversion, source_type);
+        }
         pop_generic_parameters();
         return;
     }
@@ -291,8 +323,12 @@ void TypeChecker::check_statement(const Stmt& statement)
                         check_expression(*field.default_value), field.location);
                     require_assignable(declared, actual, field.location);
                 }
-            } else {
+            } else if (member->kind == ClassMemberKind::Method) {
                 check_method(static_cast<const MethodDeclaration&>(*member));
+            } else {
+                check_conversion(
+                    static_cast<const ConversionOverload&>(*member),
+                    Type{TypeKind::Unknown, false, false, declaration.name});
             }
         }
         pop_generic_parameters();
@@ -350,6 +386,8 @@ Type TypeChecker::check_expression(const Expr& expression)
         static_cast<void>(require_value(check_expression(*member.object), current_location_));
         return Type{TypeKind::Unknown, false, true};
     }
+    case ExprKind::Cast:
+        return check_cast(static_cast<const CastExpr&>(expression));
     case ExprKind::Grouping:
         return check_expression(*static_cast<const GroupingExpr&>(expression).expression);
     }
@@ -564,6 +602,54 @@ Type TypeChecker::check_binary(const BinaryExpr& binary)
     }
 }
 
+Type TypeChecker::check_cast(const CastExpr& cast)
+{
+    const SourceLocation location = cast.target_type.location;
+    const Type source = require_value(check_expression(*cast.expression), location);
+    const Type target = resolve_type(cast.target_type);
+    reject_standalone_null_type(target, location);
+
+    if (source.kind == TypeKind::Null) {
+        if (target.nullable) {
+            return target;
+        }
+        throw_type_error(location, "null cannot be cast to non-null type '"
+            + type_name(target) + "'");
+    }
+    if (source.nullable && !target.nullable) {
+        throw_type_error(
+            location,
+            "cast from nullable type '" + type_name(source) + "' to non-null type '"
+                + type_name(target) + "' does not unwrap the value");
+    }
+    if (has_same_base_type(source, target)) {
+        return target;
+    }
+    if (source.nullable) {
+        throw_type_error(
+            location,
+            "nullable type '" + type_name(source)
+                + "' cannot use a conversion overload");
+    }
+    const bool source_is_numeric = source.kind == TypeKind::Int
+        || source.kind == TypeKind::Dec;
+    const bool target_is_numeric = target.kind == TypeKind::Int
+        || target.kind == TypeKind::Dec;
+    if (source_is_numeric && target_is_numeric) {
+        return target;
+    }
+    if (source.deferred || target.deferred) {
+        return target;
+    }
+    if (find_conversion(source, target)) {
+        return target;
+    }
+
+    throw_type_error(
+        location,
+        "no conversion from '" + type_name(source) + "' to '" + type_name(target) + "'");
+}
+
 void TypeChecker::check_function(const FunctionDeclarationStmt& function)
 {
     const auto enclosing_return_type = current_return_type_;
@@ -607,6 +693,21 @@ void TypeChecker::check_method(const MethodDeclaration& method)
     }
     pop_scope();
     pop_generic_parameters();
+    current_return_type_ = enclosing_return_type;
+}
+
+void TypeChecker::check_conversion(
+    const ConversionOverload& conversion,
+    const Type& source_type)
+{
+    const auto enclosing_return_type = current_return_type_;
+    current_return_type_ = resolve_type(conversion.target_type);
+    reject_standalone_null_type(*current_return_type_, conversion.target_type.location);
+
+    push_scope();
+    declare_value("self", source_type);
+    check_statement_list(conversion.body->statements);
+    pop_scope();
     current_return_type_ = enclosing_return_type;
 }
 
@@ -742,6 +843,13 @@ void TypeChecker::declare_value(const std::string& name, Type type)
     scopes_.back().values.emplace(name, type);
 }
 
+void TypeChecker::declare_conversion(
+    const std::string& source_name,
+    const Type& target_type)
+{
+    scopes_.back().conversions[source_name].insert(type_name(target_type));
+}
+
 std::optional<Type> TypeChecker::find_value(const std::string& name) const
 {
     for (auto scope = scopes_.rbegin(); scope != scopes_.rend(); ++scope) {
@@ -768,6 +876,25 @@ const TypeChecker::FunctionSignature* TypeChecker::find_function(
         }
     }
     return nullptr;
+}
+
+bool TypeChecker::find_conversion(
+    const Type& source_type,
+    const Type& target_type) const
+{
+    if (source_type.name.empty()) {
+        return false;
+    }
+    for (auto scope = scopes_.rbegin(); scope != scopes_.rend(); ++scope) {
+        const auto source = scope->conversions.find(source_type.name);
+        if (source != scope->conversions.end()) {
+            return source->second.contains(type_name(target_type));
+        }
+        if (scope->values.contains(source_type.name)) {
+            return false;
+        }
+    }
+    return false;
 }
 
 } // namespace toro

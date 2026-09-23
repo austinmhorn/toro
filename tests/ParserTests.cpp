@@ -1208,6 +1208,57 @@ void test_nullable_type_references()
         "    List<User>?\n");
 }
 
+void test_cast_expressions()
+{
+    expect_dump(
+        "x as int + 1",
+        "Binary(+)\n"
+        "  Cast(int)\n"
+        "    Identifier(x)\n"
+        "  Integer(1)\n");
+    expect_dump(
+        "print(10 as dec)",
+        "Call\n"
+        "  Identifier(print)\n"
+        "  Cast(dec)\n"
+        "    Integer(10)\n");
+    expect_dump(
+        "value as int as dec",
+        "Cast(dec)\n"
+        "  Cast(int)\n"
+        "    Identifier(value)\n");
+}
+
+void test_conversion_overloads()
+{
+    expect_program_dump(
+        "class Player {\n"
+        "    name: string\n"
+        "    overload as string {\n"
+        "        return self.name\n"
+        "    }\n"
+        "}\n"
+        "struct Number {\n"
+        "    value: int\n"
+        "    overload as string { return \"number\" }\n"
+        "}\n",
+        "ClassDeclaration(Player)\n"
+        "  private Field(name: string)\n"
+        "  Conversion(as string)\n"
+        "    Block\n"
+        "      Return\n"
+        "        MemberAccess\n"
+        "          Identifier(self)\n"
+        "          name\n"
+        "\n"
+        "StructDeclaration(Number)\n"
+        "  Field(value: int)\n"
+        "  Conversion(as string)\n"
+        "    Block\n"
+        "      Return\n"
+        "        String(number)\n");
+}
+
 void test_explicit_generic_calls()
 {
     expect_program_dump(
@@ -1556,6 +1607,34 @@ void test_generic_failures()
         "expected '>' after generic type arguments");
 }
 
+void test_conversion_failures()
+{
+    expect_program_error(
+        "class Value {\n"
+        "    overload as string { return \"one\" }\n"
+        "    overload as string { return \"two\" }\n"
+        "}\n",
+        "duplicate conversion overload target");
+    expect_program_error(
+        "struct Value {\n"
+        "    overload as int { return 1 }\n"
+        "    overload as int { return 2 }\n"
+        "}\n",
+        "duplicate conversion overload target");
+    expect_program_error(
+        "class Value { overload string { return \"value\" } }\n",
+        "expected 'as' after 'overload'");
+    expect_program_error(
+        "class Value { overload as string() { return \"value\" } }\n",
+        "conversion overloads cannot declare parameters");
+    expect_program_error(
+        "class Value { overload as string -> string { return \"value\" } }\n",
+        "conversion overloads cannot declare a return type");
+    expect_program_error(
+        "class Value { public overload as string { return \"value\" } }\n",
+        "conversion overload syntax is exactly 'overload as Type'");
+}
+
 } // namespace
 
 int main()
@@ -1617,6 +1696,8 @@ int main()
         test_generic_struct_class_and_interface();
         test_generic_type_references();
         test_nullable_type_references();
+        test_cast_expressions();
+        test_conversion_overloads();
         test_explicit_generic_calls();
         test_generic_call_comparison_disambiguation();
         test_failures();
@@ -1632,6 +1713,7 @@ int main()
         test_destroy_failures();
         test_inheritance_and_interface_failures();
         test_generic_failures();
+        test_conversion_failures();
     } catch (const std::exception& error) {
         std::cerr << "parser test failure: " << error.what() << '\n';
         return 1;

@@ -39,6 +39,7 @@ private:
     void analyze_expression(const Expr& expression);
     void analyze_function(const FunctionDeclarationStmt& function);
     void analyze_method(const MethodDeclaration& method);
+    void analyze_conversion(const ConversionOverload& conversion);
     void analyze_block(const BlockStmt& block);
 
     void push_scope();

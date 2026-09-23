@@ -29,6 +29,7 @@ private:
     struct Scope {
         std::unordered_map<std::string, Type> values;
         std::unordered_map<std::string, FunctionSignature> functions;
+        std::unordered_map<std::string, std::unordered_set<std::string>> conversions;
     };
 
     void check_statement_list(const std::vector<std::unique_ptr<Stmt>>& statements);
@@ -37,8 +38,10 @@ private:
     [[nodiscard]] Type check_expression(const Expr& expression);
     [[nodiscard]] Type check_call(const CallExpr& call);
     [[nodiscard]] Type check_binary(const BinaryExpr& binary);
+    [[nodiscard]] Type check_cast(const CastExpr& cast);
     void check_function(const FunctionDeclarationStmt& function);
     void check_method(const MethodDeclaration& method);
+    void check_conversion(const ConversionOverload& conversion, const Type& source_type);
     void check_block(const BlockStmt& block);
 
     [[nodiscard]] Type resolve_type(const TypeReference& reference) const;
@@ -53,8 +56,12 @@ private:
     void push_generic_parameters(const std::vector<GenericParameter>& parameters);
     void pop_generic_parameters();
     void declare_value(const std::string& name, Type type);
+    void declare_conversion(const std::string& source_name, const Type& target_type);
     [[nodiscard]] std::optional<Type> find_value(const std::string& name) const;
     [[nodiscard]] const FunctionSignature* find_function(const std::string& name) const;
+    [[nodiscard]] bool find_conversion(
+        const Type& source_type,
+        const Type& target_type) const;
 
     std::vector<Scope> scopes_;
     std::vector<std::unordered_set<std::string>> generic_parameter_scopes_;

@@ -198,7 +198,7 @@ their corresponding scope.
 
 Functions and declared types are registered as symbols, and `print` is a
 predefined symbol. `self` is available only in class methods. The current pass
-does not perform member lookup, overload resolution, interface conformance,
+does not perform member lookup, function overload resolution, interface conformance,
 inheritance validation, or generic constraint validation.
 
 ### Primitive type checking
@@ -241,3 +241,35 @@ if user != null {
 ```
 
 Flow-sensitive narrowing and null-safe member access are not implemented yet.
+
+### Explicit casts and conversions
+
+The `as` operator performs explicit conversions and binds more tightly than
+arithmetic operators:
+
+```toro
+decimal := 10 as dec
+integer := 19.9 as int
+result := integer as dec + 1.0
+```
+
+`int` and `dec` may be converted in either direction, but are never converted
+implicitly. Once execution is implemented, `dec as int` will truncate toward
+zero. Same-type casts are valid. A nullable `T?` cast to `T` does not unwrap the
+value and is rejected.
+
+Classes and structs may define one explicit conversion per target type:
+
+```toro
+class Player {
+    name: string
+
+    overload as string {
+        return self.name
+    }
+}
+```
+
+The conversion runs only when requested with `player as string`; assignments,
+arguments, and `print(player)` do not invoke it implicitly. General operator
+overloads and code generation for conversions are not implemented yet.
