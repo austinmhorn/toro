@@ -124,8 +124,10 @@ conversions and user-defined class or struct conversions. Generic function calls
 infer type arguments, accept validated explicit type arguments, substitute return
 types, and enforce interface constraints. Inference recursively matches nested
 types such as `List<T>` and `Map<string, List<T>>`.
-Enum construction and exhaustive `handle` checking are also part of this pass;
-`Result<T, E>` receives minimal enum-like `ok(T)` and `err(E)` handling support.
+Enum construction and exhaustive `handle` checking are also part of this pass.
+`ok(value)` and `error(value)` construct an expected `Result<T, E>`, while
+postfix `?` extracts the success type and propagates a compatible error from a
+function returning `Result`.
 
 ## Logical operators
 

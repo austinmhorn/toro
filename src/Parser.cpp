@@ -122,6 +122,12 @@ void append_dump(const Expr& expression, std::size_t depth, std::string& output)
         output += std::string((depth + 1) * 2, ' ') + member.member + "\n";
         return;
     }
+    case ExprKind::Propagation: {
+        const auto& propagation = static_cast<const PropagationExpr&>(expression);
+        output += "Propagation(?)\n";
+        append_dump(*propagation.expression, depth + 1, output);
+        return;
+    }
     case ExprKind::Cast: {
         const auto& cast = static_cast<const CastExpr&>(expression);
         output += "Cast(" + format_type(cast.target_type) + ")\n";
@@ -1368,6 +1374,9 @@ std::unique_ptr<Expr> Parser::parse_call()
                 TokenType::Identifier, "expected member name after '.'");
             expression = std::make_unique<MemberAccessExpr>(
                 std::move(expression), member.lexeme);
+        } else if (match({TokenType::Question})) {
+            expression = std::make_unique<PropagationExpr>(
+                std::move(expression), previous());
         } else {
             break;
         }

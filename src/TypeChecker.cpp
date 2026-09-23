@@ -547,14 +547,17 @@ void TypeChecker::check_statement(const Stmt& statement)
     switch (statement.kind) {
     case StmtKind::VariableDeclaration: {
         const auto& declaration = static_cast<const VariableDeclarationStmt&>(statement);
-        const Type initializer = require_value(
-            check_expression(*declaration.initializer), declaration.location);
         if (declaration.explicit_type) {
             const Type declared = resolve_type(*declaration.explicit_type);
             reject_standalone_null_type(declared, declaration.explicit_type->location);
+            const Type initializer = require_value(
+                check_expression(*declaration.initializer, declared),
+                declaration.location);
             require_assignable(declared, initializer, declaration.location);
             declare_value(declaration.name, declared);
         } else {
+            const Type initializer = require_value(
+                check_expression(*declaration.initializer), declaration.location);
             if (initializer.kind == TypeKind::Null) {
                 throw_type_error(
                     declaration.location,
@@ -568,7 +571,7 @@ void TypeChecker::check_statement(const Stmt& statement)
         const auto& assignment = static_cast<const AssignmentStmt&>(statement);
         const auto expected = find_value(assignment.name);
         const Type actual = require_value(
-            check_expression(*assignment.value), assignment.location);
+            check_expression(*assignment.value, expected), assignment.location);
         if (expected) {
             require_assignable(*expected, actual, assignment.location);
         }
@@ -578,7 +581,7 @@ void TypeChecker::check_statement(const Stmt& statement)
         const auto& assignment = static_cast<const MemberAssignmentStmt&>(statement);
         const Type expected = check_member_access(*assignment.target);
         const Type value = require_value(
-            check_expression(*assignment.value), assignment.location);
+            check_expression(*assignment.value, expected), assignment.location);
         require_assignable(expected, value, assignment.location);
         return;
     }
@@ -608,7 +611,8 @@ void TypeChecker::check_statement(const Stmt& statement)
                 statement.location, "a function without a return type cannot return a value");
         }
         const Type actual = require_value(
-            check_expression(*return_statement.value), statement.location);
+            check_expression(*return_statement.value, *current_return_type_),
+            statement.location);
         require_assignable(*current_return_type_, actual, statement.location);
         return;
     }
@@ -658,9 +662,9 @@ void TypeChecker::check_statement(const Stmt& statement)
                     variants.emplace(name, variant.payload_type);
                 }
             } else if (handled.name == "Result" && handled.arguments.size() == 2) {
-                variant_order = {"ok", "err"};
+                variant_order = {"ok", "error"};
                 variants.emplace("ok", handled.arguments[0]);
-                variants.emplace("err", handled.arguments[1]);
+                variants.emplace("error", handled.arguments[1]);
             }
         }
         if (variants.empty()) {
@@ -728,7 +732,7 @@ void TypeChecker::check_statement(const Stmt& statement)
             if (field.default_value) {
                 current_location_ = field.location;
                 const Type actual = require_value(
-                    check_expression(*field.default_value), field.location);
+                    check_expression(*field.default_value, declared), field.location);
                 require_assignable(declared, actual, field.location);
             }
         }
@@ -753,7 +757,7 @@ void TypeChecker::check_statement(const Stmt& statement)
                 reject_standalone_null_type(declared, field.type.location);
                 if (field.default_value) {
                     const Type actual = require_value(
-                        check_expression(*field.default_value), field.location);
+                        check_expression(*field.default_value, declared), field.location);
                     require_assignable(declared, actual, field.location);
                 }
             } else if (member->kind == ClassMemberKind::Method) {
@@ -772,7 +776,9 @@ void TypeChecker::check_statement(const Stmt& statement)
     }
 }
 
-Type TypeChecker::check_expression(const Expr& expression)
+Type TypeChecker::check_expression(
+    const Expr& expression,
+    std::optional<Type> expected_type)
 {
     switch (expression.kind) {
     case ExprKind::Integer:
@@ -821,21 +827,42 @@ Type TypeChecker::check_expression(const Expr& expression)
     case ExprKind::Binary:
         return check_binary(static_cast<const BinaryExpr&>(expression));
     case ExprKind::Call:
-        return check_call(static_cast<const CallExpr&>(expression));
+        return check_call(static_cast<const CallExpr&>(expression), expected_type);
     case ExprKind::MemberAccess: {
         const auto& member = static_cast<const MemberAccessExpr&>(expression);
         return check_member_access(member);
     }
+    case ExprKind::Propagation:
+        return check_propagation(static_cast<const PropagationExpr&>(expression));
     case ExprKind::Cast:
         return check_cast(static_cast<const CastExpr&>(expression));
     case ExprKind::Grouping:
-        return check_expression(*static_cast<const GroupingExpr&>(expression).expression);
+        return check_expression(
+            *static_cast<const GroupingExpr&>(expression).expression,
+            std::move(expected_type));
     }
     return unknown_type;
 }
 
-Type TypeChecker::check_call(const CallExpr& call)
+Type TypeChecker::check_call(
+    const CallExpr& call,
+    std::optional<Type> expected_type)
 {
+    if (call.callee->kind == ExprKind::Identifier) {
+        const auto& callee = static_cast<const IdentifierExpr&>(*call.callee);
+        if (callee.name == "ok" || callee.name == "error") {
+            if (!expected_type
+                || expected_type->name != "Result"
+                || expected_type->arguments.size() != 2) {
+                throw_type_error(
+                    current_location_, "cannot infer '" + callee.name
+                        + "' without an expected Result<T, E> type");
+            }
+            return check_result_construction(
+                callee.name, call, *expected_type);
+        }
+    }
+
     std::vector<Type> arguments;
     arguments.reserve(call.arguments.size());
     for (const auto& argument : call.arguments) {
@@ -906,6 +933,65 @@ Type TypeChecker::check_call(const CallExpr& call)
         }
     }
     return unknown_type;
+}
+
+Type TypeChecker::check_result_construction(
+    const std::string& constructor_name,
+    const CallExpr& call,
+    const Type& expected_type)
+{
+    if (!call.generic_arguments.empty()) {
+        throw_type_error(
+            current_location_, "Result constructor '" + constructor_name
+                + "' does not accept explicit generic arguments");
+    }
+    if (call.arguments.size() != 1) {
+        throw_type_error(
+            current_location_, "Result constructor '" + constructor_name
+                + "' expects 1 argument, got "
+                + std::to_string(call.arguments.size()));
+    }
+    const std::size_t payload_index = constructor_name == "ok" ? 0U : 1U;
+    const Type& payload_type = expected_type.arguments[payload_index];
+    const Type payload = require_value(
+        check_expression(*call.arguments.front().value, payload_type),
+        current_location_);
+    require_assignable(payload_type, payload, current_location_);
+    return Type{
+        TypeKind::Unknown,
+        false,
+        false,
+        "Result",
+        expected_type.arguments,
+    };
+}
+
+Type TypeChecker::check_propagation(const PropagationExpr& propagation)
+{
+    const SourceLocation location = token_location(propagation.question_token);
+    const Type result = require_value(
+        check_expression(*propagation.expression), location);
+    if (result.nullable || result.name != "Result" || result.arguments.size() != 2) {
+        throw_type_error(
+            location, "operator '?' requires Result<T, E>, got '"
+                + type_name(result) + "'");
+    }
+    if (!current_return_type_
+        || current_return_type_->nullable
+        || current_return_type_->name != "Result"
+        || current_return_type_->arguments.size() != 2) {
+        throw_type_error(
+            location, "operator '?' is only valid inside a function returning Result<T, E>");
+    }
+    const Type& propagated_error = result.arguments[1];
+    const Type& return_error = current_return_type_->arguments[1];
+    if (!is_assignable(return_error, propagated_error)) {
+        throw_type_error(
+            location, "cannot propagate Result error type '"
+                + type_name(propagated_error) + "' from a function returning error type '"
+                + type_name(return_error) + "'");
+    }
+    return result.arguments[0];
 }
 
 Type TypeChecker::check_construction(

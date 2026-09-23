@@ -89,8 +89,17 @@ private:
     void validate_class(const std::string& name, const NominalTypeInfo& type_info) const;
     void validate_interfaces(const std::string& name, const NominalTypeInfo& type_info) const;
     void check_statement(const Stmt& statement);
-    [[nodiscard]] Type check_expression(const Expr& expression);
-    [[nodiscard]] Type check_call(const CallExpr& call);
+    [[nodiscard]] Type check_expression(
+        const Expr& expression,
+        std::optional<Type> expected_type = std::nullopt);
+    [[nodiscard]] Type check_call(
+        const CallExpr& call,
+        std::optional<Type> expected_type);
+    [[nodiscard]] Type check_result_construction(
+        const std::string& constructor_name,
+        const CallExpr& call,
+        const Type& expected_type);
+    [[nodiscard]] Type check_propagation(const PropagationExpr& propagation);
     [[nodiscard]] Type check_construction(
         const std::string& name,
         const CallExpr& call,

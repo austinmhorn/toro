@@ -133,8 +133,8 @@ handle load_user(42) {
         print(user.name)
     }
 
-    err(error) {
-        print(error)
+    error(problem) {
+        print(problem)
     }
 }
 ```

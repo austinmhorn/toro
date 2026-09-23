@@ -1179,7 +1179,7 @@ void test_nested_handle_and_result()
         "        ok(number) {\n"
         "            copy: int = number\n"
         "        }\n"
-        "        err(error) {\n"
+        "        error(error) {\n"
         "            message: string = error\n"
         "        }\n"
         "    }\n"
@@ -1192,7 +1192,99 @@ void test_nested_handle_and_result()
         "        ok(number) {}\n"
         "    }\n"
         "}\n",
-        "missing variants: err");
+        "missing variants: error");
+}
+
+void test_result_construction()
+{
+    expect_valid(
+        "result: Result<int, string> = ok(10)\n"
+        "failure: Result<int, string> = error(\"bad\")\n");
+    expect_valid(
+        "function parse_age(text: string) -> Result<int, string> {\n"
+        "    if text == \"\" {\n"
+        "        return error(\"empty input\")\n"
+        "    }\n"
+        "    return ok(28)\n"
+        "}\n");
+    expect_error(
+        "result: Result<int, string> = ok(\"wrong\")\n",
+        "cannot assign value of type 'string' to type 'int'");
+    expect_error(
+        "result: Result<int, string> = error(10)\n",
+        "cannot assign value of type 'int' to type 'string'");
+    expect_error(
+        "result: Result<int, string> = ok()\n",
+        "Result constructor 'ok' expects 1 argument, got 0");
+    expect_error(
+        "result: Result<int, string> = error(\"first\", \"second\")\n",
+        "Result constructor 'error' expects 1 argument, got 2");
+    expect_error(
+        "result := ok(10)\n",
+        "cannot infer 'ok' without an expected Result<T, E> type");
+    expect_error(
+        "failure := error(\"bad\")\n",
+        "cannot infer 'error' without an expected Result<T, E> type");
+}
+
+void test_result_propagation()
+{
+    expect_valid(
+        "function operation() -> Result<int, string> {\n"
+        "    return ok(10)\n"
+        "}\n"
+        "function execute() -> Result<int, string> {\n"
+        "    value: int = operation()?\n"
+        "    return ok(value)\n"
+        "}\n");
+    expect_error(
+        "function execute() -> Result<int, string> {\n"
+        "    value := 10?\n"
+        "    return ok(value)\n"
+        "}\n",
+        "operator '?' requires Result<T, E>, got 'int'");
+    expect_error(
+        "function execute(value: int?) -> Result<int, string> {\n"
+        "    number := value?\n"
+        "    return ok(number)\n"
+        "}\n",
+        "operator '?' requires Result<T, E>, got 'int?'");
+    expect_error(
+        "function operation() -> Result<int, string> {}\n"
+        "value := operation()?\n",
+        "operator '?' is only valid inside a function returning Result<T, E>");
+    expect_error(
+        "function operation() -> Result<int, string> {}\n"
+        "function execute() -> int {\n"
+        "    return operation()?\n"
+        "}\n",
+        "operator '?' is only valid inside a function returning Result<T, E>");
+    expect_valid(
+        "class Problem {}\n"
+        "class SpecificProblem : Problem {}\n"
+        "function operation() -> Result<int, SpecificProblem> {}\n"
+        "function execute() -> Result<int, Problem> {\n"
+        "    value := operation()?\n"
+        "    return ok(value)\n"
+        "}\n");
+    expect_error(
+        "function operation() -> Result<int, string> {}\n"
+        "function execute() -> Result<int, bool> {\n"
+        "    value := operation()?\n"
+        "    return ok(value)\n"
+        "}\n",
+        "cannot propagate Result error type 'string' from a function returning error type 'bool'");
+    expect_valid(
+        "class User {\n"
+        "    public function get_name() -> string { return \"toro\" }\n"
+        "}\n"
+        "function load_user() -> Result<User, string> {\n"
+        "    return ok(User())\n"
+        "}\n"
+        "function load_name() -> Result<string, string> {\n"
+        "    name: string = load_user()?.get_name()\n"
+        "    return ok(name)\n"
+        "}\n");
 }
 
 void test_existing_language_features_remain_checkable()
@@ -1265,6 +1357,8 @@ int main()
         test_enum_identity();
         test_typed_handle();
         test_nested_handle_and_result();
+        test_result_construction();
+        test_result_propagation();
         test_existing_language_features_remain_checkable();
     } catch (const std::exception& error) {
         std::cerr << "type checker test failure: " << error.what() << '\n';

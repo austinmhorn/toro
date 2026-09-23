@@ -59,6 +59,23 @@ void test_unary_minus()
     expect_dump("-10", "Unary(-)\n  Integer(10)\n");
 }
 
+void test_result_propagation()
+{
+    expect_dump(
+        "operation()?",
+        "Propagation(?)\n"
+        "  Call\n"
+        "    Identifier(operation)\n");
+    expect_dump(
+        "load_user()?.get_name()",
+        "Call\n"
+        "  MemberAccess\n"
+        "    Propagation(?)\n"
+        "      Call\n"
+        "        Identifier(load_user)\n"
+        "    get_name\n");
+}
+
 void test_multiplication_before_addition()
 {
     expect_dump(
@@ -1642,6 +1659,7 @@ int main()
     try {
         test_literals_and_identifier();
         test_unary_minus();
+        test_result_propagation();
         test_multiplication_before_addition();
         test_parentheses_override_precedence();
         test_comparison_precedence();

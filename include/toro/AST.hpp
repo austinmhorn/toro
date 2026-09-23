@@ -40,6 +40,7 @@ enum class ExprKind {
     Binary,
     Call,
     MemberAccess,
+    Propagation,
     Cast,
     Grouping,
 };
@@ -173,6 +174,18 @@ struct MemberAccessExpr final : Expr {
 
     std::unique_ptr<Expr> object;
     std::string member;
+};
+
+struct PropagationExpr final : Expr {
+    PropagationExpr(std::unique_ptr<Expr> expression, Token question_token)
+        : Expr(ExprKind::Propagation)
+        , expression(std::move(expression))
+        , question_token(std::move(question_token))
+    {
+    }
+
+    std::unique_ptr<Expr> expression;
+    Token question_token;
 };
 
 struct CastExpr final : Expr {

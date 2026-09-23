@@ -97,9 +97,30 @@ enum and cannot repeat. Payload variants require a binding, payload-free variant
 forbid one, and each binding is scoped and typed within its case block. Every
 variant must be covered because wildcard/default cases are not defined yet.
 
-As preparation for the future standard result type, the checker recognizes
-`Result<T, E>` as enum-like when handled, with `ok(T)` and `err(E)` cases. Result
-construction, `?` propagation, and runtime representation remain deferred.
+`Result<T, E>` is enum-like, with `ok(T)` and `error(E)` cases. Its constructors
+infer their payload types from an expected result type:
+
+```toro
+result: Result<int, string> = ok(10)
+failure: Result<int, string> = error("bad")
+```
+
+A bare `ok(...)` or `error(...)` without an expected `Result<T, E>` type is
+rejected. A `handle` over a result must exhaustively cover `ok` and `error`, with
+bindings typed as `T` and `E` respectively.
+
+Postfix `?` extracts `T` from a `Result<T, E>` expression. It is valid only in a
+function returning another `Result` whose error type can accept `E`:
+
+```toro
+function checked_age() -> Result<int, string> {
+    age := parse_age("28")?
+    return ok(age)
+}
+```
+
+Propagation does not unwrap nullable types and performs no automatic error
+conversion. Runtime representation and code generation remain deferred.
 
 ### Structs and members
 

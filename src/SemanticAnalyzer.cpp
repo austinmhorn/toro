@@ -21,6 +21,8 @@ void SemanticAnalyzer::analyze(const Program& program)
     inside_class_method_ = false;
     push_scope();
     scopes_.back().emplace("print", Symbol{SymbolKind::Builtin, SourceLocation{0, 0}});
+    scopes_.back().emplace("ok", Symbol{SymbolKind::Builtin, SourceLocation{0, 0}});
+    scopes_.back().emplace("error", Symbol{SymbolKind::Builtin, SourceLocation{0, 0}});
     analyze_statement_list(program.statements);
     pop_scope();
 }
@@ -235,6 +237,9 @@ void SemanticAnalyzer::analyze_expression(const Expr& expression)
     }
     case ExprKind::MemberAccess:
         analyze_expression(*static_cast<const MemberAccessExpr&>(expression).object);
+        return;
+    case ExprKind::Propagation:
+        analyze_expression(*static_cast<const PropagationExpr&>(expression).expression);
         return;
     case ExprKind::Cast:
         analyze_expression(*static_cast<const CastExpr&>(expression).expression);
