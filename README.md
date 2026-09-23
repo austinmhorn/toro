@@ -114,7 +114,9 @@ specialization, runtime virtual dispatch, and flow-sensitive null narrowing are
 not implemented yet. Functions and methods may overload by parameter types and
 arity; resolution prefers exact matches over base/interface compatibility and
 reports missing or ambiguous matches. Explicit `as` casts support numeric
-conversions and user-defined class or struct conversions.
+conversions and user-defined class or struct conversions. Generic function calls
+infer type arguments, accept validated explicit type arguments, substitute return
+types, and enforce interface constraints.
 
 ## Logical operators
 

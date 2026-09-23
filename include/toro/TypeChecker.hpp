@@ -19,13 +19,20 @@ private:
     struct FunctionParameterType {
         std::string name;
         Type type;
+        TypeReference type_reference;
     };
 
     struct FunctionSignature {
         std::vector<FunctionParameterType> parameters;
         Type return_type;
-        bool is_generic;
+        std::optional<TypeReference> return_type_reference;
+        std::vector<GenericParameter> generic_parameters;
         SourceLocation location;
+    };
+
+    struct OverloadResolution {
+        const FunctionSignature* signature;
+        Type return_type;
     };
 
     struct FieldInfo {
@@ -82,16 +89,20 @@ private:
         const MemberAccessExpr& callee,
         const CallExpr& call,
         const std::vector<Type>& arguments);
-    [[nodiscard]] const FunctionSignature& resolve_overload(
+    [[nodiscard]] OverloadResolution resolve_overload(
         const std::string& callable_kind,
         const std::string& callable_name,
         const std::vector<CallArgument>& call_arguments,
         const std::vector<Type>& arguments,
+        const std::vector<TypeReference>& generic_arguments,
         const std::vector<const FunctionSignature*>& candidates) const;
     [[nodiscard]] std::optional<int> overload_score(
         const std::vector<CallArgument>& call_arguments,
         const std::vector<Type>& arguments,
-        const FunctionSignature& signature) const;
+        const std::vector<TypeReference>& generic_arguments,
+        const FunctionSignature& signature,
+        Type& return_type,
+        std::string& failure_reason) const;
     [[nodiscard]] Type check_member_access(const MemberAccessExpr& member);
     [[nodiscard]] Type check_binary(const BinaryExpr& binary);
     [[nodiscard]] Type check_cast(const CastExpr& cast);
@@ -101,6 +112,9 @@ private:
     void check_block(const BlockStmt& block);
 
     [[nodiscard]] Type resolve_type(const TypeReference& reference) const;
+    [[nodiscard]] Type substitute_type(
+        const TypeReference& reference,
+        const std::unordered_map<std::string, Type>& substitutions) const;
     [[nodiscard]] bool is_generic_parameter(const std::string& name) const;
     [[nodiscard]] bool contains_generic_parameter(const TypeReference& reference) const;
     [[nodiscard]] Type require_value(Type type, SourceLocation location) const;

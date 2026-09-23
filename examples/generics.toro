@@ -6,6 +6,16 @@ interface Comparable {
     function compare(other: Comparable) -> int
 }
 
+class Value implements Serializable, Comparable {
+    public function serialize() -> string {
+        return "value"
+    }
+
+    public function compare(other: Comparable) -> int {
+        return 0
+    }
+}
+
 struct Pair<A, B> {
     first: A
     second: B
@@ -20,12 +30,11 @@ function max<T: Serializable + Comparable>(a: T, b: T) -> T {
 }
 
 function collect<T>(items: Map<string, List<T>>) -> List<T> {
-    return items
 }
 
 function main() {
     pair := Pair<int, string>(first: 1, second: "one")
-    value := max<int>(10, 20)
+    value := max<Value>(Value(), Value())
     print(pair)
     print(value)
 }

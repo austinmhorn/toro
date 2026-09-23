@@ -188,11 +188,20 @@ Type references may be nested, and calls may provide explicit type arguments:
 
 ```toro
 index: Map<string, List<User>>
-value := max<int>(10, 20)
+value := identity<int>(10)
 ```
 
-Generic inference, constraint validation, and specialization belong to later
-semantic and code-generation phases.
+Generic function calls infer type arguments from positional or named arguments.
+Repeated uses of one type parameter must infer a compatible single type, and
+inferred types are substituted into return types, including nested generic return
+types. Explicit type arguments must match the declared generic arity and replace
+inference for those parameters.
+
+Each interface constraint is checked after substitution. A concrete class or
+struct satisfies a constraint by implementing that interface. Multiple
+constraints separated by `+` must all be satisfied. Operations on an
+unconstrained type parameter are rejected when the checker cannot prove them
+valid. Generic struct/class specialization and monomorphization remain deferred.
 
 ### Name resolution
 
@@ -205,8 +214,7 @@ their corresponding scope.
 Functions and declared types are registered as symbols, and `print` is a
 predefined symbol. `self` is available in class and struct methods. The current
 passes validate inheritance, abstract methods, overrides, and interface
-conformance, and callable overloads, but do not perform generic constraint
-validation.
+conformance, callable overloads, and generic function constraints.
 
 ### Primitive type checking
 
@@ -238,9 +246,10 @@ its concrete result type and can disambiguate a call. Inherited methods join the
 derived overload set, while an identical derived signature remains subject to
 `virtual` and `override` validation.
 
-Generic candidates remain a deferred fallback beneath concrete overloads;
-generic inference and specialization are not implemented. The built-in
-`print(...)` behavior is unchanged.
+Generic candidates infer and substitute their type parameters, but remain ranked
+beneath exact concrete and compatible subtype/interface overloads. Multiple
+equally ranked generic candidates are ambiguous. Generic specialization is not
+implemented. The built-in `print(...)` behavior is unchanged.
 
 ### Construction and members
 

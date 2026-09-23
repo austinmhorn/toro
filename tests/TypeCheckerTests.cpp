@@ -742,6 +742,105 @@ void test_generic_overload_fallback()
         "fallback: string = choose<string>(\"hello\")\n");
 }
 
+void test_generic_function_inference()
+{
+    expect_valid(
+        "function identity<T>(value: T) -> T { return value }\n"
+        "integer: int = identity(10)\n"
+        "text: string = identity(\"hi\")\n");
+    expect_valid(
+        "function choose<T>(a: T, b: T) -> T { return a }\n"
+        "integer: int = choose(10, 20)\n"
+        "text: string = choose(b: \"second\", a: \"first\")\n");
+    expect_valid(
+        "function first<A, B>(a: A, b: B) -> A { return a }\n"
+        "integer: int = first(10, \"ignored\")\n"
+        "text: string = first(\"value\", false)\n");
+    expect_valid(
+        "function make_list<T>(value: T) -> List<T> {}\n"
+        "items: List<int> = make_list(10)\n");
+    expect_error(
+        "function choose<T>(a: T, b: T) -> T { return a }\n"
+        "value := choose(10, \"hello\")\n",
+        "conflicting inference for generic parameter 'T'");
+}
+
+void test_explicit_generic_arguments()
+{
+    expect_valid(
+        "function identity<T>(value: T) -> T { return value }\n"
+        "integer: int = identity<int>(10)\n"
+        "text: string = identity<string>(\"hello\")\n");
+    expect_error(
+        "function identity<T>(value: T) -> T { return value }\n"
+        "value := identity<int, string>(10)\n",
+        "expected 1 explicit generic arguments, got 2");
+    expect_error(
+        "function identity<T>(value: T) -> T { return value }\n"
+        "value := identity<int>(\"wrong\")\n",
+        "conflicting inference for generic parameter 'T'");
+    expect_error(
+        "function duplicate<T>(value: T) {}\n"
+        "function duplicate<U>(other: U) {}\n",
+        "duplicate callable signature for function 'duplicate'");
+}
+
+void test_generic_constraints()
+{
+    expect_valid(
+        "interface Comparable {}\n"
+        "class Number implements Comparable {}\n"
+        "function max<T: Comparable>(a: T, b: T) -> T { return a }\n"
+        "number: Number = max(Number(), Number())\n");
+    expect_valid(
+        "interface Serializable {}\n"
+        "interface Comparable {}\n"
+        "struct Data implements Serializable, Comparable {}\n"
+        "function process<T: Serializable + Comparable>(value: T) -> T {\n"
+        "    return value\n"
+        "}\n"
+        "data: Data = process(Data())\n");
+    expect_error(
+        "interface Comparable {}\n"
+        "class Plain {}\n"
+        "function max<T: Comparable>(value: T) -> T { return value }\n"
+        "value := max(Plain())\n",
+        "type 'Plain' does not satisfy constraint 'Comparable'");
+    expect_error(
+        "interface Serializable {}\n"
+        "interface Comparable {}\n"
+        "class Partial implements Serializable {}\n"
+        "function process<T: Serializable + Comparable>(value: T) -> T {\n"
+        "    return value\n"
+        "}\n"
+        "value := process(Partial())\n",
+        "does not satisfy constraint 'Comparable'");
+}
+
+void test_generic_overload_resolution()
+{
+    expect_valid(
+        "function inspect<T>(value: T) -> string { return \"generic\" }\n"
+        "function inspect(value: int) -> int { return value }\n"
+        "concrete: int = inspect(10)\n"
+        "fallback: string = inspect(true)\n");
+    expect_error(
+        "function select<T>(first: T, second: int) {}\n"
+        "function select<U>(first: string, second: U) {}\n"
+        "select(\"value\", 10)\n",
+        "ambiguous overload for 'select'");
+}
+
+void test_unconstrained_generic_operations()
+{
+    expect_error(
+        "function add<T>(a: T, b: T) -> T { return a + b }\n",
+        "cannot use unconstrained generic type 'T'");
+    expect_error(
+        "function negate<T>(value: T) -> T { return -value }\n",
+        "cannot use unconstrained generic type 'T'");
+}
+
 void test_existing_language_features_remain_checkable()
 {
     expect_valid(
@@ -799,6 +898,11 @@ int main()
         test_method_overloads();
         test_overload_ranking_and_inheritance();
         test_generic_overload_fallback();
+        test_generic_function_inference();
+        test_explicit_generic_arguments();
+        test_generic_constraints();
+        test_generic_overload_resolution();
+        test_unconstrained_generic_operations();
         test_existing_language_features_remain_checkable();
     } catch (const std::exception& error) {
         std::cerr << "type checker test failure: " << error.what() << '\n';
