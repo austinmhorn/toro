@@ -236,7 +236,7 @@ Native executable
 - Basic operators:
   - arithmetic: `+ - * / %`
   - comparison: `== != < <= > >=`
-  - boolean: `&& || !`
+  - logical: `and or`
 - Strings and string literals
 - Basic interpolation if implementation cost remains reasonable
 - Basic `struct`

@@ -128,6 +128,19 @@ void append_statement_dump(const Stmt& statement, std::size_t depth, std::string
         }
         return;
     }
+    case StmtKind::If: {
+        const auto& if_statement = static_cast<const IfStmt&>(statement);
+        output += indentation + "If\n";
+        output += std::string((depth + 1) * 2, ' ') + "Condition\n";
+        append_dump(*if_statement.condition, depth + 2, output);
+        output += std::string((depth + 1) * 2, ' ') + "Then\n";
+        append_statement_dump(*if_statement.then_block, depth + 2, output);
+        if (if_statement.else_branch) {
+            output += std::string((depth + 1) * 2, ' ') + "Else\n";
+            append_statement_dump(*if_statement.else_branch, depth + 2, output);
+        }
+        return;
+    }
     }
 }
 
@@ -144,7 +157,7 @@ Parser::Parser(std::vector<Token> tokens)
 std::unique_ptr<Expr> Parser::parse_expression()
 {
     statement_line_ = peek().line;
-    auto expression = parse_equality();
+    auto expression = parse_or();
     if (!at_end()) {
         throw_parse_error(peek(), "unexpected token after expression");
     }
@@ -170,6 +183,12 @@ std::unique_ptr<Stmt> Parser::parse_statement()
     if (check(TokenType::Return)) {
         return parse_return_statement();
     }
+    if (check(TokenType::If)) {
+        return parse_if_statement();
+    }
+    if (check(TokenType::Else)) {
+        throw_parse_error(peek(), "unexpected 'else' without matching 'if'");
+    }
     if (check(TokenType::LeftBrace)) {
         auto block = parse_block_statement();
         require_statement_end();
@@ -181,7 +200,7 @@ std::unique_ptr<Stmt> Parser::parse_statement()
     }
 
     const SourceLocation location{peek().line, peek().column};
-    auto expression = parse_equality();
+    auto expression = parse_or();
 
     if (match({TokenType::Assign})) {
         const Token assignment = previous();
@@ -190,7 +209,7 @@ std::unique_ptr<Stmt> Parser::parse_statement()
         }
 
         require_expression("expected assignment value");
-        auto value = parse_equality();
+        auto value = parse_or();
         require_statement_end();
 
         auto name = std::move(static_cast<IdentifierExpr&>(*expression).name);
@@ -215,7 +234,7 @@ std::unique_ptr<Stmt> Parser::parse_variable_declaration()
     }
 
     require_expression("expected variable initializer");
-    auto initializer = parse_equality();
+    auto initializer = parse_or();
     require_statement_end();
 
     return std::make_unique<VariableDeclarationStmt>(
@@ -277,12 +296,49 @@ std::unique_ptr<Stmt> Parser::parse_return_statement()
     if (!at_end()
         && peek().type != TokenType::RightBrace
         && peek().line == return_token.line) {
-        value = parse_equality();
+        value = parse_or();
     }
 
     require_statement_end();
     return std::make_unique<ReturnStmt>(
         SourceLocation{return_token.line, return_token.column}, std::move(value));
+}
+
+std::unique_ptr<Stmt> Parser::parse_if_statement()
+{
+    Token if_token = advance();
+    if (at_end()
+        || peek().line != if_token.line
+        || peek().type == TokenType::LeftBrace) {
+        throw_parse_error(peek(), "expected condition after 'if'");
+    }
+
+    auto condition = parse_or();
+    if (!check(TokenType::LeftBrace)) {
+        throw_parse_error(peek(), "expected '{' after if condition");
+    }
+    auto then_block = parse_block_statement();
+
+    std::unique_ptr<Stmt> else_branch;
+    if (!at_end() && peek().type == TokenType::Else) {
+        Token else_token = advance();
+        statement_line_ = else_token.line;
+
+        if (check(TokenType::If)) {
+            else_branch = parse_if_statement();
+        } else if (check(TokenType::LeftBrace)) {
+            else_branch = parse_block_statement();
+        } else {
+            throw_parse_error(peek(), "expected 'if' or '{' after 'else'");
+        }
+    }
+
+    require_statement_end();
+    return std::make_unique<IfStmt>(
+        SourceLocation{if_token.line, if_token.column},
+        std::move(condition),
+        std::move(then_block),
+        std::move(else_branch));
 }
 
 std::unique_ptr<BlockStmt> Parser::parse_block_statement()
@@ -303,6 +359,34 @@ std::unique_ptr<BlockStmt> Parser::parse_block_statement()
     statement_line_ = right_brace.line;
     return std::make_unique<BlockStmt>(
         SourceLocation{left_brace.line, left_brace.column}, std::move(statements));
+}
+
+std::unique_ptr<Expr> Parser::parse_or()
+{
+    auto expression = parse_and();
+
+    while (match({TokenType::Or})) {
+        Token operator_token = previous();
+        auto right = parse_and();
+        expression = std::make_unique<BinaryExpr>(
+            std::move(expression), std::move(operator_token), std::move(right));
+    }
+
+    return expression;
+}
+
+std::unique_ptr<Expr> Parser::parse_and()
+{
+    auto expression = parse_equality();
+
+    while (match({TokenType::And})) {
+        Token operator_token = previous();
+        auto right = parse_equality();
+        expression = std::make_unique<BinaryExpr>(
+            std::move(expression), std::move(operator_token), std::move(right));
+    }
+
+    return expression;
 }
 
 std::unique_ptr<Expr> Parser::parse_equality()
@@ -412,7 +496,7 @@ std::unique_ptr<Expr> Parser::parse_primary()
         return std::make_unique<IdentifierExpr>(previous().lexeme);
     }
     if (match({TokenType::LeftParen})) {
-        auto expression = parse_equality();
+        auto expression = parse_or();
         consume(TokenType::RightParen, "expected ')' after expression");
         return std::make_unique<GroupingExpr>(std::move(expression));
     }
@@ -426,7 +510,7 @@ std::unique_ptr<Expr> Parser::finish_call(std::unique_ptr<Expr> callee)
     if (!check(TokenType::RightParen)) {
         do {
             require_expression("expected call argument");
-            arguments.push_back(parse_equality());
+            arguments.push_back(parse_or());
         } while (match({TokenType::Comma}));
     }
 

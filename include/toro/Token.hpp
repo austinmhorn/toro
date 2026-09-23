@@ -34,6 +34,8 @@ enum class TokenType {
     True,
     False,
     Null,
+    And,
+    Or,
     As,
     Weak,
     Performance,
@@ -102,6 +104,8 @@ struct Token {
     case TokenType::True: return "True";
     case TokenType::False: return "False";
     case TokenType::Null: return "Null";
+    case TokenType::And: return "And";
+    case TokenType::Or: return "Or";
     case TokenType::As: return "As";
     case TokenType::Weak: return "Weak";
     case TokenType::Performance: return "Performance";

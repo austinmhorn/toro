@@ -106,6 +106,46 @@ void test_equality_precedence()
         "  Bool(true)\n");
 }
 
+void test_logical_operators()
+{
+    expect_dump(
+        "active and logged_in",
+        "Binary(and)\n"
+        "  Identifier(active)\n"
+        "  Identifier(logged_in)\n");
+    expect_dump(
+        "admin or owner",
+        "Binary(or)\n"
+        "  Identifier(admin)\n"
+        "  Identifier(owner)\n");
+}
+
+void test_logical_precedence()
+{
+    expect_dump(
+        "a == 1 or b == 2 and c == 3",
+        "Binary(or)\n"
+        "  Binary(==)\n"
+        "    Identifier(a)\n"
+        "    Integer(1)\n"
+        "  Binary(and)\n"
+        "    Binary(==)\n"
+        "      Identifier(b)\n"
+        "      Integer(2)\n"
+        "    Binary(==)\n"
+        "      Identifier(c)\n"
+        "      Integer(3)\n");
+    expect_dump(
+        "a > 1 and b <= 2",
+        "Binary(and)\n"
+        "  Binary(>)\n"
+        "    Identifier(a)\n"
+        "    Integer(1)\n"
+        "  Binary(<=)\n"
+        "    Identifier(b)\n"
+        "    Integer(2)\n");
+}
+
 void test_left_associativity()
 {
     expect_dump(
@@ -300,6 +340,135 @@ void test_standalone_block()
         "      Identifier(x)\n");
 }
 
+void test_basic_if()
+{
+    expect_program_dump(
+        "if x > 5 {\n"
+        "    print(\"large\")\n"
+        "}\n",
+        "If\n"
+        "  Condition\n"
+        "    Binary(>)\n"
+        "      Identifier(x)\n"
+        "      Integer(5)\n"
+        "  Then\n"
+        "    Block\n"
+        "      ExpressionStatement\n"
+        "        Call\n"
+        "          Identifier(print)\n"
+        "          String(large)\n");
+
+    const auto program = parse_program("\n  if true {\n  }\n");
+    const auto& if_statement = static_cast<const toro::IfStmt&>(
+        *program.statements.front());
+    expect(if_statement.location.line == 2 && if_statement.location.column == 3,
+        "if source location was not retained");
+}
+
+void test_if_else()
+{
+    expect_program_dump(
+        "if x > 5 {\n"
+        "    print(\"large\")\n"
+        "} else {\n"
+        "    print(\"small\")\n"
+        "}\n",
+        "If\n"
+        "  Condition\n"
+        "    Binary(>)\n"
+        "      Identifier(x)\n"
+        "      Integer(5)\n"
+        "  Then\n"
+        "    Block\n"
+        "      ExpressionStatement\n"
+        "        Call\n"
+        "          Identifier(print)\n"
+        "          String(large)\n"
+        "  Else\n"
+        "    Block\n"
+        "      ExpressionStatement\n"
+        "        Call\n"
+        "          Identifier(print)\n"
+        "          String(small)\n");
+}
+
+void test_else_if_chains()
+{
+    const auto program = parse_program(
+        "if first {\n}\n"
+        "else if second {\n}\n"
+        "else if third {\n}\n"
+        "else {\n}\n");
+    const auto& first = static_cast<const toro::IfStmt&>(*program.statements.front());
+    expect(first.else_branch->kind == toro::StmtKind::If,
+        "first else-if branch was not an if statement");
+    const auto& second = static_cast<const toro::IfStmt&>(*first.else_branch);
+    expect(second.else_branch->kind == toro::StmtKind::If,
+        "second else-if branch was not an if statement");
+    const auto& third = static_cast<const toro::IfStmt&>(*second.else_branch);
+    expect(third.else_branch->kind == toro::StmtKind::Block,
+        "final else branch was not a block");
+}
+
+void test_nested_if_and_return()
+{
+    const auto program = parse_program(
+        "function check(x: int, y: int) -> int {\n"
+        "    if x > 0 {\n"
+        "        if y > 0 {\n"
+        "            return x\n"
+        "        }\n"
+        "    }\n"
+        "    return 0\n"
+        "}\n");
+    const auto& function = static_cast<const toro::FunctionDeclarationStmt&>(
+        *program.statements.front());
+    const auto& outer_if = static_cast<const toro::IfStmt&>(*function.body->statements.front());
+    expect(outer_if.then_block->statements.front()->kind == toro::StmtKind::If,
+        "nested if was not retained in the outer block");
+    const auto& inner_if = static_cast<const toro::IfStmt&>(
+        *outer_if.then_block->statements.front());
+    expect(inner_if.then_block->statements.front()->kind == toro::StmtKind::Return,
+        "return was not retained inside the nested if");
+}
+
+void test_declarations_and_assignments_in_branches()
+{
+    const auto program = parse_program(
+        "if ready {\n"
+        "    value := 1\n"
+        "} else {\n"
+        "    value = 2\n"
+        "}\n");
+    const auto& if_statement = static_cast<const toro::IfStmt&>(
+        *program.statements.front());
+    expect(if_statement.then_block->statements.front()->kind
+            == toro::StmtKind::VariableDeclaration,
+        "declaration was not retained in then branch");
+    const auto& else_block = static_cast<const toro::BlockStmt&>(
+        *if_statement.else_branch);
+    expect(else_block.statements.front()->kind == toro::StmtKind::Assignment,
+        "assignment was not retained in else branch");
+}
+
+void test_logical_operators_in_if_condition()
+{
+    const auto program = parse_program(
+        "if active and logged_in or admin {\n"
+        "    print(\"allowed\")\n"
+        "}\n");
+    const auto& if_statement = static_cast<const toro::IfStmt&>(
+        *program.statements.front());
+    expect(
+        toro::dump_expression(*if_statement.condition)
+            == "Binary(or)\n"
+               "  Binary(and)\n"
+               "    Identifier(active)\n"
+               "    Identifier(logged_in)\n"
+               "  Identifier(admin)\n",
+        "logical operators parsed incorrectly in if condition");
+}
+
 void expect_parse_error(std::string_view source, std::string_view expected_message)
 {
     try {
@@ -361,6 +530,25 @@ void test_function_failures()
         "expected expression");
 }
 
+void test_if_failures()
+{
+    expect_program_error(
+        "if {\n}\n",
+        "expected condition after 'if'");
+    expect_program_error(
+        "if x > 5\n    print(x)\n",
+        "expected '{' after if condition");
+    expect_program_error(
+        "if x > 5 {\n    print(x)\n",
+        "expected '}' after block");
+    expect_program_error(
+        "else {\n}\n",
+        "unexpected 'else' without matching 'if'");
+    expect_program_error(
+        "if first {\n}\nelse if second\n    print(second)\n",
+        "expected '{' after if condition");
+}
+
 } // namespace
 
 int main()
@@ -372,6 +560,8 @@ int main()
         test_parentheses_override_precedence();
         test_comparison_precedence();
         test_equality_precedence();
+        test_logical_operators();
+        test_logical_precedence();
         test_left_associativity();
         test_remaining_binary_operators();
         test_variable_declarations();
@@ -385,9 +575,16 @@ int main()
         test_nested_function_statements();
         test_multiple_functions();
         test_standalone_block();
+        test_basic_if();
+        test_if_else();
+        test_else_if_chains();
+        test_nested_if_and_return();
+        test_declarations_and_assignments_in_branches();
+        test_logical_operators_in_if_condition();
         test_failures();
         test_statement_failures();
         test_function_failures();
+        test_if_failures();
     } catch (const std::exception& error) {
         std::cerr << "parser test failure: " << error.what() << '\n';
         return 1;

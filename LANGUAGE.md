@@ -41,3 +41,14 @@ function main() {
         print("Hello, toro!")
     }
 }
+
+### Logical Operators
+
+toro uses the keywords `and` and `or` rather than symbolic logical operators.
+`and` has higher precedence than `or`; equality and comparison operators have
+higher precedence than both.
+
+These operators will short-circuit when execution and code generation are implemented:
+
+- `false and expression` does not evaluate `expression`.
+- `true or expression` does not evaluate `expression`.

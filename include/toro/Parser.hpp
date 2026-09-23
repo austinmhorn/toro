@@ -23,7 +23,10 @@ private:
     [[nodiscard]] std::unique_ptr<Stmt> parse_variable_declaration();
     [[nodiscard]] std::unique_ptr<Stmt> parse_function_declaration();
     [[nodiscard]] std::unique_ptr<Stmt> parse_return_statement();
+    [[nodiscard]] std::unique_ptr<Stmt> parse_if_statement();
     [[nodiscard]] std::unique_ptr<BlockStmt> parse_block_statement();
+    [[nodiscard]] std::unique_ptr<Expr> parse_or();
+    [[nodiscard]] std::unique_ptr<Expr> parse_and();
     [[nodiscard]] std::unique_ptr<Expr> parse_equality();
     [[nodiscard]] std::unique_ptr<Expr> parse_comparison();
     [[nodiscard]] std::unique_ptr<Expr> parse_term();

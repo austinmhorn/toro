@@ -1,0 +1,11 @@
+function main() {
+    x := 10
+
+    if x > 10 {
+        print("greater")
+    } else if x == 10 {
+        print("equal")
+    } else {
+        print("less")
+    }
+}

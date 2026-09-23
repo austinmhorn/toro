@@ -55,14 +55,15 @@ void test_keywords_and_identifiers()
     constexpr std::string_view source =
         "function return if else while for in stop continue handle "
         "public private class struct enum interface virtual override abstract "
-        "true false null as weak performance function_name";
+        "true false null and or as weak performance function_name";
     constexpr std::array expected{
         TokenType::Function, TokenType::Return, TokenType::If, TokenType::Else,
         TokenType::While, TokenType::For, TokenType::In, TokenType::Stop,
         TokenType::Continue, TokenType::Handle, TokenType::Public, TokenType::Private,
         TokenType::Class, TokenType::Struct, TokenType::Enum, TokenType::Interface,
         TokenType::Virtual, TokenType::Override, TokenType::Abstract, TokenType::True,
-        TokenType::False, TokenType::Null, TokenType::As, TokenType::Weak,
+        TokenType::False, TokenType::Null, TokenType::And, TokenType::Or,
+        TokenType::As, TokenType::Weak,
         TokenType::Performance, TokenType::Identifier,
     };
 

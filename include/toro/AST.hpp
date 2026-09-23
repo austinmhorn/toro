@@ -155,6 +155,7 @@ enum class StmtKind {
     FunctionDeclaration,
     Return,
     Block,
+    If,
 };
 
 struct Stmt {
@@ -258,6 +259,24 @@ struct ReturnStmt final : Stmt {
     }
 
     std::unique_ptr<Expr> value;
+};
+
+struct IfStmt final : Stmt {
+    IfStmt(
+        SourceLocation location,
+        std::unique_ptr<Expr> condition,
+        std::unique_ptr<BlockStmt> then_block,
+        std::unique_ptr<Stmt> else_branch)
+        : Stmt(StmtKind::If, location)
+        , condition(std::move(condition))
+        , then_block(std::move(then_block))
+        , else_branch(std::move(else_branch))
+    {
+    }
+
+    std::unique_ptr<Expr> condition;
+    std::unique_ptr<BlockStmt> then_block;
+    std::unique_ptr<Stmt> else_branch;
 };
 
 struct Program {
