@@ -14,3 +14,10 @@ function process(message: Message) {
         }
     }
 }
+
+function main() {
+    message := Message.text("hello")
+    quit := Message.quit
+    process(message)
+    process(quit)
+}

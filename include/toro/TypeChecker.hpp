@@ -54,7 +54,12 @@ private:
         bool is_override;
     };
 
-    enum class NominalKind { Struct, Class, Interface };
+    struct EnumVariantInfo {
+        std::optional<Type> payload_type;
+        SourceLocation location;
+    };
+
+    enum class NominalKind { Struct, Class, Interface, Enum };
 
     struct NominalTypeInfo {
         NominalKind kind;
@@ -65,6 +70,8 @@ private:
         std::vector<std::string> field_order;
         std::unordered_map<std::string, FieldInfo> fields;
         std::unordered_map<std::string, std::vector<MethodInfo>> methods;
+        std::vector<std::string> variant_order;
+        std::unordered_map<std::string, EnumVariantInfo> variants;
         SourceLocation location;
     };
 
@@ -93,6 +100,12 @@ private:
         const MemberAccessExpr& callee,
         const CallExpr& call,
         const std::vector<Type>& arguments);
+    [[nodiscard]] Type check_enum_variant_call(
+        const std::string& enum_name,
+        const std::string& variant_name,
+        const CallExpr& call,
+        const std::vector<Type>& arguments,
+        const NominalTypeInfo& type_info) const;
     [[nodiscard]] OverloadResolution resolve_overload(
         const std::string& callable_kind,
         const std::string& callable_name,

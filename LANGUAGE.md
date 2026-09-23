@@ -68,7 +68,14 @@ enum Message {
     text(string)
     quit
 }
+
+message := Message.text("hello")
+quit := Message.quit
 ```
+
+Payload-bearing variants require exactly one value of the declared type.
+Payload-free variants are values without arguments. Each constructed variant has
+the type of its containing enum, and values from different enums are distinct.
 
 The general-purpose `handle` statement matches an expression against ordered
 variant cases. A payload-bearing case may bind the payload for use in its block:
@@ -85,7 +92,14 @@ handle message {
 }
 ```
 
-Wildcard cases and exhaustiveness checking are not defined yet.
+The handled expression must have an enum type. Case names must belong to that
+enum and cannot repeat. Payload variants require a binding, payload-free variants
+forbid one, and each binding is scoped and typed within its case block. Every
+variant must be covered because wildcard/default cases are not defined yet.
+
+As preparation for the future standard result type, the checker recognizes
+`Result<T, E>` as enum-like when handled, with `ok(T)` and `err(E)` cases. Result
+construction, `?` propagation, and runtime representation remain deferred.
 
 ### Structs and members
 

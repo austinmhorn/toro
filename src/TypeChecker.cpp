@@ -345,11 +345,34 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
             pop_generic_parameters();
             break;
         }
-        case StmtKind::EnumDeclaration:
-            declare_value(static_cast<const EnumDeclarationStmt&>(*statement).name,
-                Type{TypeKind::Unknown, false, false,
-                    static_cast<const EnumDeclarationStmt&>(*statement).name});
+        case StmtKind::EnumDeclaration: {
+            const auto& declaration = static_cast<const EnumDeclarationStmt&>(*statement);
+            declare_value(declaration.name,
+                Type{TypeKind::Unknown, false, false, declaration.name});
+            NominalTypeInfo type_info;
+            type_info.kind = NominalKind::Enum;
+            type_info.location = declaration.location;
+            for (const auto& variant : declaration.variants) {
+                const auto [unused, inserted] = type_info.variants.emplace(
+                    variant.name,
+                    EnumVariantInfo{
+                        variant.payload_type
+                            ? std::optional<Type>{resolve_type(*variant.payload_type)}
+                            : std::nullopt,
+                        variant.location,
+                    });
+                static_cast<void>(unused);
+                if (!inserted) {
+                    throw_type_error(
+                        variant.location, "duplicate enum variant '"
+                            + declaration.name + "." + variant.name + "'");
+                }
+                type_info.variant_order.push_back(variant.name);
+            }
+            scopes_.back().nominal_types.emplace(
+                declaration.name, std::move(type_info));
             break;
+        }
         default:
             break;
         }
@@ -623,15 +646,76 @@ void TypeChecker::check_statement(const Stmt& statement)
         return;
     case StmtKind::Handle: {
         const auto& handle = static_cast<const HandleStmt&>(statement);
-        static_cast<void>(require_value(
-            check_expression(*handle.expression), statement.location));
+        const Type handled = require_value(
+            check_expression(*handle.expression), statement.location);
+        std::vector<std::string> variant_order;
+        std::unordered_map<std::string, std::optional<Type>> variants;
+        if (!handled.nullable && is_unknown(handled) && !handled.name.empty()) {
+            if (const auto* type_info = find_nominal_type(handled.name);
+                type_info && type_info->kind == NominalKind::Enum) {
+                variant_order = type_info->variant_order;
+                for (const auto& [name, variant] : type_info->variants) {
+                    variants.emplace(name, variant.payload_type);
+                }
+            } else if (handled.name == "Result" && handled.arguments.size() == 2) {
+                variant_order = {"ok", "err"};
+                variants.emplace("ok", handled.arguments[0]);
+                variants.emplace("err", handled.arguments[1]);
+            }
+        }
+        if (variants.empty()) {
+            throw_type_error(
+                statement.location, "handle expression must have an enum type, got '"
+                    + type_name(handled) + "'");
+        }
+
+        std::unordered_set<std::string> covered;
         for (const auto& handle_case : handle.cases) {
+            current_location_ = handle_case.location;
+            const auto variant = variants.find(handle_case.variant_name);
+            if (variant == variants.end()) {
+                throw_type_error(
+                    handle_case.location, "enum '" + type_name(handled)
+                        + "' has no variant named '" + handle_case.variant_name + "'");
+            }
+            if (!covered.insert(handle_case.variant_name).second) {
+                throw_type_error(
+                    handle_case.location, "duplicate handle case '"
+                        + handle_case.variant_name + "'");
+            }
+            if (variant->second && !handle_case.binding_name) {
+                throw_type_error(
+                    handle_case.location, "handle case '" + handle_case.variant_name
+                        + "' requires a payload binding");
+            }
+            if (!variant->second && handle_case.binding_name) {
+                throw_type_error(
+                    handle_case.location, "handle case '" + handle_case.variant_name
+                        + "' cannot bind a payload");
+            }
             push_scope();
             if (handle_case.binding_name) {
-                declare_value(*handle_case.binding_name, unknown_type);
+                declare_value(*handle_case.binding_name, *variant->second);
             }
             check_statement_list(handle_case.body->statements);
             pop_scope();
+        }
+        std::vector<std::string> missing;
+        for (const auto& variant_name : variant_order) {
+            if (!covered.contains(variant_name)) {
+                missing.push_back(variant_name);
+            }
+        }
+        if (!missing.empty()) {
+            std::string message = "non-exhaustive handle for '" + type_name(handled)
+                + "'; missing variants: ";
+            for (std::size_t index = 0; index < missing.size(); ++index) {
+                if (index != 0) {
+                    message += ", ";
+                }
+                message += missing[index];
+            }
+            throw_type_error(statement.location, message);
         }
         return;
     }
@@ -798,8 +882,16 @@ Type TypeChecker::check_call(const CallExpr& call)
     }
 
     if (call.callee->kind == ExprKind::MemberAccess) {
-        return check_method_call(
-            static_cast<const MemberAccessExpr&>(*call.callee), call, arguments);
+        const auto& member = static_cast<const MemberAccessExpr&>(*call.callee);
+        if (member.object->kind == ExprKind::Identifier) {
+            const auto& object = static_cast<const IdentifierExpr&>(*member.object);
+            if (const auto* type_info = find_nominal_type(object.name);
+                type_info && type_info->kind == NominalKind::Enum) {
+                return check_enum_variant_call(
+                    object.name, member.member, call, arguments, *type_info);
+            }
+        }
+        return check_method_call(member, call, arguments);
     }
 
     const Type callee_type = check_expression(*call.callee);
@@ -822,6 +914,11 @@ Type TypeChecker::check_construction(
     const std::vector<Type>& arguments,
     const NominalTypeInfo& type_info)
 {
+    if (type_info.kind == NominalKind::Enum) {
+        throw_type_error(
+            current_location_, "enum '" + name
+                + "' must be constructed through one of its variants");
+    }
     if (type_info.kind == NominalKind::Interface) {
         throw_type_error(
             current_location_, "interface '" + name + "' cannot be constructed");
@@ -959,6 +1056,39 @@ Type TypeChecker::check_construction(
     }
     return Type{
         TypeKind::Unknown, false, false, name, std::move(type_arguments)};
+}
+
+Type TypeChecker::check_enum_variant_call(
+    const std::string& enum_name,
+    const std::string& variant_name,
+    const CallExpr& call,
+    const std::vector<Type>& arguments,
+    const NominalTypeInfo& type_info) const
+{
+    if (!call.generic_arguments.empty()) {
+        throw_type_error(
+            current_location_, "enum variant '" + enum_name + "." + variant_name
+                + "' does not accept generic arguments");
+    }
+    const auto variant = type_info.variants.find(variant_name);
+    if (variant == type_info.variants.end()) {
+        throw_type_error(
+            current_location_, "enum '" + enum_name + "' has no variant named '"
+                + variant_name + "'");
+    }
+    const std::size_t expected_count = variant->second.payload_type ? 1U : 0U;
+    if (arguments.size() != expected_count) {
+        throw_type_error(
+            current_location_, "enum variant '" + enum_name + "." + variant_name
+                + "' expects " + std::to_string(expected_count) + " payload argument"
+                + (expected_count == 1 ? "" : "s") + ", got "
+                + std::to_string(arguments.size()));
+    }
+    if (variant->second.payload_type) {
+        require_assignable(
+            *variant->second.payload_type, arguments.front(), current_location_);
+    }
+    return Type{TypeKind::Unknown, false, false, enum_name};
 }
 
 Type TypeChecker::check_method_call(
@@ -1238,6 +1368,24 @@ std::optional<int> TypeChecker::overload_score(
 
 Type TypeChecker::check_member_access(const MemberAccessExpr& member)
 {
+    if (member.object->kind == ExprKind::Identifier) {
+        const auto& object = static_cast<const IdentifierExpr&>(*member.object);
+        if (const auto* type_info = find_nominal_type(object.name);
+            type_info && type_info->kind == NominalKind::Enum) {
+            const auto variant = type_info->variants.find(member.member);
+            if (variant == type_info->variants.end()) {
+                throw_type_error(
+                    current_location_, "enum '" + object.name
+                        + "' has no variant named '" + member.member + "'");
+            }
+            if (variant->second.payload_type) {
+                throw_type_error(
+                    current_location_, "enum variant '" + object.name + "."
+                        + member.member + "' requires 1 payload argument");
+            }
+            return Type{TypeKind::Unknown, false, false, object.name};
+        }
+    }
     const Type object = require_value(check_expression(*member.object), current_location_);
     if (object.nullable) {
         throw_type_error(

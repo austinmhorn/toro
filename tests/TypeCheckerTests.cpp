@@ -974,6 +974,227 @@ void test_recursive_structural_inference()
         "conflicting inference for generic parameter 'T'");
 }
 
+void test_enum_variant_construction()
+{
+    expect_valid(
+        "enum Message {\n"
+        "    text(string)\n"
+        "    quit\n"
+        "}\n"
+        "message: Message = Message.text(\"hello\")\n"
+        "quit: Message = Message.quit\n");
+    expect_error(
+        "enum Message {\n"
+        "    text(string)\n"
+        "}\n"
+        "message := Message.text()\n",
+        "Message.text' expects 1 payload argument, got 0");
+    expect_error(
+        "enum Message {\n"
+        "    text(string)\n"
+        "}\n"
+        "message := Message.text(10)\n",
+        "cannot assign value of type 'int' to type 'string'");
+    expect_error(
+        "enum Message {\n"
+        "    quit\n"
+        "}\n"
+        "message := Message.quit(10)\n",
+        "Message.quit' expects 0 payload arguments, got 1");
+    expect_error(
+        "enum Message {\n"
+        "    quit\n"
+        "}\n"
+        "message := Message.missing\n",
+        "enum 'Message' has no variant named 'missing'");
+    expect_error(
+        "enum Message {\n"
+        "    text(string)\n"
+        "}\n"
+        "message := Message.text\n",
+        "Message.text' requires 1 payload argument");
+}
+
+void test_enum_identity()
+{
+    expect_valid(
+        "enum Direction {\n"
+        "    north\n"
+        "}\n"
+        "direction: Direction = Direction.north\n");
+    expect_error(
+        "enum Direction {\n"
+        "    north\n"
+        "}\n"
+        "enum Status {\n"
+        "    north\n"
+        "}\n"
+        "status: Status = Direction.north\n",
+        "cannot assign value of type 'Direction' to type 'Status'");
+}
+
+void test_typed_handle()
+{
+    expect_valid(
+        "enum Message {\n"
+        "    text(string)\n"
+        "    quit\n"
+        "}\n"
+        "function process(message: Message) {\n"
+        "    handle message {\n"
+        "        text(value) {\n"
+        "            copy: string = value\n"
+        "        }\n"
+        "        quit {\n"
+        "            return\n"
+        "        }\n"
+        "    }\n"
+        "}\n");
+    expect_error(
+        "enum Message {\n"
+        "    text(string)\n"
+        "    quit\n"
+        "}\n"
+        "function process(message: Message) {\n"
+        "    handle message {\n"
+        "        text(value) {\n"
+        "            wrong: int = value\n"
+        "        }\n"
+        "        quit {}\n"
+        "    }\n"
+        "}\n",
+        "cannot assign value of type 'string' to type 'int'");
+    expect_error(
+        "enum Message {\n"
+        "    text(string)\n"
+        "    quit\n"
+        "}\n"
+        "function process(message: Message) {\n"
+        "    handle message {\n"
+        "        text(value) {}\n"
+        "        quit {}\n"
+        "    }\n"
+        "    print(value)\n"
+        "}\n",
+        "unknown identifier 'value'");
+    expect_error(
+        "enum Message {\n"
+        "    text(string)\n"
+        "    quit\n"
+        "}\n"
+        "function process(message: Message) {\n"
+        "    handle message {\n"
+        "        missing {}\n"
+        "        text(value) {}\n"
+        "        quit {}\n"
+        "    }\n"
+        "}\n",
+        "enum 'Message' has no variant named 'missing'");
+    expect_error(
+        "enum Message {\n"
+        "    text(string)\n"
+        "    quit\n"
+        "}\n"
+        "function process(message: Message) {\n"
+        "    handle message {\n"
+        "        text(first) {}\n"
+        "        text(second) {}\n"
+        "        quit {}\n"
+        "    }\n"
+        "}\n",
+        "duplicate handle case 'text'");
+    expect_error(
+        "enum Message {\n"
+        "    text(string)\n"
+        "    quit\n"
+        "}\n"
+        "function process(message: Message) {\n"
+        "    handle message {\n"
+        "        text {}\n"
+        "        quit {}\n"
+        "    }\n"
+        "}\n",
+        "handle case 'text' requires a payload binding");
+    expect_error(
+        "enum Message {\n"
+        "    text(string)\n"
+        "    quit\n"
+        "}\n"
+        "function process(message: Message) {\n"
+        "    handle message {\n"
+        "        text(value) {}\n"
+        "        quit(value) {}\n"
+        "    }\n"
+        "}\n",
+        "handle case 'quit' cannot bind a payload");
+    expect_error(
+        "enum Direction {\n"
+        "    north\n"
+        "    south\n"
+        "    east\n"
+        "}\n"
+        "function inspect(direction: Direction) {\n"
+        "    handle direction {\n"
+        "        north {}\n"
+        "    }\n"
+        "}\n",
+        "missing variants: south, east");
+    expect_error(
+        "value := 10\n"
+        "handle value {\n"
+        "    anything {}\n"
+        "}\n",
+        "handle expression must have an enum type, got 'int'");
+}
+
+void test_nested_handle_and_result()
+{
+    expect_valid(
+        "enum Outer {\n"
+        "    inner(Inner)\n"
+        "    none\n"
+        "}\n"
+        "enum Inner {\n"
+        "    value(int)\n"
+        "    empty\n"
+        "}\n"
+        "function inspect(outer: Outer) {\n"
+        "    handle outer {\n"
+        "        inner(inner_value) {\n"
+        "            handle inner_value {\n"
+        "                value(number) {\n"
+        "                    copy: int = number\n"
+        "                }\n"
+        "                empty {}\n"
+        "            }\n"
+        "        }\n"
+        "        none {}\n"
+        "    }\n"
+        "}\n");
+    expect_valid(
+        "function result() -> Result<int, string> {}\n"
+        "function inspect() {\n"
+        "    value := result()\n"
+        "    handle value {\n"
+        "        ok(number) {\n"
+        "            copy: int = number\n"
+        "        }\n"
+        "        err(error) {\n"
+        "            message: string = error\n"
+        "        }\n"
+        "    }\n"
+        "}\n");
+    expect_error(
+        "function result() -> Result<int, string> {}\n"
+        "function inspect() {\n"
+        "    value := result()\n"
+        "    handle value {\n"
+        "        ok(number) {}\n"
+        "    }\n"
+        "}\n",
+        "missing variants: err");
+}
+
 void test_existing_language_features_remain_checkable()
 {
     expect_valid(
@@ -1040,6 +1261,10 @@ int main()
         test_generic_member_substitution();
         test_generic_type_constraints();
         test_recursive_structural_inference();
+        test_enum_variant_construction();
+        test_enum_identity();
+        test_typed_handle();
+        test_nested_handle_and_result();
         test_existing_language_features_remain_checkable();
     } catch (const std::exception& error) {
         std::cerr << "type checker test failure: " << error.what() << '\n';

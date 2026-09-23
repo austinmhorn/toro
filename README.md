@@ -20,6 +20,8 @@ abstract classes, nullable types, and explicit casts.
 Generic struct and class instances retain their concrete type arguments. The
 checker validates explicit or inferred generic construction, constraints, and
 substituted field and method types, including recursively nested generic types.
+Enum variants are typed constructors, and `handle` validates case payload
+bindings, variant identity, duplicate cases, and exhaustive coverage.
 
 ## Build
 
@@ -122,6 +124,8 @@ conversions and user-defined class or struct conversions. Generic function calls
 infer type arguments, accept validated explicit type arguments, substitute return
 types, and enforce interface constraints. Inference recursively matches nested
 types such as `List<T>` and `Map<string, List<T>>`.
+Enum construction and exhaustive `handle` checking are also part of this pass;
+`Result<T, E>` receives minimal enum-like `ok(T)` and `err(E)` handling support.
 
 ## Logical operators
 
