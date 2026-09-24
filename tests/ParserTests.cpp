@@ -903,7 +903,7 @@ void test_class_methods_init_and_destroy()
 {
     expect_program_dump(
         "class Player {\n"
-        "    function init(name: string) {\n"
+        "    init(name: string) {\n"
         "        self.name = name\n"
         "    }\n"
         "\n"
@@ -1592,6 +1592,22 @@ void test_destroy_failures()
         "class may declare at most one destroy method");
 }
 
+void test_init_failures()
+{
+    expect_program_error(
+        "class Player { function init(name: string) {} }\n",
+        "class initializer syntax is 'init(...)', not 'function init(...)'");
+    expect_program_error(
+        "class Player {\n"
+        "    init() {}\n"
+        "    init(name: string) {}\n"
+        "}\n",
+        "class may declare at most one init method");
+    expect_program_error(
+        "class Player { init() -> Player {} }\n",
+        "init method cannot declare a return type");
+}
+
 void test_inheritance_and_interface_failures()
 {
     expect_program_error("interface {\n}\n", "expected interface name");
@@ -1768,6 +1784,7 @@ int main()
         test_named_argument_failures();
         test_class_failures();
         test_destroy_failures();
+        test_init_failures();
         test_inheritance_and_interface_failures();
         test_generic_failures();
         test_conversion_failures();

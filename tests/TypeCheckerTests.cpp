@@ -623,6 +623,77 @@ void test_method_calls()
         "type 'Counter' has no method named 'reset'");
 }
 
+void test_class_initializers()
+{
+    expect_valid(
+        "class Player {\n"
+        "    public name: string\n"
+        "    private health: int = 100\n"
+        "    init(name: string) { self.name = name }\n"
+        "}\n"
+        "player := Player(name: \"Austin\")\n"
+        "other := Player(\"toro\")\n");
+    expect_error(
+        "class Player { init(name: string) {} }\n"
+        "player := Player()\n",
+        "expects 1 arguments, got 0");
+    expect_error(
+        "class Player { init(name: string) {} }\n"
+        "player := Player(name: 10)\n",
+        "expects 'string', got 'int'");
+    expect_error(
+        "class Player { init(name: string) {} }\n"
+        "player := Player(other: \"Austin\")\n",
+        "has no parameter named 'other'");
+    expect_error(
+        "class Player { public init() {} }\n"
+        "player := Player()\n"
+        "player.init()\n",
+        "init cannot be invoked directly");
+
+    expect_valid(
+        "class Child {}\n"
+        "class Parent {\n"
+        "    public child: Child\n"
+        "    init(child: Child) { self.child = child }\n"
+        "}\n"
+        "child := Child()\n"
+        "parent := Parent(child: child)\n");
+    expect_error(
+        "class Child {}\n"
+        "class Parent {\n"
+        "    child: Child\n"
+        "    init() {}\n"
+        "}\n",
+        "does not definitely initialize required field 'child'");
+    expect_valid(
+        "class Child {}\n"
+        "class Parent {\n"
+        "    child: Child\n"
+        "    init(child: Child, choose: bool) {\n"
+        "        if choose { self.child = child } else { self.child = child }\n"
+        "    }\n"
+        "}\n");
+    expect_error(
+        "class Child {}\n"
+        "class Parent {\n"
+        "    child: Child\n"
+        "    init(child: Child, choose: bool) {\n"
+        "        if choose { self.child = child }\n"
+        "    }\n"
+        "}\n",
+        "does not definitely initialize required field 'child'");
+    expect_valid(
+        "class Parent { public child: Child? }\n"
+        "class Child {\n"
+        "    public weak parent: Parent?\n"
+        "    init(parent: Parent?) { self.parent = parent }\n"
+        "}\n"
+        "parent := Parent()\n"
+        "child := Child(parent: parent)\n"
+        "parent.child = child\n");
+}
+
 void test_inheritance_and_subtyping()
 {
     expect_valid(
@@ -1487,6 +1558,7 @@ int main()
         test_construction_and_field_access();
         test_member_errors_and_visibility();
         test_method_calls();
+        test_class_initializers();
         test_inheritance_and_subtyping();
         test_virtual_and_override_validation();
         test_abstract_classes();

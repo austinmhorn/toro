@@ -923,6 +923,7 @@ std::unique_ptr<Stmt> Parser::parse_class_declaration(bool is_abstract)
     std::vector<std::unique_ptr<ClassMember>> members;
     std::unordered_set<std::string> conversion_targets;
     bool saw_destroy = false;
+    bool saw_init = false;
     while (!at_end() && peek().type != TokenType::RightBrace) {
         statement_line_ = peek().line;
         Visibility visibility = Visibility::Private;
@@ -963,8 +964,18 @@ std::unique_ptr<Stmt> Parser::parse_class_declaration(bool is_abstract)
             }
             members.push_back(std::move(conversion));
         } else if (check(TokenType::Function)) {
+            if (check_next(TokenType::Identifier)
+                && tokens_[current_ + 1].lexeme == "init") {
+                throw_parse_error(
+                    tokens_[current_ + 1],
+                    "class initializer syntax is 'init(...)', not 'function init(...)'");
+            }
             members.push_back(parse_method_declaration(
-                visibility, is_virtual, is_override, saw_destroy));
+                visibility, is_virtual, is_override, saw_destroy, &saw_init));
+        } else if (!is_weak && !is_virtual && !is_override
+            && check(TokenType::Identifier) && peek().lexeme == "init") {
+            members.push_back(parse_method_declaration(
+                visibility, false, false, saw_destroy, &saw_init, true));
         } else if (!is_virtual && !is_override && check(TokenType::Identifier)) {
             members.push_back(parse_class_field(visibility, is_weak));
         } else {
@@ -1167,13 +1178,24 @@ std::unique_ptr<ClassMember> Parser::parse_method_declaration(
     Visibility visibility,
     bool is_virtual,
     bool is_override,
-    bool& saw_destroy)
+    bool& saw_destroy,
+    bool* saw_init,
+    bool shorthand_init)
 {
     Token function_token = advance();
-    const Token& name = consume(TokenType::Identifier, "expected method name");
+    const Token& name = shorthand_init
+        ? function_token
+        : consume(TokenType::Identifier, "expected method name");
     const std::string method_name = name.lexeme;
     auto generic_parameters = parse_generic_parameters();
     const bool is_destroy = method_name == "destroy";
+    const bool is_init = saw_init != nullptr && method_name == "init";
+    if (is_init) {
+        if (*saw_init) {
+            throw_parse_error(name, "class may declare at most one init method");
+        }
+        *saw_init = true;
+    }
     if (is_destroy) {
         if (saw_destroy) {
             throw_parse_error(name, "class may declare at most one destroy method");
@@ -1206,6 +1228,9 @@ std::unique_ptr<ClassMember> Parser::parse_method_declaration(
     if (match({TokenType::Arrow})) {
         if (is_destroy) {
             throw_parse_error(previous(), "destroy method cannot declare a return type");
+        }
+        if (is_init) {
+            throw_parse_error(previous(), "init method cannot declare a return type");
         }
         return_type = parse_type_reference("expected return type after '->'");
     }

@@ -29,7 +29,8 @@ procedural subset, non-generic value structs, and enums with exhaustive
 `handle` statements. Concrete `Result<T, E>` values, exhaustive Result handling,
 and postfix `?` propagation are also lowered when both payload types are
 backend-supported. Non-generic classes lower to heap objects with identity and
-generated strong-reference ARC operations.
+generated strong-reference ARC operations. Class construction executes a single
+`init` method after allocating the object and establishing all field defaults.
 
 ## Build
 
@@ -127,6 +128,7 @@ Generate C after parsing and checking a source file:
 ./build/toro emit-c examples/results.toro
 ./build/toro emit-c examples/class_arc.toro
 ./build/toro emit-c examples/lifecycle.toro
+./build/toro emit-c examples/init.toro
 ```
 
 Build a native executable with the host C compiler:
@@ -149,6 +151,7 @@ Build and run through temporary artifacts:
 ./build/toro run examples/results.toro
 ./build/toro run examples/class_arc.toro
 ./build/toro run examples/lifecycle.toro
+./build/toro run examples/init.toro
 ```
 
 `run` forwards program output and returns its exit status. Its temporary C source
@@ -203,9 +206,16 @@ nullable class type; they use zeroing control-block references, do not retain
 their target, and safely read as `null` after target destruction. Parent-strong
 to child / child-weak to parent graphs therefore clean up normally. Strong
 reference cycles can still leak because toro does not yet include a cycle
-collector. `init`, inheritance, interfaces, generic classes, class-valued
-enum/Result payloads, and field access through a temporary class reference remain
-explicit backend errors.
+collector. When a class declares `init`, constructor arguments bind to its
+parameters instead of fields. The backend initializes explicit defaults, toro
+zero values, and nullable fields before invoking `init` exactly once. Required
+non-null fields without defaults must be assigned by `init` on every reachable
+completion path. Classes without `init` retain field-based construction.
+Initializers use the dedicated `init(...) { ... }` lifecycle syntax;
+`function init(...)` is rejected.
+Initializer overloading, inheritance/base initialization, interfaces, generic
+classes, class-valued enum/Result payloads, and field access through a temporary
+class reference remain explicit backend errors.
 
 ## Logical operators
 

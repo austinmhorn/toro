@@ -503,11 +503,44 @@ void test_class_lifecycle_and_weak_lowering()
     }
 }
 
+void test_class_initializer_lowering()
+{
+    const auto output = generate(
+        "class Child { public value: int }\n"
+        "class Parent {\n"
+        "    public name: string\n"
+        "    public health: int = 100\n"
+        "    public child: Child\n"
+        "    public weak backup: Child?\n"
+        "    init(name: string, child: Child) {\n"
+        "        self.name = name\n"
+        "        self.child = child\n"
+        "        self.backup = child\n"
+        "    }\n"
+        "}\n"
+        "function main() {\n"
+        "    child := Child(value: 7)\n"
+        "    parent := Parent(child: child, name: \"Austin\")\n"
+        "    print(parent.health)\n"
+        "}\n");
+
+    expect_contains(
+        output,
+        "toro_method_6_Parent_init(toro_new_class_",
+        "initializer invocation after allocation");
+    expect_contains(
+        output,
+        "->toro_field_health = 100;",
+        "field default before initializer invocation");
+    expect_contains(
+        output,
+        "toro_class_5_Child_retain(toro_field_class_",
+        "strong field assignment in initializer");
+    expect_contains(output, "toro_weak_set(", "weak field assignment in initializer");
+}
+
 void test_unsupported_features()
 {
-    expect_backend_error(
-        "class Point { function init() {} }\n",
-        "class init execution is not supported by the C backend");
     expect_backend_error(
         "function identity<T>(value: T) -> T { return value }\n",
         "generic functions are not supported by the C backend");
@@ -624,6 +657,7 @@ int main()
         test_distinct_result_instances();
         test_class_arc_lowering();
         test_class_lifecycle_and_weak_lowering();
+        test_class_initializer_lowering();
         test_unsupported_features();
         test_generated_c_compiles();
     } catch (const std::exception& error) {

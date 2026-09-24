@@ -165,7 +165,7 @@ class Player {
     public name: string
     private health: int = 100
 
-    function init(name: string) {
+    init(name: string) {
         self.name = name
     }
 
@@ -179,10 +179,20 @@ class Player {
 }
 ```
 
-`init` execution remains deferred. A class may declare one parameterless
-`destroy()` method, and it cannot declare a return type. The native backend runs
+A class may declare one `init` method. When present, construction arguments bind
+to its parameters. Construction allocates the object, initializes explicit field
+defaults and toro zero/null values, then executes `init` exactly once with a valid
+`self`. A required non-null field that has no safe default must be assigned on
+every reachable path before `init` completes. Without `init`, construction keeps
+using named or positional field arguments. `init(...) { ... }` is a dedicated
+lifecycle declaration; spelling it as `function init(...)` is invalid.
+
+A class may also declare one parameterless `destroy()` method, and neither
+`init` nor `destroy` can declare a return type. The native backend runs
 `destroy()` exactly once at final strong release, before owned fields and object
-storage are freed. `self` and fields remain usable during that call.
+storage are freed. `self` and fields remain usable during that call. Initializer
+overloading, base-initializer chaining, and failable initialization are not yet
+supported.
 
 ### Interfaces and inheritance
 
@@ -371,9 +381,10 @@ cyclic-reference collection are not lowered yet. Enum and
 Result payloads may use primitives, supported non-generic structs, supported
 enums, or supported nested Results; other payload types produce a backend
 diagnostic. Class-valued enum/Result payloads remain unsupported so ownership is
-never guessed. `init` execution remains deferred. Method receivers and argument forms that cannot yet be
-owned safely are materialized and released around the call; temporary class
-field access remains rejected rather than lowered to invalid C.
+never guessed. Non-generic class `init` methods execute after field storage is
+initialized. Method receivers and argument forms that cannot yet be owned safely
+are materialized and released around the call; temporary class field access
+remains rejected rather than lowered to invalid C.
 
 The native toolchain can compile this generated source as C11. `toro build`
 writes a persistent executable, defaulting to the source filename stem in the

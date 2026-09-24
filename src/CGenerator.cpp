@@ -691,11 +691,6 @@ private:
                 }
 
                 const auto& method = static_cast<const MethodDeclaration&>(*member);
-                if (method.name == "init") {
-                    throw_backend_error(
-                        method.location,
-                        "class init execution is not supported by the C backend");
-                }
                 if (!method.generic_parameters.empty()) {
                     throw_backend_error(
                         method.location,
@@ -2012,6 +2007,11 @@ private:
         const CallExpr& call)
     {
         const auto& info = classes_.at(name);
+        if (const auto initializer = info.methods.find("init");
+            initializer != info.methods.end()) {
+            return emit_initialized_class_construction(
+                name, call, info, initializer->second);
+        }
         std::vector<const CallArgument*> arguments(info.fields.size(), nullptr);
         std::size_t positional_index = 0;
         for (const auto& argument : call.arguments) {
@@ -2086,6 +2086,105 @@ private:
                         + "(" + access + ");\n";
                 }
             }
+        }
+        return {temporary, type, true, false, std::move(prelude), true};
+    }
+
+    GeneratedExpression emit_initialized_class_construction(
+        const std::string& name,
+        const CallExpr& call,
+        const ClassInfo& info,
+        const MethodInfo& initializer)
+    {
+        const CValueType type{CValueKind::Class, name};
+        const std::string temporary =
+            "toro_new_class_" + std::to_string(temporary_index_++);
+        std::string prelude = c_type_name(type) + " " + temporary
+            + " = malloc(sizeof(*" + temporary + "));\n";
+        prelude += "if (" + temporary + " == NULL) { abort(); }\n";
+        prelude += temporary + "->toro_strong_count = 1;\n";
+        prelude += temporary + "->toro_weak_control = malloc(sizeof(*"
+            + temporary + "->toro_weak_control));\n";
+        prelude += "if (" + temporary + "->toro_weak_control == NULL) { abort(); }\n";
+        prelude += temporary + "->toro_weak_control->toro_object = "
+            + temporary + ";\n";
+        prelude += temporary + "->toro_weak_control->toro_weak_count = 1;\n";
+
+        for (const auto& field : info.fields) {
+            const std::string access = temporary + "->"
+                + field_name(field.declaration->name);
+            if (field.declaration->is_weak) {
+                prelude += access + ".toro_control = NULL;\n";
+            }
+            if (!field.declaration->default_value) {
+                if (field.declaration->is_weak) {
+                    continue;
+                }
+                if (field.type.kind == CValueKind::Class) {
+                    prelude += access + " = NULL;\n";
+                } else {
+                    prelude += access + " = "
+                        + (field.type.kind == CValueKind::Int
+                                || field.type.kind == CValueKind::Dec
+                                || field.type.kind == CValueKind::Bool
+                                || field.type.kind == CValueKind::String
+                            ? zero_value(field.type, field.declaration->location)
+                            : "(" + c_type_name(field.type) + "){0}")
+                        + ";\n";
+                }
+                continue;
+            }
+
+            const auto value = emit_expression(
+                *field.declaration->default_value, field.type);
+            prelude += value.prelude;
+            if (field.declaration->is_weak) {
+                const std::string weak_value =
+                    "toro_weak_value_" + std::to_string(temporary_index_++);
+                prelude += c_type_name(field.type) + " " + weak_value
+                    + " = " + value.code + ";\n";
+                prelude += "toro_weak_set(&" + access + ", " + weak_value
+                    + " == NULL ? NULL : " + weak_value
+                    + "->toro_weak_control);\n";
+                if (value.owned) {
+                    prelude += release_name(value.type.nominal_name)
+                        + "(" + weak_value + ");\n";
+                }
+            } else {
+                prelude += access + " = " + value.code + ";\n";
+                if (field.type.kind == CValueKind::Class && !value.owned) {
+                    prelude += retain_name(field.type.nominal_name)
+                        + "(" + access + ");\n";
+                }
+            }
+        }
+
+        const auto ordered = order_arguments(call, initializer.declaration->parameters);
+        std::string invocation = method_name(name, "init") + "(" + temporary;
+        std::vector<ValueInfo> owned_arguments;
+        for (std::size_t index = 0; index < ordered.size(); ++index) {
+            const auto argument = emit_expression(
+                *ordered[index]->value, initializer.parameter_types[index]);
+            prelude += argument.prelude;
+            invocation += ", ";
+            if (argument.type.kind == CValueKind::Class && argument.owned) {
+                const std::string argument_temporary =
+                    "toro_argument_class_" + std::to_string(temporary_index_++);
+                prelude += c_type_name(argument.type) + " " + argument_temporary
+                    + " = " + argument.code + ";\n";
+                owned_arguments.push_back(
+                    ValueInfo{argument.type, argument_temporary, false, true});
+                invocation += argument_temporary;
+            } else {
+                invocation += argument.code;
+            }
+        }
+        invocation += ");\n";
+        prelude += invocation;
+        for (auto argument = owned_arguments.rbegin();
+             argument != owned_arguments.rend(); ++argument) {
+            prelude += release_name(argument->type.nominal_name)
+                + "(" + argument->c_name + ");\n";
         }
         return {temporary, type, true, false, std::move(prelude), true};
     }
@@ -2282,6 +2381,11 @@ private:
             && receiver.type.kind != CValueKind::Class) {
             throw_backend_error(
                 current_location_, "method calls require a struct or class receiver");
+        }
+        if (receiver.type.kind == CValueKind::Class && member.member == "init") {
+            throw_backend_error(
+                current_location_,
+                "init cannot be invoked directly");
         }
         const auto* methods = receiver.type.kind == CValueKind::Struct
             ? &structs_.at(receiver.type.nominal_name).methods

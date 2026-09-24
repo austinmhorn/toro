@@ -406,6 +406,42 @@ void test_class_lifecycle_and_weak_runtime_behavior()
         "generated lifecycle program produced unexpected output");
 }
 
+void test_class_initializer_runtime_behavior()
+{
+    const auto c_source = generate(
+        "class Child {\n"
+        "    public value: int\n"
+        "    public weak owner: Owner?\n"
+        "}\n"
+        "class Owner {\n"
+        "    public name: string\n"
+        "    private health: int = 100\n"
+        "    public child: Child\n"
+        "    init(child: Child, name: string) {\n"
+        "        print(\"init\")\n"
+        "        print(self.health)\n"
+        "        self.name = name\n"
+        "        self.child = child\n"
+        "        child.owner = self\n"
+        "    }\n"
+        "    public function show() {\n"
+        "        print(self.name)\n"
+        "        print(self.child.value)\n"
+        "        print(self.child.owner != null)\n"
+        "    }\n"
+        "}\n"
+        "function main() {\n"
+        "    child := Child(value: 7)\n"
+        "    owner := Owner(name: \"Austin\", child: child)\n"
+        "    owner.show()\n"
+        "}\n");
+    const auto [status, output] = capture_run(toro::NativeCompiler(), c_source);
+    expect(status == 0, "generated init program did not exit successfully");
+    expect(
+        output == "init\n100\nAustin\n7\ntrue\n",
+        "generated init program produced unexpected output");
+}
+
 void test_compile_failure_reporting()
 {
     const auto directory = make_test_directory();
@@ -428,9 +464,8 @@ void test_unsupported_backend_feature()
 {
     try {
         static_cast<void>(generate(
-            "class Unsupported {\n"
-            "    function init() {}\n"
-            "}\n"));
+            "class Base {}\n"
+            "class Unsupported : Base {}\n"));
     } catch (const std::runtime_error& error) {
         expect(
             std::string_view(error.what()).find("backend error")
@@ -465,6 +500,7 @@ int main()
         test_result_runtime_behavior();
         test_class_arc_runtime_behavior();
         test_class_lifecycle_and_weak_runtime_behavior();
+        test_class_initializer_runtime_behavior();
         test_compile_failure_reporting();
         test_unsupported_backend_feature();
         test_temporary_cleanup();

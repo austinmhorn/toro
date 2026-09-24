@@ -749,12 +749,17 @@ void TypeChecker::check_statement(const Stmt& statement)
     case StmtKind::ClassDeclaration: {
         const auto& declaration = static_cast<const ClassDeclarationStmt&>(statement);
         push_generic_parameters(declaration.generic_parameters);
+        const MethodDeclaration* initializer = nullptr;
+        std::unordered_set<std::string> required_initializer_fields;
         for (const auto& member : declaration.members) {
             current_location_ = member->location;
             if (member->kind == ClassMemberKind::Field) {
                 const auto& field = static_cast<const ClassField&>(*member);
                 const Type declared = resolve_type(field.type);
                 reject_standalone_null_type(declared, field.type.location);
+                if (!field.default_value && !has_zero_value(declared)) {
+                    required_initializer_fields.insert(field.name);
+                }
                 if (field.is_weak) {
                     const auto* target = find_nominal_type(declared.name);
                     if (!declared.nullable || declared.kind != TypeKind::Unknown
@@ -770,14 +775,115 @@ void TypeChecker::check_statement(const Stmt& statement)
                     require_assignable(declared, actual, field.location);
                 }
             } else if (member->kind == ClassMemberKind::Method) {
+                const auto& method = static_cast<const MethodDeclaration&>(*member);
+                if (method.name == "init") {
+                    initializer = &method;
+                }
                 check_method(
-                    static_cast<const MethodDeclaration&>(*member),
+                    method,
                     Type{TypeKind::Unknown, false, false, declaration.name});
             } else {
                 check_conversion(
                     static_cast<const ConversionOverload&>(*member),
                     Type{TypeKind::Unknown, false, false, declaration.name});
             }
+        }
+        if (initializer) {
+            using AssignedFields = std::unordered_set<std::string>;
+            std::function<AssignedFields(
+                const std::vector<std::unique_ptr<Stmt>>&,
+                AssignedFields)> analyze_list;
+            std::function<AssignedFields(const Stmt&, AssignedFields)> analyze_statement;
+            const auto require_initialized = [&](const AssignedFields& assigned) {
+                for (const auto& field : required_initializer_fields) {
+                    if (!assigned.contains(field)) {
+                        throw_type_error(
+                            initializer->location,
+                            "init for class '" + declaration.name
+                                + "' does not definitely initialize required field '"
+                                + field + "'");
+                    }
+                }
+            };
+            analyze_statement = [&](const Stmt& nested, AssignedFields assigned) {
+                switch (nested.kind) {
+                case StmtKind::MemberAssignment: {
+                    const auto& assignment =
+                        static_cast<const MemberAssignmentStmt&>(nested);
+                    if (assignment.target->object->kind == ExprKind::Identifier
+                        && static_cast<const IdentifierExpr&>(
+                               *assignment.target->object).name == "self"
+                        && required_initializer_fields.contains(
+                            assignment.target->member)) {
+                        assigned.insert(assignment.target->member);
+                    }
+                    return assigned;
+                }
+                case StmtKind::Block:
+                    return analyze_list(
+                        static_cast<const BlockStmt&>(nested).statements,
+                        std::move(assigned));
+                case StmtKind::If: {
+                    const auto& conditional = static_cast<const IfStmt&>(nested);
+                    const auto then_fields = analyze_list(
+                        conditional.then_block->statements, assigned);
+                    const auto else_fields = conditional.else_branch
+                        ? analyze_statement(*conditional.else_branch, assigned)
+                        : assigned;
+                    AssignedFields intersection;
+                    for (const auto& field : then_fields) {
+                        if (else_fields.contains(field)) {
+                            intersection.insert(field);
+                        }
+                    }
+                    return intersection;
+                }
+                case StmtKind::Handle: {
+                    const auto& handle = static_cast<const HandleStmt&>(nested);
+                    std::optional<AssignedFields> intersection;
+                    for (const auto& handle_case : handle.cases) {
+                        const auto case_fields = analyze_list(
+                            handle_case.body->statements, assigned);
+                        if (!intersection) {
+                            intersection = case_fields;
+                            continue;
+                        }
+                        for (auto field = intersection->begin();
+                             field != intersection->end();) {
+                            if (!case_fields.contains(*field)) {
+                                field = intersection->erase(field);
+                            } else {
+                                ++field;
+                            }
+                        }
+                    }
+                    return intersection.value_or(std::move(assigned));
+                }
+                case StmtKind::Return:
+                    require_initialized(assigned);
+                    return assigned;
+                case StmtKind::While:
+                    static_cast<void>(analyze_list(
+                        static_cast<const WhileStmt&>(nested).body->statements,
+                        assigned));
+                    return assigned;
+                case StmtKind::ForIn:
+                    static_cast<void>(analyze_list(
+                        static_cast<const ForInStmt&>(nested).body->statements,
+                        assigned));
+                    return assigned;
+                default:
+                    return assigned;
+                }
+            };
+            analyze_list = [&](const std::vector<std::unique_ptr<Stmt>>& statements,
+                               AssignedFields assigned) {
+                for (const auto& nested : statements) {
+                    assigned = analyze_statement(*nested, std::move(assigned));
+                }
+                return assigned;
+            };
+            require_initialized(analyze_list(initializer->body->statements, {}));
         }
         pop_generic_parameters();
         return;
@@ -1045,6 +1151,32 @@ Type TypeChecker::check_construction(
                 + " generic arguments, got "
                 + std::to_string(call.generic_arguments.size()));
     }
+    if (type_info.kind == NominalKind::Class) {
+        if (const auto initializer = type_info.methods.find("init");
+            initializer != type_info.methods.end()) {
+            std::vector<const FunctionSignature*> candidates;
+            candidates.reserve(initializer->second.size());
+            for (const auto& method : initializer->second) {
+                candidates.push_back(&method.signature);
+            }
+            static_cast<void>(resolve_overload(
+                "initializer", name + ".init", call.arguments, arguments,
+                {}, candidates));
+            std::vector<Type> type_arguments;
+            type_arguments.reserve(call.generic_arguments.size());
+            for (const auto& argument : call.generic_arguments) {
+                type_arguments.push_back(resolve_type(argument));
+            }
+            if (type_arguments.size() != type_info.generic_parameters.size()) {
+                throw_type_error(
+                    current_location_,
+                    "generic class initialization requires explicit generic arguments");
+            }
+            return Type{
+                TypeKind::Unknown, false, false, name,
+                std::move(type_arguments)};
+        }
+    }
     std::unordered_map<std::string, Type> substitutions;
     std::unordered_set<std::string> explicit_parameters;
     for (std::size_t index = 0; index < call.generic_arguments.size(); ++index) {
@@ -1224,6 +1356,9 @@ Type TypeChecker::check_method_call(
     if (!type_info) {
         throw_type_error(
             current_location_, "cannot resolve members of type '" + type_name(object) + "'");
+    }
+    if (type_info->kind == NominalKind::Class && callee.member == "init") {
+        throw_type_error(current_location_, "init cannot be invoked directly");
     }
     const auto methods = find_methods(object.name, callee.member);
     if (methods.empty()) {

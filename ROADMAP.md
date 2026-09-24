@@ -458,7 +458,7 @@ class Player {
     name: string
     health: int = 100
 
-    function init(name: string) {
+    init(name: string) {
         self.name = name
     }
 }
