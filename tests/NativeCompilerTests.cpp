@@ -303,6 +303,52 @@ void test_result_runtime_behavior()
         "generated Result program produced unexpected output");
 }
 
+void test_class_arc_runtime_behavior()
+{
+    auto c_source = generate(
+        "class Counter {\n"
+        "    public value: int\n"
+        "    public function add(amount: int) { self.value = self.value + amount }\n"
+        "    public function get() -> int { return self.value }\n"
+        "}\n"
+        "function preserve(value: Counter) -> Counter { return value }\n"
+        "function touch(value: Counter) { value.add(2) }\n"
+        "function main() {\n"
+        "    original := Counter(value: 10)\n"
+        "    alias := original\n"
+        "    alias.add(5)\n"
+        "    print(original.get())\n"
+        "    touch(original)\n"
+        "    print(alias.get())\n"
+        "    returned := preserve(alias)\n"
+        "    returned.value = 20\n"
+        "    print(original.get())\n"
+        "    replacement := Counter(value: 99)\n"
+        "    replacement = original\n"
+        "    replacement.add(1)\n"
+        "    print(alias.get())\n"
+        "    if true {\n"
+        "        scoped := original\n"
+        "        scoped.add(1)\n"
+        "    }\n"
+        "    print(returned.get())\n"
+        "    touch(Counter(value: 1))\n"
+        "    print(Counter(value: 30).get())\n"
+        "}\n");
+    const std::string release_marker = "free(toro_value);";
+    const auto release = c_source.find(release_marker);
+    expect(release != std::string::npos, "generated class release helper was missing");
+    c_source.replace(
+        release,
+        release_marker.size(),
+        "free(toro_value); puts(\"freed\");");
+    const auto [status, output] = capture_run(toro::NativeCompiler(), c_source);
+    expect(status == 0, "generated class ARC program did not exit successfully");
+    expect(
+        output == "15\n17\n20\nfreed\n21\n22\nfreed\nfreed\n30\nfreed\n",
+        "generated class ARC program produced unexpected output");
+}
+
 void test_compile_failure_reporting()
 {
     const auto directory = make_test_directory();
@@ -326,6 +372,7 @@ void test_unsupported_backend_feature()
     try {
         static_cast<void>(generate(
             "class Unsupported {\n"
+            "    function init() {}\n"
             "}\n"));
     } catch (const std::runtime_error& error) {
         expect(
@@ -359,6 +406,7 @@ int main()
         test_struct_runtime_behavior();
         test_enum_runtime_behavior();
         test_result_runtime_behavior();
+        test_class_arc_runtime_behavior();
         test_compile_failure_reporting();
         test_unsupported_backend_feature();
         test_temporary_cleanup();

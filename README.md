@@ -28,7 +28,8 @@ A minimal backend can emit portable C for the currently supported primitive
 procedural subset, non-generic value structs, and enums with exhaustive
 `handle` statements. Concrete `Result<T, E>` values, exhaustive Result handling,
 and postfix `?` propagation are also lowered when both payload types are
-backend-supported.
+backend-supported. Non-generic classes lower to heap objects with identity and
+generated strong-reference ARC operations.
 
 ## Build
 
@@ -124,6 +125,7 @@ Generate C after parsing and checking a source file:
 ./build/toro emit-c examples/structs.toro
 ./build/toro emit-c examples/enums.toro
 ./build/toro emit-c examples/results.toro
+./build/toro emit-c examples/class_arc.toro
 ```
 
 Build a native executable with the host C compiler:
@@ -144,6 +146,7 @@ Build and run through temporary artifacts:
 ./build/toro run examples/structs.toro
 ./build/toro run examples/enums.toro
 ./build/toro run examples/results.toro
+./build/toro run examples/class_arc.toro
 ```
 
 `run` forwards program output and returns its exit status. Its temporary C source
@@ -185,7 +188,14 @@ tag and payload, while exhaustive `handle` statements lower to `switch` blocks
 with case-scoped payload bindings. Generic structs, interfaces, conversion
 overloads, nullable fields, Results containing unsupported runtime payloads, and
 other runtime types outside this subset fail with a backend diagnostic instead
-of producing partial or incorrect C.
+of producing partial or incorrect C. Non-generic classes use heap-backed pointer
+identity. Construction begins with one strong reference; local copies and class
+parameters retain, replacement and lexical-scope exit release, and the final
+release frees the object. Primitive and supported value fields, field access and
+assignment, methods, `self`, and class-valued function parameters/returns are
+lowered. `init`, `destroy()`, inheritance, interfaces, generic classes,
+class-reference fields or enum/Result payloads, and field access through a
+temporary class reference remain explicit backend errors.
 
 ## Logical operators
 

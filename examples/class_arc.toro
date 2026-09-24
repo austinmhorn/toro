@@ -1,0 +1,27 @@
+class Player {
+    public name: string
+    private health: int = 100
+
+    public function damage(amount: int) {
+        self.health = self.health - amount
+    }
+
+    public function get_health() -> int {
+        return self.health
+    }
+}
+
+function preserve(player: Player) -> Player {
+    return player
+}
+
+function main() {
+    player := Player(name: "Austin")
+    alias := player
+    alias.damage(25)
+    print(player.get_health())
+
+    returned := preserve(player)
+    returned.damage(5)
+    print(alias.get_health())
+}

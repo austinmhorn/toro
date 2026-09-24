@@ -324,6 +324,16 @@ exhaustive `handle` statements use normal C value semantics. Postfix `?` stores
 its operand in a temporary, checks the tag once, extracts the success payload,
 or returns a freshly tagged error Result from the enclosing function.
 
+Non-generic classes lower to heap-allocated C objects containing a strong
+reference count and their instance fields. Class variables store pointers, so
+copying a class value preserves object identity rather than copying fields.
+Construction creates one strong reference. Owned locals and class parameters
+retain borrowed references, assignments release replaced references, returns
+preserve the returned lifetime, and lexical-scope exit releases owned locals.
+The generated release helper frees the object when its count reaches zero.
+Class methods receive the same object pointer as `self`, so field mutations are
+visible through every alias.
+
 Primitive types map directly to C:
 
 ```text
@@ -339,12 +349,16 @@ field: explicit source defaults take priority, while omitted `int`, `dec`,
 `bool`, and `string` fields use `0`, `0.0`, `false`, and `""`. Omitted nested
 struct values remain unsupported unless explicitly supplied.
 
-Classes, generic structs, method overloads, conversions, interfaces,
-inheritance, nullable fields, collections, and ARC are not lowered yet. Enum and
+Generic classes and structs, method overloads, conversions, interfaces,
+inheritance, nullable fields, collections, weak references, lifecycle method
+execution, and cyclic-reference collection are not lowered yet. Enum and
 Result payloads may use primitives, supported non-generic structs, supported
 enums, or supported nested Results; other payload types produce a backend
-diagnostic. Method receivers that cannot safely be addressed are rejected rather
-than lowered to invalid C.
+diagnostic. Class-reference fields and class-valued enum/Result payloads remain
+unsupported so ownership is never guessed. `init` and `destroy()` runtime
+execution are deferred. Method receivers and argument forms that cannot yet be
+owned safely are materialized and released around the call; temporary class
+field access remains rejected rather than lowered to invalid C.
 
 The native toolchain can compile this generated source as C11. `toro build`
 writes a persistent executable, defaulting to the source filename stem in the

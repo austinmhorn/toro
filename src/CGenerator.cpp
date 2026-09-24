@@ -12,7 +12,7 @@
 namespace toro {
 namespace {
 
-enum class CValueKind { Int, Dec, Bool, String, Struct, Enum, Result, Void };
+enum class CValueKind { Int, Dec, Bool, String, Struct, Class, Enum, Result, Void };
 
 struct CValueType {
     CValueKind kind;
@@ -42,6 +42,7 @@ struct ValueInfo {
     CValueType type;
     std::string c_name;
     bool pointer{false};
+    bool owned_local{false};
 };
 
 struct FunctionInfo {
@@ -68,6 +69,18 @@ struct StructInfo {
     std::unordered_map<std::string, MethodInfo> methods;
 };
 
+struct ClassFieldInfo {
+    const ClassField* declaration;
+    CValueType type;
+};
+
+struct ClassInfo {
+    const ClassDeclarationStmt* declaration;
+    std::vector<ClassFieldInfo> fields;
+    std::unordered_map<std::string, std::size_t> field_indices;
+    std::unordered_map<std::string, MethodInfo> methods;
+};
+
 struct EnumVariantInfo {
     const EnumVariant* declaration;
     std::optional<CValueType> payload_type;
@@ -90,18 +103,21 @@ struct GeneratedExpression {
     bool addressable{false};
     bool pointer{false};
     std::string prelude;
+    bool owned{false};
 
     GeneratedExpression(
         std::string code,
         CValueType type,
         bool addressable = false,
         bool pointer = false,
-        std::string prelude = {})
+        std::string prelude = {},
+        bool owned = false)
         : code(std::move(code))
         , type(std::move(type))
         , addressable(addressable)
         , pointer(pointer)
         , prelude(std::move(prelude))
+        , owned(owned)
     {
     }
 };
@@ -150,6 +166,22 @@ std::string struct_name(std::string_view name)
     return "toro_struct_" + std::string(name);
 }
 
+std::string class_name(std::string_view name)
+{
+    return "toro_class_" + std::to_string(name.size()) + "_"
+        + std::string(name);
+}
+
+std::string retain_name(std::string_view name)
+{
+    return class_name(name) + "_retain";
+}
+
+std::string release_name(std::string_view name)
+{
+    return class_name(name) + "_release";
+}
+
 std::string enum_name(std::string_view name)
 {
     return "toro_enum_" + std::to_string(name.size()) + "_"
@@ -180,6 +212,9 @@ std::string type_mangle(const CValueType& type)
     case CValueKind::String: return "s";
     case CValueKind::Struct:
         return "s" + std::to_string(type.nominal_name.size()) + "_"
+            + type.nominal_name;
+    case CValueKind::Class:
+        return "c" + std::to_string(type.nominal_name.size()) + "_"
             + type.nominal_name;
     case CValueKind::Enum:
         return "e" + std::to_string(type.nominal_name.size()) + "_"
@@ -228,6 +263,7 @@ std::string c_type_name(CValueType type)
     case CValueKind::Bool: return "bool";
     case CValueKind::String: return "const char*";
     case CValueKind::Struct: return struct_name(type.nominal_name);
+    case CValueKind::Class: return class_name(type.nominal_name) + "*";
     case CValueKind::Enum: return enum_name(type.nominal_name);
     case CValueKind::Result: return result_name(type);
     case CValueKind::Void: return "void";
@@ -266,11 +302,16 @@ public:
             "#include <stdbool.h>\n"
             "#include <stdint.h>\n"
             "#include <stdio.h>\n"
+            "#include <stdlib.h>\n"
             "#include <string.h>\n\n";
 
         for (const auto& struct_declaration : struct_order_) {
             output += "typedef struct " + struct_name(struct_declaration->name)
                 + " " + struct_name(struct_declaration->name) + ";\n";
+        }
+        for (const auto& class_declaration : class_order_) {
+            output += "typedef struct " + class_name(class_declaration->name)
+                + " " + class_name(class_declaration->name) + ";\n";
         }
         for (const auto& enum_declaration : enum_order_) {
             output += "typedef struct " + enum_name(enum_declaration->name)
@@ -280,7 +321,7 @@ public:
             output += "typedef struct " + result_name(result.type) + " "
                 + result_name(result.type) + ";\n";
         }
-        if (!struct_order_.empty() || !enum_order_.empty()
+        if (!struct_order_.empty() || !class_order_.empty() || !enum_order_.empty()
             || !result_order_.empty()) {
             output += '\n';
         }
@@ -295,6 +336,7 @@ public:
 
         for (const auto& statement : program.statements) {
             if (statement->kind == StmtKind::StructDeclaration
+                || statement->kind == StmtKind::ClassDeclaration
                 || statement->kind == StmtKind::EnumDeclaration) {
                 continue;
             }
@@ -314,18 +356,36 @@ public:
                     static_cast<const MethodDeclaration&>(*method);
                 output += method_declaration_text(
                     declaration->name,
+                    CValueKind::Struct,
                     method_declaration,
                     info.methods.at(method_declaration.name));
                 output += ";\n";
             }
         }
+        for (const auto* declaration : class_order_) {
+            const auto& info = classes_.at(declaration->name);
+            for (const auto& member : declaration->members) {
+                if (member->kind != ClassMemberKind::Method) {
+                    continue;
+                }
+                const auto& method = static_cast<const MethodDeclaration&>(*member);
+                output += method_declaration_text(
+                    declaration->name,
+                    CValueKind::Class,
+                    method,
+                    info.methods.at(method.name));
+                output += ";\n";
+            }
+        }
         if (!program.statements.empty() || !struct_order_.empty()
+            || !class_order_.empty()
             || !enum_order_.empty()) {
             output += '\n';
         }
 
         for (const auto& statement : program.statements) {
             if (statement->kind == StmtKind::StructDeclaration
+                || statement->kind == StmtKind::ClassDeclaration
                 || statement->kind == StmtKind::EnumDeclaration) {
                 continue;
             }
@@ -340,8 +400,24 @@ public:
                     static_cast<const MethodDeclaration&>(*method);
                 output += emit_method(
                     declaration->name,
+                    CValueKind::Struct,
                     method_declaration,
                     info.methods.at(method_declaration.name));
+                output += '\n';
+            }
+        }
+        for (const auto* declaration : class_order_) {
+            const auto& info = classes_.at(declaration->name);
+            for (const auto& member : declaration->members) {
+                if (member->kind != ClassMemberKind::Method) {
+                    continue;
+                }
+                const auto& method = static_cast<const MethodDeclaration&>(*member);
+                output += emit_method(
+                    declaration->name,
+                    CValueKind::Class,
+                    method,
+                    info.methods.at(method.name));
                 output += '\n';
             }
         }
@@ -372,6 +448,54 @@ public:
     }
 
 private:
+    static bool contains_class_reference(const CValueType& type)
+    {
+        if (type.kind == CValueKind::Class) {
+            return true;
+        }
+        return std::ranges::any_of(
+            type.arguments,
+            [](const CValueType& argument) {
+                return contains_class_reference(argument);
+            });
+    }
+
+    static bool statement_guarantees_return(const Stmt& statement)
+    {
+        switch (statement.kind) {
+        case StmtKind::Return:
+            return true;
+        case StmtKind::Block:
+            return statements_guarantee_return(
+                static_cast<const BlockStmt&>(statement).statements);
+        case StmtKind::If: {
+            const auto& conditional = static_cast<const IfStmt&>(statement);
+            return conditional.else_branch
+                && statements_guarantee_return(conditional.then_block->statements)
+                && statement_guarantees_return(*conditional.else_branch);
+        }
+        case StmtKind::Handle: {
+            const auto& handle = static_cast<const HandleStmt&>(statement);
+            return !handle.cases.empty()
+                && std::ranges::all_of(
+                    handle.cases,
+                    [](const HandleCase& handle_case) {
+                        return statements_guarantee_return(
+                            handle_case.body->statements);
+                    });
+        }
+        default:
+            return false;
+        }
+    }
+
+    static bool statements_guarantee_return(
+        const std::vector<std::unique_ptr<Stmt>>& statements)
+    {
+        return !statements.empty()
+            && statement_guarantees_return(*statements.back());
+    }
+
     void collect_types(const Program& program)
     {
         for (const auto& statement : program.statements) {
@@ -405,14 +529,48 @@ private:
                 enum_order_.push_back(&declaration);
                 nominal_order_.push_back(
                     CValueType{CValueKind::Enum, declaration.name});
+            } else if (statement->kind == StmtKind::ClassDeclaration) {
+                const auto& declaration =
+                    static_cast<const ClassDeclarationStmt&>(*statement);
+                if (declaration.is_abstract) {
+                    throw_backend_error(
+                        declaration.location,
+                        "abstract classes are not supported by the C backend");
+                }
+                if (!declaration.generic_parameters.empty()) {
+                    throw_backend_error(
+                        declaration.location,
+                        "generic classes are not supported by the C backend");
+                }
+                if (declaration.base_type) {
+                    throw_backend_error(
+                        declaration.location,
+                        "class inheritance is not supported by the C backend");
+                }
+                if (!declaration.interfaces.empty()) {
+                    throw_backend_error(
+                        declaration.location,
+                        "class interface implementations are not supported by the C backend");
+                }
+                classes_.emplace(
+                    declaration.name, ClassInfo{&declaration, {}, {}, {}});
+                class_order_.push_back(&declaration);
+                nominal_order_.push_back(
+                    CValueType{CValueKind::Class, declaration.name});
             }
         }
 
         for (const auto* declaration : struct_order_) {
             auto& info = structs_.at(declaration->name);
             for (const auto& field : declaration->fields) {
+                const CValueType field_type = lower_type(field.type);
+                if (contains_class_reference(field_type)) {
+                    throw_backend_error(
+                        field.location,
+                        "class-reference struct fields are not supported by the C backend");
+                }
                 info.field_indices.emplace(field.name, info.fields.size());
-                info.fields.push_back(StructFieldInfo{&field, lower_type(field.type)});
+                info.fields.push_back(StructFieldInfo{&field, field_type});
             }
             for (const auto& member : declaration->methods) {
                 const auto& method = static_cast<const MethodDeclaration&>(*member);
@@ -445,13 +603,78 @@ private:
         for (const auto* declaration : enum_order_) {
             auto& info = enums_.at(declaration->name);
             for (const auto& variant : declaration->variants) {
+                std::optional<CValueType> payload_type;
+                if (variant.payload_type) {
+                    payload_type = lower_type(*variant.payload_type);
+                    if (contains_class_reference(*payload_type)) {
+                        throw_backend_error(
+                            variant.location,
+                            "class-reference enum payloads are not supported by the C backend");
+                    }
+                }
                 info.variant_indices.emplace(variant.name, info.variants.size());
                 info.variants.push_back(EnumVariantInfo{
                     &variant,
-                    variant.payload_type
-                        ? std::optional<CValueType>{lower_type(*variant.payload_type)}
-                        : std::nullopt,
+                    std::move(payload_type),
                 });
+            }
+        }
+
+        for (const auto* declaration : class_order_) {
+            auto& info = classes_.at(declaration->name);
+            for (const auto& member : declaration->members) {
+                if (member->kind == ClassMemberKind::Conversion) {
+                    throw_backend_error(
+                        member->location,
+                        "class conversion overloads are not supported by the C backend");
+                }
+                if (member->kind == ClassMemberKind::Field) {
+                    const auto& field = static_cast<const ClassField&>(*member);
+                    const CValueType field_type = lower_type(field.type);
+                    if (contains_class_reference(field_type)) {
+                        throw_backend_error(
+                            field.location,
+                            "class-reference fields are not supported by the C backend");
+                    }
+                    info.field_indices.emplace(field.name, info.fields.size());
+                    info.fields.push_back(ClassFieldInfo{&field, field_type});
+                    continue;
+                }
+
+                const auto& method = static_cast<const MethodDeclaration&>(*member);
+                if (method.name == "init") {
+                    throw_backend_error(
+                        method.location,
+                        "class init execution is not supported by the C backend");
+                }
+                if (method.name == "destroy") {
+                    throw_backend_error(
+                        method.location,
+                        "destroy() runtime invocation is not supported by the C backend");
+                }
+                if (!method.generic_parameters.empty()) {
+                    throw_backend_error(
+                        method.location,
+                        "generic class methods are not supported by the C backend");
+                }
+                if (method.is_virtual || method.is_override || !method.body) {
+                    throw_backend_error(
+                        method.location,
+                        "virtual, override, or bodyless class methods are not supported by the C backend");
+                }
+                MethodInfo method_info{&method, void_type, {}};
+                if (method.return_type) {
+                    method_info.return_type = lower_type(*method.return_type);
+                }
+                for (const auto& parameter : method.parameters) {
+                    method_info.parameter_types.push_back(lower_type(parameter.type));
+                }
+                if (!info.methods.emplace(method.name, std::move(method_info)).second) {
+                    throw_backend_error(
+                        method.location,
+                        "class method overloads are not supported by the C backend: '"
+                            + declaration->name + "." + method.name + "'");
+                }
             }
         }
     }
@@ -503,6 +726,11 @@ private:
                 {},
                 {lower_type(type.arguments[0]), lower_type(type.arguments[1])},
             };
+            if (contains_class_reference(result)) {
+                throw_backend_error(
+                    type.location,
+                    "class-reference Result payloads are not supported by the C backend");
+            }
             if (std::ranges::none_of(
                     result_order_,
                     [&](const ResultInfo& existing) {
@@ -532,6 +760,9 @@ private:
         if (structs_.contains(type.name)) {
             return CValueType{CValueKind::Struct, type.name};
         }
+        if (classes_.contains(type.name)) {
+            return CValueType{CValueKind::Class, type.name};
+        }
         if (enums_.contains(type.name)) {
             return CValueType{CValueKind::Enum, type.name};
         }
@@ -551,6 +782,17 @@ private:
                     static_cast<const MethodDeclaration&>(*method);
                 if (method_declaration.body) {
                     collect_local_types(*method_declaration.body);
+                }
+            }
+        }
+        for (const auto* declaration : class_order_) {
+            for (const auto& member : declaration->members) {
+                if (member->kind != ClassMemberKind::Method) {
+                    continue;
+                }
+                const auto& method = static_cast<const MethodDeclaration&>(*member);
+                if (method.body) {
+                    collect_local_types(*method.body);
                 }
             }
         }
@@ -623,6 +865,8 @@ private:
             SourceLocation location{1, 1};
             if (type.kind == CValueKind::Struct) {
                 location = structs_.at(name).declaration->location;
+            } else if (type.kind == CValueKind::Class) {
+                location = classes_.at(name).declaration->location;
             } else if (type.kind == CValueKind::Enum) {
                 location = enums_.at(name).declaration->location;
             } else if (const auto result = std::ranges::find_if(
@@ -640,6 +884,35 @@ private:
         }
         state[key] = 1;
         std::string output;
+        if (type.kind == CValueKind::Class) {
+            const auto& info = classes_.at(name);
+            for (const auto& field : info.fields) {
+                if (field.type.kind == CValueKind::Struct
+                    || field.type.kind == CValueKind::Enum
+                    || field.type.kind == CValueKind::Result) {
+                    output += emit_type_definition(field.type, state);
+                }
+            }
+            const std::string object = class_name(name);
+            output += "struct " + object + "\n{\n";
+            output += "    uint64_t toro_strong_count;\n";
+            for (const auto& field : info.fields) {
+                output += "    " + c_type_name(field.type) + " "
+                    + field_name(field.declaration->name) + ";\n";
+            }
+            output += "};\n\n";
+            output += "static void " + retain_name(name) + "(" + object
+                + "* toro_value)\n{\n";
+            output += "    if (toro_value != NULL) { ++toro_value->toro_strong_count; }\n";
+            output += "}\n\n";
+            output += "static void " + release_name(name) + "(" + object
+                + "* toro_value)\n{\n";
+            output += "    if (toro_value != NULL && --toro_value->toro_strong_count == 0)\n";
+            output += "    {\n        free(toro_value);\n    }\n";
+            output += "}\n\n";
+            state[key] = 2;
+            return output;
+        }
         if (type.kind == CValueKind::Result) {
             for (const auto& argument : type.arguments) {
                 if (argument.kind == CValueKind::Struct
@@ -733,12 +1006,15 @@ private:
 
     std::string method_declaration_text(
         const std::string& owner,
+        CValueKind owner_kind,
         const MethodDeclaration& method,
         const MethodInfo& info) const
     {
         std::string output = "static " + c_type_name(info.return_type) + " "
             + method_name(owner, method.name) + "("
-            + struct_name(owner) + "* toro_self";
+            + c_type_name(CValueType{owner_kind, owner})
+            + (owner_kind == CValueKind::Struct ? "*" : "")
+            + " toro_self";
         for (std::size_t index = 0; index < method.parameters.size(); ++index) {
             output += ", " + c_type_name(info.parameter_types[index]) + " "
                 + parameter_name(method.parameters[index].name);
@@ -772,20 +1048,40 @@ private:
     {
         current_location_ = function.location;
         scopes_.clear();
+        owned_class_values_.clear();
         push_scope();
         const auto& info = functions_.at(function.name);
         current_return_type_ = info.return_type;
         for (std::size_t index = 0; index < function.parameters.size(); ++index) {
+            const bool owns_parameter =
+                info.parameter_types[index].kind == CValueKind::Class;
             scopes_.back().emplace(
                 function.parameters[index].name,
                 ValueInfo{
                     info.parameter_types[index],
                     parameter_name(function.parameters[index].name),
+                    false,
+                    owns_parameter,
                 });
+            if (owns_parameter) {
+                owned_class_values_.back().push_back(ValueInfo{
+                    info.parameter_types[index],
+                    parameter_name(function.parameters[index].name),
+                    false,
+                    true,
+                });
+            }
         }
 
         std::string output = function_declaration(function) + "\n{\n";
+        for (const auto& parameter : owned_class_values_.back()) {
+            output += indent(1) + retain_name(parameter.type.nominal_name)
+                + "(" + parameter.c_name + ");\n";
+        }
         output += emit_statement_list(function.body->statements, 1);
+        if (!statements_guarantee_return(function.body->statements)) {
+            output += scope_cleanup(scopes_.size() - 1, 1);
+        }
         output += "}\n";
         pop_scope();
         current_return_type_.reset();
@@ -794,31 +1090,53 @@ private:
 
     std::string emit_method(
         const std::string& owner,
+        CValueKind owner_kind,
         const MethodDeclaration& method,
         const MethodInfo& info)
     {
         current_location_ = method.location;
         scopes_.clear();
+        owned_class_values_.clear();
         push_scope();
         current_return_type_ = info.return_type;
         scopes_.back().emplace(
             "self",
             ValueInfo{
-                CValueType{CValueKind::Struct, owner},
+                CValueType{owner_kind, owner},
                 "toro_self",
-                true,
+                owner_kind == CValueKind::Struct,
             });
         for (std::size_t index = 0; index < method.parameters.size(); ++index) {
+            const bool owns_parameter =
+                info.parameter_types[index].kind == CValueKind::Class;
             scopes_.back().emplace(
                 method.parameters[index].name,
                 ValueInfo{
                     info.parameter_types[index],
                     parameter_name(method.parameters[index].name),
+                    false,
+                    owns_parameter,
                 });
+            if (owns_parameter) {
+                owned_class_values_.back().push_back(ValueInfo{
+                    info.parameter_types[index],
+                    parameter_name(method.parameters[index].name),
+                    false,
+                    true,
+                });
+            }
         }
 
-        std::string output = method_declaration_text(owner, method, info) + "\n{\n";
+        std::string output = method_declaration_text(
+            owner, owner_kind, method, info) + "\n{\n";
+        for (const auto& parameter : owned_class_values_.back()) {
+            output += indent(1) + retain_name(parameter.type.nominal_name)
+                + "(" + parameter.c_name + ");\n";
+        }
         output += emit_statement_list(method.body->statements, 1);
+        if (!statements_guarantee_return(method.body->statements)) {
+            output += scope_cleanup(scopes_.size() - 1, 1);
+        }
         output += "}\n";
         pop_scope();
         current_return_type_.reset();
@@ -851,15 +1169,47 @@ private:
                 *declaration.initializer, declared_type);
             const CValueType type = declared_type.value_or(initializer.type);
             const std::string c_name = variable_name(declaration.name);
-            scopes_.back().emplace(declaration.name, ValueInfo{type, c_name});
-            return indent_prelude(initializer.prelude, depth)
-                + prefix + c_type_name(type) + " " + c_name + " = "
+            std::string output = indent_prelude(initializer.prelude, depth);
+            output += prefix + c_type_name(type) + " " + c_name + " = "
                 + initializer.code + ";\n";
+            if (type.kind == CValueKind::Class) {
+                if (!initializer.owned) {
+                    output += prefix + retain_name(type.nominal_name)
+                        + "(" + c_name + ");\n";
+                }
+                owned_class_values_.back().push_back(
+                    ValueInfo{type, c_name, false, true});
+            }
+            scopes_.back().emplace(
+                declaration.name,
+                ValueInfo{type, c_name, false, type.kind == CValueKind::Class});
+            return output;
         }
         case StmtKind::Assignment: {
             const auto& assignment = static_cast<const AssignmentStmt&>(statement);
             const auto& target = find_value(assignment.name);
             const auto value = emit_expression(*assignment.value, target.type);
+            if (target.type.kind == CValueKind::Class) {
+                if (!target.owned_local) {
+                    throw_backend_error(
+                        statement.location,
+                        "cannot reassign borrowed class reference '"
+                            + assignment.name + "' in the C backend");
+                }
+                const std::string temporary =
+                    "toro_class_value_" + std::to_string(temporary_index_++);
+                std::string output = indent_prelude(value.prelude, depth);
+                output += prefix + c_type_name(target.type) + " " + temporary
+                    + " = " + value.code + ";\n";
+                if (!value.owned) {
+                    output += prefix + retain_name(target.type.nominal_name)
+                        + "(" + temporary + ");\n";
+                }
+                output += prefix + release_name(target.type.nominal_name)
+                    + "(" + target.c_name + ");\n";
+                output += prefix + target.c_name + " = " + temporary + ";\n";
+                return output;
+            }
             return indent_prelude(value.prelude, depth)
                 + prefix + target.c_name + " = "
                 + value.code + ";\n";
@@ -880,18 +1230,53 @@ private:
         case StmtKind::Expression: {
             const auto& expression = static_cast<const ExpressionStmt&>(statement);
             const auto value = emit_expression(*expression.expression);
+            if (value.type.kind == CValueKind::Class && value.owned) {
+                const std::string temporary =
+                    "toro_unused_class_" + std::to_string(temporary_index_++);
+                return indent_prelude(value.prelude, depth)
+                    + prefix + c_type_name(value.type) + " " + temporary
+                    + " = " + value.code + ";\n"
+                    + prefix + release_name(value.type.nominal_name)
+                    + "(" + temporary + ");\n";
+            }
             return indent_prelude(value.prelude, depth)
                 + prefix + value.code + ";\n";
         }
         case StmtKind::Return: {
             const auto& return_statement = static_cast<const ReturnStmt&>(statement);
             if (!return_statement.value) {
-                return prefix + "return;\n";
+                return all_scope_cleanup(depth) + prefix + "return;\n";
             }
             const auto value = emit_expression(
                 *return_statement.value, current_return_type_);
+            if (value.type.kind == CValueKind::Class) {
+                const std::string temporary =
+                    "toro_return_class_" + std::to_string(temporary_index_++);
+                std::string output = indent_prelude(value.prelude, depth);
+                output += prefix + c_type_name(value.type) + " " + temporary
+                    + " = " + value.code + ";\n";
+                if (!value.owned) {
+                    output += prefix + retain_name(value.type.nominal_name)
+                        + "(" + temporary + ");\n";
+                }
+                output += all_scope_cleanup(depth);
+                output += prefix + "return " + temporary + ";\n";
+                return output;
+            }
+            const bool has_owned_references = std::ranges::any_of(
+                owned_class_values_,
+                [](const auto& values) { return !values.empty(); });
+            if (!has_owned_references) {
+                return indent_prelude(value.prelude, depth)
+                    + prefix + "return " + value.code + ";\n";
+            }
+            const std::string temporary =
+                "toro_return_value_" + std::to_string(temporary_index_++);
             return indent_prelude(value.prelude, depth)
-                + prefix + "return " + value.code + ";\n";
+                + prefix + c_type_name(value.type) + " " + temporary
+                + " = " + value.code + ";\n"
+                + all_scope_cleanup(depth)
+                + prefix + "return " + temporary + ";\n";
         }
         case StmtKind::Block:
             return emit_block(static_cast<const BlockStmt&>(statement), depth);
@@ -913,6 +1298,7 @@ private:
             output += indent(depth + 2) + "break;\n";
             output += indent(depth + 1) + "}\n";
             output += emit_statement_list(loop.body->statements, depth + 1);
+            output += scope_cleanup(scopes_.size() - 1, depth + 1);
             output += prefix + "}\n";
             pop_scope();
             return output;
@@ -947,6 +1333,9 @@ private:
         push_scope();
         std::string output = "{\n";
         output += emit_statement_list(block.statements, depth + 1);
+        if (!statements_guarantee_return(block.statements)) {
+            output += scope_cleanup(scopes_.size() - 1, depth + 1);
+        }
         output += indent(depth) + "}\n";
         pop_scope();
         return output;
@@ -1040,6 +1429,9 @@ private:
                     + ".toro_payload." + payload + ";\n";
             }
             output += emit_statement_list(handle_case.body->statements, depth + 2);
+            if (!statements_guarantee_return(handle_case.body->statements)) {
+                output += scope_cleanup(scopes_.size() - 1, depth + 2);
+            }
             output += indent(depth + 2) + "break;\n";
             pop_scope();
             output += indent(depth + 1) + "}\n";
@@ -1148,9 +1540,11 @@ private:
             };
         }
         if (left.type.kind == CValueKind::Struct
+            || left.type.kind == CValueKind::Class
             || left.type.kind == CValueKind::Enum
             || left.type.kind == CValueKind::Result
             || right.type.kind == CValueKind::Struct
+            || right.type.kind == CValueKind::Class
             || right.type.kind == CValueKind::Enum
             || right.type.kind == CValueKind::Result) {
             throw_backend_error(
@@ -1239,6 +1633,9 @@ private:
         if (structs_.contains(callee.name)) {
             return emit_struct_construction(callee.name, call);
         }
+        if (classes_.contains(callee.name)) {
+            return emit_class_construction(callee.name, call);
+        }
         const auto function = functions_.find(callee.name);
         if (function == functions_.end()) {
             throw_backend_error(
@@ -1250,6 +1647,7 @@ private:
 
         std::string code = function_name(callee.name) + "(";
         std::string prelude;
+        std::vector<ValueInfo> owned_arguments;
         for (std::size_t index = 0; index < ordered.size(); ++index) {
             if (index != 0) {
                 code += ", ";
@@ -1257,16 +1655,24 @@ private:
             const auto argument = emit_expression(
                 *ordered[index]->value, function->second.parameter_types[index]);
             prelude += argument.prelude;
-            code += argument.code;
+            if (argument.type.kind == CValueKind::Class && argument.owned) {
+                const std::string temporary =
+                    "toro_argument_class_" + std::to_string(temporary_index_++);
+                prelude += c_type_name(argument.type) + " " + temporary
+                    + " = " + argument.code + ";\n";
+                owned_arguments.push_back(
+                    ValueInfo{argument.type, temporary, false, true});
+                code += temporary;
+            } else {
+                code += argument.code;
+            }
         }
         code += ")";
-        return {
+        return complete_call(
             std::move(code),
             function->second.return_type,
-            false,
-            false,
             std::move(prelude),
-        };
+            std::move(owned_arguments));
     }
 
     GeneratedExpression emit_result_construction(
@@ -1492,6 +1898,63 @@ private:
         };
     }
 
+    GeneratedExpression emit_class_construction(
+        const std::string& name,
+        const CallExpr& call)
+    {
+        const auto& info = classes_.at(name);
+        std::vector<const CallArgument*> arguments(info.fields.size(), nullptr);
+        std::size_t positional_index = 0;
+        for (const auto& argument : call.arguments) {
+            std::size_t field_index = positional_index;
+            if (argument.name) {
+                const auto found = info.field_indices.find(*argument.name);
+                if (found == info.field_indices.end()) {
+                    throw_backend_error(
+                        current_location_,
+                        "class '" + name + "' has no field named '"
+                            + *argument.name + "'");
+                }
+                field_index = found->second;
+            } else {
+                while (positional_index < arguments.size()
+                    && arguments[positional_index] != nullptr) {
+                    ++positional_index;
+                }
+                field_index = positional_index++;
+            }
+            if (field_index >= arguments.size() || arguments[field_index] != nullptr) {
+                throw_backend_error(
+                    current_location_, "invalid class construction argument layout");
+            }
+            arguments[field_index] = &argument;
+        }
+
+        const CValueType type{CValueKind::Class, name};
+        const std::string temporary =
+            "toro_new_class_" + std::to_string(temporary_index_++);
+        std::string prelude = c_type_name(type) + " " + temporary
+            + " = malloc(sizeof(*" + temporary + "));\n";
+        prelude += "if (" + temporary + " == NULL) { abort(); }\n";
+        prelude += temporary + "->toro_strong_count = 1;\n";
+        for (std::size_t index = 0; index < info.fields.size(); ++index) {
+            const auto& field = info.fields[index];
+            GeneratedExpression value{"", field.type};
+            if (arguments[index]) {
+                value = emit_expression(*arguments[index]->value, field.type);
+            } else if (field.declaration->default_value) {
+                value = emit_expression(*field.declaration->default_value, field.type);
+            } else {
+                value = GeneratedExpression{
+                    zero_value(field.type, field.declaration->location), field.type};
+            }
+            prelude += value.prelude;
+            prelude += temporary + "->" + field_name(field.declaration->name)
+                + " = " + value.code + ";\n";
+        }
+        return {temporary, type, true, false, std::move(prelude), true};
+    }
+
     std::string zero_value(CValueType type, SourceLocation location) const
     {
         switch (type.kind) {
@@ -1499,6 +1962,9 @@ private:
         case CValueKind::Dec: return "0.0";
         case CValueKind::Bool: return "false";
         case CValueKind::String: return "\"\"";
+        case CValueKind::Class:
+            throw_backend_error(
+                location, "class-reference field has no backend zero value");
         case CValueKind::Struct:
             throw_backend_error(
                 location,
@@ -1521,9 +1987,32 @@ private:
     GeneratedExpression emit_member_access(const MemberAccessExpr& member)
     {
         const auto object = emit_expression(*member.object);
-        if (object.type.kind != CValueKind::Struct) {
+        if (object.type.kind != CValueKind::Struct
+            && object.type.kind != CValueKind::Class) {
             throw_backend_error(
-                current_location_, "field access requires a struct value");
+                current_location_, "field access requires a struct or class value");
+        }
+        if (object.type.kind == CValueKind::Class) {
+            if (object.owned) {
+                throw_backend_error(
+                    current_location_,
+                    "field access through a temporary class reference is not supported by the C backend");
+            }
+            const auto& info = classes_.at(object.type.nominal_name);
+            const auto field = info.field_indices.find(member.member);
+            if (field == info.field_indices.end()) {
+                throw_backend_error(
+                    current_location_,
+                    "class '" + object.type.nominal_name + "' has no field named '"
+                        + member.member + "'");
+            }
+            return {
+                "(" + object.code + ")->" + field_name(member.member),
+                info.fields[field->second].type,
+                object.addressable,
+                false,
+                object.prelude,
+            };
         }
         const auto& info = structs_.at(object.type.nominal_name);
         const auto field = info.field_indices.find(member.member);
@@ -1578,19 +2067,23 @@ private:
         const MemberAccessExpr& member)
     {
         const auto receiver = emit_expression(*member.object);
-        if (receiver.type.kind != CValueKind::Struct) {
+        if (receiver.type.kind != CValueKind::Struct
+            && receiver.type.kind != CValueKind::Class) {
             throw_backend_error(
-                current_location_, "method calls require a struct receiver");
+                current_location_, "method calls require a struct or class receiver");
         }
-        const auto& struct_info = structs_.at(receiver.type.nominal_name);
-        const auto method = struct_info.methods.find(member.member);
-        if (method == struct_info.methods.end()) {
+        const auto* methods = receiver.type.kind == CValueKind::Struct
+            ? &structs_.at(receiver.type.nominal_name).methods
+            : &classes_.at(receiver.type.nominal_name).methods;
+        const auto method = methods->find(member.member);
+        if (method == methods->end()) {
             throw_backend_error(
                 current_location_,
-                "struct '" + receiver.type.nominal_name + "' has no method named '"
+                "type '" + receiver.type.nominal_name + "' has no method named '"
                     + member.member + "'");
         }
-        if (!receiver.pointer && !receiver.addressable) {
+        if (receiver.type.kind == CValueKind::Struct
+            && !receiver.pointer && !receiver.addressable) {
             throw_backend_error(
                 current_location_,
                 "struct method receiver must be an addressable value");
@@ -1598,21 +2091,83 @@ private:
         const auto ordered = order_arguments(
             call, method->second.declaration->parameters);
         std::string code = method_name(receiver.type.nominal_name, member.member) + "(";
-        code += receiver.pointer ? receiver.code : "&(" + receiver.code + ")";
         std::string prelude = receiver.prelude;
+        std::vector<ValueInfo> owned_arguments;
+        if (receiver.type.kind == CValueKind::Class && receiver.owned) {
+            const std::string temporary =
+                "toro_receiver_class_" + std::to_string(temporary_index_++);
+            prelude += c_type_name(receiver.type) + " " + temporary
+                + " = " + receiver.code + ";\n";
+            owned_arguments.push_back(
+                ValueInfo{receiver.type, temporary, false, true});
+            code += temporary;
+        } else {
+            code += receiver.type.kind == CValueKind::Class || receiver.pointer
+                ? receiver.code
+                : "&(" + receiver.code + ")";
+        }
         for (std::size_t index = 0; index < ordered.size(); ++index) {
             const auto argument = emit_expression(
                 *ordered[index]->value, method->second.parameter_types[index]);
             prelude += argument.prelude;
-            code += ", " + argument.code;
+            code += ", ";
+            if (argument.type.kind == CValueKind::Class && argument.owned) {
+                const std::string temporary =
+                    "toro_argument_class_" + std::to_string(temporary_index_++);
+                prelude += c_type_name(argument.type) + " " + temporary
+                    + " = " + argument.code + ";\n";
+                owned_arguments.push_back(
+                    ValueInfo{argument.type, temporary, false, true});
+                code += temporary;
+            } else {
+                code += argument.code;
+            }
         }
         code += ")";
-        return {
+        return complete_call(
             std::move(code),
             method->second.return_type,
+            std::move(prelude),
+            std::move(owned_arguments));
+    }
+
+    GeneratedExpression complete_call(
+        std::string code,
+        const CValueType& result_type,
+        std::string prelude,
+        std::vector<ValueInfo> owned_arguments)
+    {
+        if (owned_arguments.empty()) {
+            return {
+                std::move(code),
+                result_type,
+                false,
+                false,
+                std::move(prelude),
+                result_type.kind == CValueKind::Class,
+            };
+        }
+
+        std::string result_code = "(void)0";
+        if (result_type.kind == CValueKind::Void) {
+            prelude += code + ";\n";
+        } else {
+            result_code = "toro_call_value_" + std::to_string(temporary_index_++);
+            prelude += c_type_name(result_type) + " " + result_code
+                + " = " + code + ";\n";
+        }
+        for (auto argument = owned_arguments.rbegin();
+             argument != owned_arguments.rend(); ++argument) {
+            prelude += release_name(argument->type.nominal_name)
+                + "(" + argument->c_name + ");\n";
+        }
+        return {
+            std::move(result_code),
+            result_type,
             false,
             false,
             std::move(prelude),
+            result_type.kind == CValueKind::Class,
         };
     }
 
@@ -1656,6 +2211,9 @@ private:
         case CValueKind::Struct:
             throw_backend_error(
                 current_location_, "printing struct values is not supported by the C backend");
+        case CValueKind::Class:
+            throw_backend_error(
+                current_location_, "printing class references is not supported by the C backend");
         case CValueKind::Enum:
             throw_backend_error(
                 current_location_, "printing enum values is not supported by the C backend");
@@ -1672,11 +2230,33 @@ private:
     void push_scope()
     {
         scopes_.emplace_back();
+        owned_class_values_.emplace_back();
     }
 
     void pop_scope()
     {
         scopes_.pop_back();
+        owned_class_values_.pop_back();
+    }
+
+    std::string scope_cleanup(std::size_t scope_index, std::size_t depth) const
+    {
+        std::string output;
+        const auto& values = owned_class_values_.at(scope_index);
+        for (auto value = values.rbegin(); value != values.rend(); ++value) {
+            output += indent(depth) + release_name(value->type.nominal_name)
+                + "(" + value->c_name + ");\n";
+        }
+        return output;
+    }
+
+    std::string all_scope_cleanup(std::size_t depth) const
+    {
+        std::string output;
+        for (std::size_t index = owned_class_values_.size(); index > 0; --index) {
+            output += scope_cleanup(index - 1, depth);
+        }
+        return output;
     }
 
     const ValueInfo& find_value(const std::string& name) const
@@ -1692,12 +2272,15 @@ private:
 
     std::unordered_map<std::string, StructInfo> structs_;
     std::vector<const StructDeclarationStmt*> struct_order_;
+    std::unordered_map<std::string, ClassInfo> classes_;
+    std::vector<const ClassDeclarationStmt*> class_order_;
     std::unordered_map<std::string, EnumInfo> enums_;
     std::vector<const EnumDeclarationStmt*> enum_order_;
     std::vector<CValueType> nominal_order_;
     std::vector<ResultInfo> result_order_;
     std::unordered_map<std::string, FunctionInfo> functions_;
     std::vector<std::unordered_map<std::string, ValueInfo>> scopes_;
+    std::vector<std::vector<ValueInfo>> owned_class_values_;
     std::size_t temporary_index_{0};
     std::optional<CValueType> current_return_type_;
     SourceLocation current_location_{1, 1};

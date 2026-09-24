@@ -401,13 +401,58 @@ void test_distinct_result_instances()
     expect_contains(output, "toro_result_r1_s_1_i", "second Result instance");
 }
 
+void test_class_arc_lowering()
+{
+    const auto output = generate(
+        "class Counter {\n"
+        "    public value: int\n"
+        "    private step: int = 1\n"
+        "    public function increment() { self.value = self.value + self.step }\n"
+        "    public function get() -> int { return self.value }\n"
+        "}\n"
+        "function preserve(value: Counter) -> Counter { return value }\n"
+        "function main() {\n"
+        "    original := Counter(value: 10)\n"
+        "    copy := original\n"
+        "    copy.increment()\n"
+        "    copy.value = 12\n"
+        "    returned := preserve(original)\n"
+        "    replacement := Counter(value: 99)\n"
+        "    replacement = returned\n"
+        "    print(original.get())\n"
+        "}\n");
+
+    expect_contains(output, "uint64_t toro_strong_count;", "class ARC count");
+    expect_contains(output, "malloc(sizeof(*toro_new_class_", "class allocation");
+    expect_contains(output, "->toro_strong_count = 1;", "initial strong reference");
+    expect_contains(
+        output,
+        "static void toro_class_7_Counter_retain",
+        "class retain helper");
+    expect_contains(
+        output,
+        "static void toro_class_7_Counter_release",
+        "class release helper");
+    expect_contains(output, "free(toro_value);", "final strong release frees object");
+    expect_contains(
+        output,
+        "toro_class_7_Counter_retain(toro_var_copy);",
+        "reference copy retain");
+    expect_contains(
+        output,
+        "toro_class_7_Counter_release(toro_var_replacement);",
+        "replacement releases prior reference");
+    expect_contains(
+        output,
+        "(toro_self)->toro_field_value",
+        "class self field access");
+}
+
 void test_unsupported_features()
 {
     expect_backend_error(
-        "class Point {\n"
-        "    public x: int\n"
-        "}\n",
-        "top-level statements are not supported by the C backend");
+        "class Point { function init() {} }\n",
+        "class init execution is not supported by the C backend");
     expect_backend_error(
         "function identity<T>(value: T) -> T { return value }\n",
         "generic functions are not supported by the C backend");
@@ -437,11 +482,33 @@ void test_unsupported_features()
     expect_backend_error(
         "class Resource {}\n"
         "enum Event { resource(Resource) }\n",
-        "type 'Resource' is not supported by the C backend");
+        "class-reference enum payloads are not supported by the C backend");
     expect_backend_error(
         "class Resource {}\n"
         "function consume(result: Result<Resource, string>) {}\n",
-        "type 'Resource' is not supported by the C backend");
+        "class-reference Result payloads are not supported by the C backend");
+    expect_backend_error(
+        "class Resource { function destroy() {} }\n",
+        "destroy() runtime invocation is not supported by the C backend");
+    expect_backend_error(
+        "class Box<T> { public value: T }\n",
+        "generic classes are not supported by the C backend");
+    expect_backend_error(
+        "class Base {}\nclass Child : Base {}\n",
+        "class inheritance is not supported by the C backend");
+    expect_backend_error(
+        "interface Runnable { function run() }\n"
+        "class Worker implements Runnable { public function run() {} }\n",
+        "class interface implementations are not supported by the C backend");
+    expect_backend_error(
+        "class Named {\n"
+        "    public name: string\n"
+        "    overload as string { return self.name }\n"
+        "}\n",
+        "class conversion overloads are not supported by the C backend");
+    expect_backend_error(
+        "class Node { public next: Node }\n",
+        "class-reference fields are not supported by the C backend");
     expect_backend_error(
         "function consume(result: Result<int?, string>) {}\n",
         "nullable type 'int?' is not supported by the C backend");
@@ -497,6 +564,7 @@ int main()
         test_enum_function_return_and_nested_payload_types();
         test_result_construction_handle_and_propagation();
         test_distinct_result_instances();
+        test_class_arc_lowering();
         test_unsupported_features();
         test_generated_c_compiles();
     } catch (const std::exception& error) {
