@@ -1,20 +1,16 @@
+# Toro Language Design
 
-### `LANGUAGE.md`
+> This document tracks the evolving design of the Toro programming language.
 
-We don't need the full language specification yet. Start with this:
-
-```markdown
-# toro Language Design
-
-> This document tracks the evolving design of the toro programming language.
-
-toro is currently pre-1.0. Language rules described here may change as the compiler develops.
+Toro is currently pre-1.0. Language rules described here may change as the
+compiler develops.
 
 ---
 
 ## Philosophy
 
-toro aims to make normal programming simple while allowing explicit control when performance matters.
+Toro aims to make normal programming simple while allowing explicit control
+when performance matters.
 
 Core principles:
 
@@ -29,7 +25,7 @@ Core principles:
 
 ## Basic Syntax
 
-toro uses brace-delimited blocks.
+Toro uses brace-delimited blocks.
 
 Semicolons are not required.
 
@@ -38,17 +34,18 @@ function main() {
     value := 10
 
     if value > 5 {
-        print("Hello, toro!")
+        print("Hello, Toro!")
     }
 }
+```
 
 ### Logical Operators
 
-toro uses the keywords `and` and `or` rather than symbolic logical operators.
+Toro uses the keywords `and` and `or` rather than symbolic logical operators.
 `and` has higher precedence than `or`; equality and comparison operators have
 higher precedence than both.
 
-These operators will short-circuit when execution and code generation are implemented:
+These operators short-circuit during native execution:
 
 - `false and expression` does not evaluate `expression`.
 - `true or expression` does not evaluate `expression`.
@@ -131,7 +128,7 @@ error Result immediately on failure.
 ### Structs and members
 
 Struct fields have explicit types and may provide a default expression. During
-construction, explicit defaults take priority over toro's type zero values.
+construction, explicit defaults take priority over Toro's type zero values.
 Without an explicit default, `int`, `dec`, `string`, and `bool` fields receive
 `0`, `0.0`, `""`, and `false`, respectively. Nullable fields receive `null`.
 Structs may also declare public, non-virtual methods with normal `function`
@@ -156,9 +153,10 @@ print(player.name)
 
 ### Classes
 
-Classes contain ordered fields and methods. Members are private by default and
-may be marked `public` or `private`. Methods use normal `function` syntax, and
-`self` has the containing class type and may access that class's private members.
+Classes contain ordered fields, methods, and lifecycle declarations. Members are
+private by default and may be marked `public` or `private`. Ordinary methods use
+`function` syntax, and `self` has the containing class type and may access that
+class's private members.
 
 ```toro
 class Player {
@@ -173,26 +171,29 @@ class Player {
         return self.health
     }
 
-    function destroy() {
+    destroy() {
         print("player destroyed")
     }
 }
 ```
 
-A class may declare one `init` method. When present, construction arguments bind
-to its parameters. Construction allocates the object, initializes explicit field
-defaults and toro zero/null values, then executes `init` exactly once with a valid
-`self`. A required non-null field that has no safe default must be assigned on
-every reachable path before `init` completes. Without `init`, construction keeps
-using named or positional field arguments. `init(...) { ... }` is a dedicated
-lifecycle declaration; spelling it as `function init(...)` is invalid.
+A class may declare one `init` lifecycle declaration. When present,
+construction arguments bind to its parameters. Construction allocates the
+object, initializes explicit field defaults and Toro zero/null values, then
+executes `init` exactly once with a valid `self`. A required non-null field that
+has no safe default must be assigned on every reachable path before `init`
+completes. Without `init`, construction keeps using named or positional field
+arguments. `init(...) { ... }` is a dedicated lifecycle declaration; spelling
+it as `function init(...)` is invalid.
+Likewise, `destroy() { ... }` is a lifecycle declaration, and spelling it as
+`function destroy()` is invalid.
 
-A class may also declare one parameterless `destroy()` method, and neither
-`init` nor `destroy` can declare a return type. The native backend runs
-`destroy()` exactly once at final strong release, before owned fields and object
-storage are freed. `self` and fields remain usable during that call. Initializer
-overloading, base-initializer chaining, and failable initialization are not yet
-supported.
+A class may also declare one parameterless `destroy()` lifecycle declaration,
+and neither `init` nor `destroy` can declare a return type. The native backend
+runs `destroy()` exactly once at final strong release, before owned fields and
+object storage are freed. `self` and fields remain usable during that call.
+Initializer overloading, base-initializer chaining, and failable initialization
+are not yet supported.
 
 ### Interfaces and inheritance
 
@@ -405,7 +406,7 @@ cyclic-reference collection are not lowered yet. Enum and
 Result payloads may use primitives, supported non-generic structs, supported
 enums, or supported nested Results; other payload types produce a backend
 diagnostic. Class-valued enum/Result payloads remain unsupported so ownership is
-never guessed. Non-generic class `init` methods execute after field storage is
+never guessed. Non-generic class `init` declarations execute after field storage is
 initialized. Method receivers and argument forms that cannot yet be owned safely
 are materialized and released around the call; temporary class field access
 remains rejected rather than lowered to invalid C.
@@ -504,9 +505,9 @@ result := integer as dec + 1.0
 ```
 
 `int` and `dec` may be converted in either direction, but are never converted
-implicitly. Once execution is implemented, `dec as int` will truncate toward
-zero. Same-type casts are valid. A nullable `T?` cast to `T` does not unwrap the
-value and is rejected.
+implicitly. When cast/conversion backend lowering is implemented, `dec as int`
+will truncate toward zero. Same-type casts are valid. A nullable `T?` cast to
+`T` does not unwrap the value and is rejected.
 
 Classes and structs may define one explicit conversion per target type:
 

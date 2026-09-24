@@ -1,7 +1,7 @@
 class Companion {
     public label: string
 
-    function destroy() {
+    destroy() {
         print("companion destroyed")
     }
 }
@@ -15,7 +15,7 @@ class Animal {
         return self.name
     }
 
-    function destroy() {
+    destroy() {
         print("animal destroyed")
     }
 }
@@ -27,7 +27,7 @@ class Dog : Animal {
         self.age = self.age + 1
     }
 
-    function destroy() {
+    destroy() {
         print("dog destroyed")
     }
 }

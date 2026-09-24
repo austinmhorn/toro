@@ -2,7 +2,7 @@ class Child {
     public name: string
     public weak parent: Parent?
 
-    function destroy() {
+    destroy() {
         print("child destroyed")
         if self.parent == null {
             print("parent cleared")
@@ -13,7 +13,7 @@ class Child {
 class Parent {
     public child: Child?
 
-    function destroy() {
+    destroy() {
         print("parent destroyed")
         if self.child != null {
             print("child attached")

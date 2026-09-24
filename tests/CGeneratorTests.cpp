@@ -453,11 +453,11 @@ void test_class_lifecycle_and_weak_lowering()
     const auto output = generate(
         "class Child {\n"
         "    public weak parent: Parent?\n"
-        "    function destroy() { print(\"child destroyed\") }\n"
+        "    destroy() { print(\"child destroyed\") }\n"
         "}\n"
         "class Parent {\n"
         "    public child: Child?\n"
-        "    function destroy() {\n"
+        "    destroy() {\n"
         "        print(\"parent destroyed\")\n"
         "        if self.child != null { print(\"child attached\") }\n"
         "    }\n"
@@ -510,11 +510,11 @@ void test_class_inheritance_lowering()
         "class Animal {\n"
         "    public name: string\n"
         "    public function get_name() -> string { return self.name }\n"
-        "    function destroy() { print(\"animal destroyed\") }\n"
+        "    destroy() { print(\"animal destroyed\") }\n"
         "}\n"
         "class Dog : Animal {\n"
         "    public age: int\n"
-        "    function destroy() { print(\"dog destroyed\") }\n"
+        "    destroy() { print(\"dog destroyed\") }\n"
         "}\n"
         "function accept(animal: Animal) { print(animal.get_name()) }\n"
         "function main() {\n"
@@ -695,7 +695,7 @@ void test_unsupported_features()
         "class-reference Result payloads are not supported by the C backend");
     expect_backend_error(
         "class Resource {\n"
-        "    function destroy() {}\n"
+        "    destroy() {}\n"
         "    function invoke() { self.destroy() }\n"
         "}\n",
         "destroy() cannot be invoked directly");

@@ -371,7 +371,10 @@ void append_statement_dump(const Stmt& statement, std::size_t depth, std::string
             } else if (method.is_override) {
                 output += "override ";
             }
-            output += "Method(" + method.name + ")\n";
+            output += (method.name == "init" || method.name == "destroy"
+                    ? "Lifecycle("
+                    : "Method(")
+                + method.name + ")\n";
             append_generic_parameters(method.generic_parameters, depth + 2, output);
             output += std::string((depth + 2) * 2, ' ') + "Parameters\n";
             for (const auto& parameter : method.parameters) {
@@ -965,15 +968,23 @@ std::unique_ptr<Stmt> Parser::parse_class_declaration(bool is_abstract)
             members.push_back(std::move(conversion));
         } else if (check(TokenType::Function)) {
             if (check_next(TokenType::Identifier)
-                && tokens_[current_ + 1].lexeme == "init") {
+                && (tokens_[current_ + 1].lexeme == "init"
+                    || tokens_[current_ + 1].lexeme == "destroy")) {
+                const auto& lifecycle = tokens_[current_ + 1];
+                if (lifecycle.lexeme == "init") {
+                    throw_parse_error(
+                        lifecycle,
+                        "class lifecycle syntax is 'init(...)', not 'function init(...)'");
+                }
                 throw_parse_error(
-                    tokens_[current_ + 1],
-                    "class initializer syntax is 'init(...)', not 'function init(...)'");
+                    lifecycle,
+                    "class lifecycle syntax is 'destroy(...)', not 'function destroy(...)'");
             }
             members.push_back(parse_method_declaration(
                 visibility, is_virtual, is_override, saw_destroy, &saw_init));
         } else if (!is_weak && !is_virtual && !is_override
-            && check(TokenType::Identifier) && peek().lexeme == "init") {
+            && check(TokenType::Identifier)
+            && (peek().lexeme == "init" || peek().lexeme == "destroy")) {
             members.push_back(parse_method_declaration(
                 visibility, false, false, saw_destroy, &saw_init, true));
         } else if (!is_virtual && !is_override && check(TokenType::Identifier)) {
@@ -1180,10 +1191,10 @@ std::unique_ptr<ClassMember> Parser::parse_method_declaration(
     bool is_override,
     bool& saw_destroy,
     bool* saw_init,
-    bool shorthand_init)
+    bool shorthand_lifecycle)
 {
     Token function_token = advance();
-    const Token& name = shorthand_init
+    const Token& name = shorthand_lifecycle
         ? function_token
         : consume(TokenType::Identifier, "expected method name");
     const std::string method_name = name.lexeme;
@@ -1192,20 +1203,23 @@ std::unique_ptr<ClassMember> Parser::parse_method_declaration(
     const bool is_init = saw_init != nullptr && method_name == "init";
     if (is_init) {
         if (*saw_init) {
-            throw_parse_error(name, "class may declare at most one init method");
+            throw_parse_error(
+                name, "class may declare at most one init lifecycle declaration");
         }
         *saw_init = true;
     }
     if (is_destroy) {
         if (saw_destroy) {
-            throw_parse_error(name, "class may declare at most one destroy method");
+            throw_parse_error(
+                name, "class may declare at most one destroy lifecycle declaration");
         }
         saw_destroy = true;
     }
 
     consume(TokenType::LeftParen, "expected '(' after method name");
     if (is_destroy && !check(TokenType::RightParen)) {
-        throw_parse_error(peek(), "destroy method cannot declare parameters");
+        throw_parse_error(
+            peek(), "destroy lifecycle declaration cannot declare parameters");
     }
 
     std::vector<Parameter> parameters;
@@ -1227,10 +1241,13 @@ std::unique_ptr<ClassMember> Parser::parse_method_declaration(
     std::optional<TypeReference> return_type;
     if (match({TokenType::Arrow})) {
         if (is_destroy) {
-            throw_parse_error(previous(), "destroy method cannot declare a return type");
+            throw_parse_error(
+                previous(),
+                "destroy lifecycle declaration cannot declare a return type");
         }
         if (is_init) {
-            throw_parse_error(previous(), "init method cannot declare a return type");
+            throw_parse_error(
+                previous(), "init lifecycle declaration cannot declare a return type");
         }
         return_type = parse_type_reference("expected return type after '->'");
     }

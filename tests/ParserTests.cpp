@@ -47,7 +47,7 @@ void test_literals_and_identifier()
 {
     expect_dump("42", "Integer(42)\n");
     expect_dump("19.99", "Decimal(19.99)\n");
-    expect_dump("\"hello, toro!\"", "String(hello, toro!)\n");
+    expect_dump("\"hello, Toro!\"", "String(hello, Toro!)\n");
     expect_dump("true", "Bool(true)\n");
     expect_dump("false", "Bool(false)\n");
     expect_dump("null", "Null\n");
@@ -911,12 +911,12 @@ void test_class_methods_init_and_destroy()
         "        return self.health\n"
         "    }\n"
         "\n"
-        "    function destroy() {\n"
+        "    destroy() {\n"
         "        print(\"player destroyed\")\n"
         "    }\n"
         "}\n",
         "ClassDeclaration(Player)\n"
-        "  private Method(init)\n"
+        "  private Lifecycle(init)\n"
         "    Parameters\n"
         "      Parameter(name: string)\n"
         "    Block\n"
@@ -933,7 +933,7 @@ void test_class_methods_init_and_destroy()
         "        MemberAccess\n"
         "          Identifier(self)\n"
         "          health\n"
-        "  private Method(destroy)\n"
+        "  private Lifecycle(destroy)\n"
         "    Parameters\n"
         "    Block\n"
         "      ExpressionStatement\n"
@@ -1582,30 +1582,33 @@ void test_class_failures()
 void test_destroy_failures()
 {
     expect_program_error(
-        "class Broken {\n function destroy(reason: string) {}\n}\n",
-        "destroy method cannot declare parameters");
+        "class Broken {\n destroy(reason: string) {}\n}\n",
+        "destroy lifecycle declaration cannot declare parameters");
     expect_program_error(
-        "class Broken {\n function destroy() -> int {}\n}\n",
-        "destroy method cannot declare a return type");
+        "class Broken {\n destroy() -> int {}\n}\n",
+        "destroy lifecycle declaration cannot declare a return type");
     expect_program_error(
-        "class Broken {\n function destroy() {}\n function destroy() {}\n}\n",
-        "class may declare at most one destroy method");
+        "class Broken {\n destroy() {}\n destroy() {}\n}\n",
+        "class may declare at most one destroy lifecycle declaration");
+    expect_program_error(
+        "class Broken { function destroy() {} }\n",
+        "class lifecycle syntax is 'destroy(...)', not 'function destroy(...)'");
 }
 
 void test_init_failures()
 {
     expect_program_error(
         "class Player { function init(name: string) {} }\n",
-        "class initializer syntax is 'init(...)', not 'function init(...)'");
+        "class lifecycle syntax is 'init(...)', not 'function init(...)'");
     expect_program_error(
         "class Player {\n"
         "    init() {}\n"
         "    init(name: string) {}\n"
         "}\n",
-        "class may declare at most one init method");
+        "class may declare at most one init lifecycle declaration");
     expect_program_error(
         "class Player { init() -> Player {} }\n",
-        "init method cannot declare a return type");
+        "init lifecycle declaration cannot declare a return type");
 }
 
 void test_inheritance_and_interface_failures()

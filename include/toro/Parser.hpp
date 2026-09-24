@@ -44,7 +44,7 @@ private:
         bool is_override,
         bool& saw_destroy,
         bool* saw_init = nullptr,
-        bool shorthand_init = false);
+        bool shorthand_lifecycle = false);
     [[nodiscard]] std::unique_ptr<ConversionOverload> parse_conversion_overload();
     [[nodiscard]] std::unique_ptr<BlockStmt> parse_block_statement();
     [[nodiscard]] std::unique_ptr<Expr> parse_or();

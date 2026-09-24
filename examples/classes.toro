@@ -14,7 +14,7 @@ class Player {
         return self.health
     }
 
-    function destroy() {
+    destroy() {
         print("player destroyed")
     }
 }

@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.25)
 project(
     toro
     VERSION 0.1.0
-    DESCRIPTION "The toro programming language"
+    DESCRIPTION "The Toro programming language"
     LANGUAGES CXX
 )
 

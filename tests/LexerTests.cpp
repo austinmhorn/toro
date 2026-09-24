@@ -90,8 +90,8 @@ void test_numbers()
 
 void test_strings()
 {
-    const auto tokens = tokenize("\"Hello, toro!\"");
-    expect_token(tokens[0], TokenType::String, "Hello, toro!");
+    const auto tokens = tokenize("\"Hello, Toro!\"");
+    expect_token(tokens[0], TokenType::String, "Hello, Toro!");
 }
 
 void test_operators_and_punctuation()

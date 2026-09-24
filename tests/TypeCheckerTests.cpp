@@ -1520,7 +1520,7 @@ void test_existing_language_features_remain_checkable()
 {
     expect_valid(
         "function main() {\n"
-        "    message := \"Hello, toro!\"\n"
+        "    message := \"Hello, Toro!\"\n"
         "    print(message)\n"
         "}\n");
     expect_valid(

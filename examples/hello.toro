@@ -1,4 +1,4 @@
 function main() {
-    message := "Hello, toro!"
+    message := "Hello, Toro!"
     print(message)
 }

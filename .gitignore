@@ -28,5 +28,5 @@ compile_commands.json
 *.dll
 *.exe
 
-# toro-generated artifacts
+# Toro-generated artifacts
 *.out
