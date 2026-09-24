@@ -1,0 +1,55 @@
+abstract class Animal {
+    public name: string
+
+    public virtual function speak() -> string
+
+    public virtual function label() -> string {
+        return self.name
+    }
+
+    public virtual function score(value: int) -> int {
+        return value
+    }
+
+    public function describe() -> string {
+        return self.speak()
+    }
+}
+
+class Dog : Animal {
+    public override function speak() -> string {
+        return "dog"
+    }
+
+    public override function score(value: int) -> int {
+        return value + 1
+    }
+}
+
+class Corgi : Dog {
+    public override function speak() -> string {
+        return "corgi"
+    }
+}
+
+function show(animal: Animal) {
+    print(animal.speak())
+    print(animal.label())
+    print(animal.describe())
+}
+
+function as_animal(dog: Dog) -> Animal {
+    return dog
+}
+
+function main() {
+    dog := Dog(name: "Rex")
+    animal: Animal = dog
+    print(animal.speak())
+    print(animal.score(4))
+    show(dog)
+
+    corgi := Corgi(name: "Pip")
+    returned := as_animal(corgi)
+    print(returned.speak())
+}

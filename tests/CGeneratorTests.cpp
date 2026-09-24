@@ -556,6 +556,71 @@ void test_class_inheritance_lowering()
         "dynamic final release");
 }
 
+void test_virtual_dispatch_lowering()
+{
+    const auto output = generate(
+        "abstract class Animal {\n"
+        "    public name: string\n"
+        "    public virtual function speak() -> string\n"
+        "    public virtual function label() -> string { return self.name }\n"
+        "    public virtual function score(value: int) -> int { return value }\n"
+        "    public function describe() -> string { return self.speak() }\n"
+        "}\n"
+        "class Dog : Animal {\n"
+        "    public override function speak() -> string { return \"dog\" }\n"
+        "    public override function score(value: int) -> int { return value + 1 }\n"
+        "}\n"
+        "class Corgi : Dog {\n"
+        "    public override function speak() -> string { return \"corgi\" }\n"
+        "}\n"
+        "function show(animal: Animal) { print(animal.speak()) }\n"
+        "function main() {\n"
+        "    dog := Dog(name: \"Rex\")\n"
+        "    animal: Animal = dog\n"
+        "    print(dog.speak())\n"
+        "    print(animal.label())\n"
+        "    print(animal.describe())\n"
+        "    show(Corgi(name: \"Pip\"))\n"
+        "}\n");
+
+    expect_contains(
+        output,
+        "const toro_vtable_6_Animal* toro_vtable;",
+        "hierarchy-root vtable pointer");
+    expect_contains(
+        output,
+        "const char* (*toro_virtual_6_Animal_speak)(void* toro_object);",
+        "virtual speak slot");
+    expect_contains(
+        output,
+        "const char* (*toro_virtual_6_Animal_label)(void* toro_object);",
+        "second virtual slot");
+    expect_contains(
+        output,
+        "int64_t (*toro_virtual_6_Animal_score)(void* toro_object, int64_t toro_arg_value);",
+        "virtual slot with parameter");
+    expect_contains(
+        output,
+        "toro_virtual_thunk_3_Dog_speak",
+        "concrete override thunk");
+    expect_contains(
+        output,
+        "toro_virtual_thunk_3_Dog_label",
+        "inherited virtual thunk");
+    expect_contains(
+        output,
+        "toro_vtable_instance_5_Corgi",
+        "multi-level concrete vtable");
+    expect_contains(
+        output,
+        "->toro_virtual_6_Animal_speak(",
+        "virtual call through vtable");
+    expect_contains(
+        output,
+        "toro_method_6_Animal_describe(",
+        "non-virtual direct call");
+}
+
 void test_class_initializer_lowering()
 {
     const auto output = generate(
@@ -643,19 +708,6 @@ void test_unsupported_features()
         "function main() { child := Child() }\n",
         "requires unsupported base initializer chaining");
     expect_backend_error(
-        "class Base {\n"
-        "    public virtual function value() -> int { return 1 }\n"
-        "}\n"
-        "class Child : Base {\n"
-        "    public override function value() -> int { return 2 }\n"
-        "}\n"
-        "function main() {\n"
-        "    child := Child()\n"
-        "    base: Base = child\n"
-        "    print(base.value())\n"
-        "}\n",
-        "virtual dispatch is not supported by the C backend");
-    expect_backend_error(
         "interface Runnable { function run() }\n"
         "class Worker implements Runnable { public function run() {} }\n",
         "class interface implementations are not supported by the C backend");
@@ -726,6 +778,7 @@ int main()
         test_class_arc_lowering();
         test_class_lifecycle_and_weak_lowering();
         test_class_inheritance_lowering();
+        test_virtual_dispatch_lowering();
         test_class_initializer_lowering();
         test_unsupported_features();
         test_generated_c_compiles();

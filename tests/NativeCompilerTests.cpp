@@ -498,6 +498,53 @@ void test_class_inheritance_runtime_behavior()
         "generated inheritance program produced unexpected output");
 }
 
+void test_virtual_dispatch_runtime_behavior()
+{
+    const auto c_source = generate(
+        "abstract class Animal {\n"
+        "    public name: string\n"
+        "    public virtual function speak() -> string\n"
+        "    public virtual function label() -> string { return self.name }\n"
+        "    public virtual function score(value: int) -> int { return value }\n"
+        "    public function describe() -> string { return self.speak() }\n"
+        "    function destroy() { print(\"animal destroyed\") }\n"
+        "}\n"
+        "class Dog : Animal {\n"
+        "    public override function speak() -> string { return \"dog\" }\n"
+        "    public override function score(value: int) -> int { return value + 1 }\n"
+        "    function destroy() { print(\"dog destroyed\") }\n"
+        "}\n"
+        "class Corgi : Dog {\n"
+        "    public override function speak() -> string { return \"corgi\" }\n"
+        "}\n"
+        "function show(animal: Animal) {\n"
+        "    print(animal.speak())\n"
+        "    print(animal.label())\n"
+        "}\n"
+        "function return_base(dog: Dog) -> Animal { return dog }\n"
+        "function main() {\n"
+        "    dog := Dog(name: \"Rex\")\n"
+        "    print(dog.speak())\n"
+        "    animal: Animal = dog\n"
+        "    print(animal.speak())\n"
+        "    print(animal.score(4))\n"
+        "    print(animal.describe())\n"
+        "    show(dog)\n"
+        "    corgi := Corgi(name: \"Pip\")\n"
+        "    returned := return_base(corgi)\n"
+        "    print(returned.speak())\n"
+        "    print(returned.label())\n"
+        "}\n");
+    const auto [status, output] = capture_run(toro::NativeCompiler(), c_source);
+    expect(status == 0, "generated virtual dispatch program did not exit successfully");
+    expect(
+        output
+            == "dog\ndog\n5\ndog\ndog\nRex\ncorgi\nPip\n"
+               "dog destroyed\nanimal destroyed\n"
+               "dog destroyed\nanimal destroyed\n",
+        "generated virtual dispatch program produced unexpected output");
+}
+
 void test_compile_failure_reporting()
 {
     const auto directory = make_test_directory();
@@ -520,17 +567,8 @@ void test_unsupported_backend_feature()
 {
     try {
         static_cast<void>(generate(
-            "class Base {\n"
-            "    public virtual function value() -> int { return 1 }\n"
-            "}\n"
-            "class Child : Base {\n"
-            "    public override function value() -> int { return 2 }\n"
-            "}\n"
-            "function main() {\n"
-            "    child := Child()\n"
-            "    base: Base = child\n"
-            "    print(base.value())\n"
-            "}\n"));
+            "interface Runnable { function run() }\n"
+            "class Worker implements Runnable { public function run() {} }\n"));
     } catch (const std::runtime_error& error) {
         expect(
             std::string_view(error.what()).find("backend error")
@@ -567,6 +605,7 @@ int main()
         test_class_lifecycle_and_weak_runtime_behavior();
         test_class_initializer_runtime_behavior();
         test_class_inheritance_runtime_behavior();
+        test_virtual_dispatch_runtime_behavior();
         test_compile_failure_reporting();
         test_unsupported_backend_feature();
         test_temporary_cleanup();

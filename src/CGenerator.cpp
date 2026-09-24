@@ -85,6 +85,12 @@ struct ClassInfo {
     std::unordered_map<std::string, MethodInfo> methods;
 };
 
+struct VirtualSlot {
+    std::string name;
+    std::string declaration_owner;
+    const MethodInfo* declaration;
+};
+
 struct EnumVariantInfo {
     const EnumVariant* declaration;
     std::optional<CValueType> payload_type;
@@ -189,6 +195,34 @@ std::string release_name(std::string_view name)
 std::string finalize_name(std::string_view name)
 {
     return class_name(name) + "_finalize";
+}
+
+std::string vtable_name(std::string_view root)
+{
+    return "toro_vtable_" + std::to_string(root.size()) + "_"
+        + std::string(root);
+}
+
+std::string vtable_instance_name(std::string_view name)
+{
+    return "toro_vtable_instance_" + std::to_string(name.size()) + "_"
+        + std::string(name);
+}
+
+std::string virtual_slot_name(
+    std::string_view owner,
+    std::string_view name)
+{
+    return "toro_virtual_" + std::to_string(owner.size()) + "_"
+        + std::string(owner) + "_" + std::string(name);
+}
+
+std::string virtual_thunk_name(
+    std::string_view concrete,
+    std::string_view method)
+{
+    return "toro_virtual_thunk_" + std::to_string(concrete.size()) + "_"
+        + std::string(concrete) + "_" + std::string(method);
 }
 
 std::string enum_name(std::string_view name)
@@ -357,6 +391,14 @@ public:
             output += "typedef struct " + class_name(class_declaration->name)
                 + " " + class_name(class_declaration->name) + ";\n";
         }
+        for (const auto* declaration : class_order_) {
+            if (classes_.at(declaration->name).base_name
+                || virtual_slots(declaration->name).empty()) {
+                continue;
+            }
+            output += "typedef struct " + vtable_name(declaration->name)
+                + " " + vtable_name(declaration->name) + ";\n";
+        }
         for (const auto& enum_declaration : enum_order_) {
             output += "typedef struct " + enum_name(enum_declaration->name)
                 + " " + enum_name(enum_declaration->name) + ";\n";
@@ -394,6 +436,13 @@ public:
             output += emit_type_definition(result.type, definition_state);
         }
 
+        for (const auto* declaration : class_order_) {
+            if (classes_.at(declaration->name).base_name) {
+                continue;
+            }
+            output += emit_vtable_definition(declaration->name);
+        }
+
         for (const auto& statement : program.statements) {
             if (statement->kind == StmtKind::StructDeclaration
                 || statement->kind == StmtKind::ClassDeclaration
@@ -429,6 +478,9 @@ public:
                     continue;
                 }
                 const auto& method = static_cast<const MethodDeclaration&>(*member);
+                if (!method.body) {
+                    continue;
+                }
                 output += method_declaration_text(
                     declaration->name,
                     CValueKind::Class,
@@ -436,6 +488,15 @@ public:
                     info.methods.at(method.name));
                 output += ";\n";
             }
+        }
+
+        for (const auto* declaration : class_order_) {
+            if (declaration->is_abstract
+                || virtual_slots(class_root(declaration->name)).empty()) {
+                continue;
+            }
+            output += emit_virtual_thunks(*declaration);
+            output += emit_vtable_instance(*declaration);
         }
         if (!program.statements.empty() || !struct_order_.empty()
             || !class_order_.empty()
@@ -473,6 +534,9 @@ public:
                     continue;
                 }
                 const auto& method = static_cast<const MethodDeclaration&>(*member);
+                if (!method.body) {
+                    continue;
+                }
                 output += emit_method(
                     declaration->name,
                     CValueKind::Class,
@@ -535,6 +599,59 @@ private:
             current = classes_.at(*current).base_name;
         }
         return false;
+    }
+
+    std::string class_root(const std::string& name) const
+    {
+        std::string current = name;
+        while (classes_.at(current).base_name) {
+            current = *classes_.at(current).base_name;
+        }
+        return current;
+    }
+
+    std::vector<VirtualSlot> virtual_slots(const std::string& root) const
+    {
+        std::vector<VirtualSlot> slots;
+        for (const auto* declaration : class_order_) {
+            if (class_root(declaration->name) != root) {
+                continue;
+            }
+            const auto& info = classes_.at(declaration->name);
+            for (const auto& member : declaration->members) {
+                if (member->kind != ClassMemberKind::Method) {
+                    continue;
+                }
+                const auto& method =
+                    static_cast<const MethodDeclaration&>(*member);
+                if (!method.is_virtual || method.is_override) {
+                    continue;
+                }
+                slots.push_back(VirtualSlot{
+                    method.name,
+                    declaration->name,
+                    &info.methods.at(method.name),
+                });
+            }
+        }
+        return slots;
+    }
+
+    std::optional<VirtualSlot> find_virtual_slot(
+        const std::string& class_type,
+        const std::string& method_name_value) const
+    {
+        const auto slots = virtual_slots(class_root(class_type));
+        const auto slot = std::ranges::find_if(
+            slots,
+            [&](const VirtualSlot& candidate) {
+                return candidate.name == method_name_value
+                    && is_class_base_of(
+                        candidate.declaration_owner, class_type);
+            });
+        return slot == slots.end()
+            ? std::nullopt
+            : std::optional<VirtualSlot>{*slot};
     }
 
     std::string class_path_to_base(
@@ -669,24 +786,6 @@ private:
         return std::nullopt;
     }
 
-    bool has_runtime_override(
-        const std::string& static_type,
-        const std::string& method_name_value) const
-    {
-        return std::ranges::any_of(
-            classes_,
-            [&](const auto& entry) {
-                const auto& [candidate_name, candidate] = entry;
-                if (candidate_name == static_type
-                    || !is_class_base_of(static_type, candidate_name)) {
-                    return false;
-                }
-                const auto method = candidate.methods.find(method_name_value);
-                return method != candidate.methods.end()
-                    && method->second.declaration->is_override;
-            });
-    }
-
     static bool statement_guarantees_return(const Stmt& statement)
     {
         switch (statement.kind) {
@@ -759,11 +858,6 @@ private:
             } else if (statement->kind == StmtKind::ClassDeclaration) {
                 const auto& declaration =
                     static_cast<const ClassDeclarationStmt&>(*statement);
-                if (declaration.is_abstract) {
-                    throw_backend_error(
-                        declaration.location,
-                        "abstract classes are not supported by the C backend");
-                }
                 if (!declaration.generic_parameters.empty()) {
                     throw_backend_error(
                         declaration.location,
@@ -880,10 +974,10 @@ private:
                         method.location,
                         "generic class methods are not supported by the C backend");
                 }
-                if (!method.body) {
+                if (!method.body && !method.is_virtual) {
                     throw_backend_error(
                         method.location,
-                        "bodyless class methods are not supported by the C backend");
+                        "only virtual class methods may omit a body in the C backend");
                 }
                 MethodInfo method_info{&method, void_type, {}};
                 if (method.return_type) {
@@ -1078,6 +1172,110 @@ private:
         }
     }
 
+    std::string emit_vtable_definition(const std::string& root) const
+    {
+        const auto slots = virtual_slots(root);
+        if (slots.empty()) {
+            return {};
+        }
+        std::string output = "struct " + vtable_name(root) + "\n{\n";
+        for (const auto& slot : slots) {
+            output += "    " + c_type_name(slot.declaration->return_type)
+                + " (*" + virtual_slot_name(
+                    slot.declaration_owner, slot.name) + ")(void* toro_object";
+            for (std::size_t index = 0;
+                 index < slot.declaration->parameter_types.size(); ++index) {
+                output += ", "
+                    + c_type_name(slot.declaration->parameter_types[index])
+                    + " " + parameter_name(
+                        slot.declaration->declaration->parameters[index].name);
+            }
+            output += ");\n";
+        }
+        output += "};\n\n";
+        for (const auto* declaration : class_order_) {
+            if (!declaration->is_abstract
+                && class_root(declaration->name) == root) {
+                output += "static const " + vtable_name(root) + " "
+                    + vtable_instance_name(declaration->name) + ";\n";
+            }
+        }
+        output += '\n';
+        return output;
+    }
+
+    std::string emit_virtual_thunks(
+        const ClassDeclarationStmt& concrete) const
+    {
+        const auto slots = virtual_slots(class_root(concrete.name));
+        std::string output;
+        for (const auto& slot : slots) {
+            if (!is_class_base_of(slot.declaration_owner, concrete.name)) {
+                continue;
+            }
+            const auto implementation = find_class_method(concrete.name, slot.name);
+            if (!implementation || !implementation->second->declaration->body) {
+                throw_backend_error(
+                    concrete.location,
+                    "concrete class '" + concrete.name
+                        + "' has no runtime implementation for virtual method '"
+                        + slot.name + "'");
+            }
+            output += "static "
+                + c_type_name(slot.declaration->return_type) + " "
+                + virtual_thunk_name(concrete.name, slot.name)
+                + "(void* toro_object";
+            for (std::size_t index = 0;
+                 index < slot.declaration->parameter_types.size(); ++index) {
+                output += ", "
+                    + c_type_name(slot.declaration->parameter_types[index])
+                    + " " + parameter_name(
+                        slot.declaration->declaration->parameters[index].name);
+            }
+            output += ")\n{\n";
+            const std::string receiver = class_upcast(
+                "(" + class_name(concrete.name) + "*)toro_object",
+                concrete.name,
+                implementation->first);
+            output += "    ";
+            if (slot.declaration->return_type != void_type) {
+                output += "return ";
+            }
+            output += method_name(implementation->first, slot.name) + "("
+                + receiver;
+            for (const auto& parameter :
+                 slot.declaration->declaration->parameters) {
+                output += ", " + parameter_name(parameter.name);
+            }
+            output += ");\n}\n\n";
+        }
+        return output;
+    }
+
+    std::string emit_vtable_instance(
+        const ClassDeclarationStmt& concrete) const
+    {
+        const std::string root = class_root(concrete.name);
+        const auto slots = virtual_slots(root);
+        if (slots.empty()) {
+            return {};
+        }
+        std::string output = "static const " + vtable_name(root) + " "
+            + vtable_instance_name(concrete.name) + " =\n{\n";
+        for (const auto& slot : slots) {
+            output += "    ." + virtual_slot_name(
+                slot.declaration_owner, slot.name) + " = ";
+            if (is_class_base_of(slot.declaration_owner, concrete.name)) {
+                output += virtual_thunk_name(concrete.name, slot.name);
+            } else {
+                output += "NULL";
+            }
+            output += ",\n";
+        }
+        output += "};\n\n";
+        return output;
+    }
+
     std::string emit_type_definition(
         const CValueType& type,
         std::unordered_map<std::string, int>& state) const
@@ -1132,6 +1330,10 @@ private:
                 output += "    uint64_t toro_strong_count;\n";
                 output += "    toro_weak_control* toro_weak_control;\n";
                 output += "    void (*toro_finalize)(void*);\n";
+                if (!virtual_slots(name).empty()) {
+                    output += "    const " + vtable_name(name)
+                        + "* toro_vtable;\n";
+                }
             }
             for (const auto& field : info.fields) {
                 output += "    "
@@ -2312,6 +2514,10 @@ private:
         prelude += weak_control + "->toro_object = " + temporary + ";\n";
         prelude += weak_control + "->toro_weak_count = 1;\n";
         prelude += finalizer + " = " + finalize_name(name) + ";\n";
+        if (!virtual_slots(class_root(name)).empty()) {
+            prelude += class_header_access(temporary, name, "toro_vtable")
+                + " = &" + vtable_instance_name(name) + ";\n";
+        }
         for (std::size_t index = 0; index < fields.size(); ++index) {
             const auto& field = *fields[index].second;
             GeneratedExpression value{"", field.type};
@@ -2377,6 +2583,10 @@ private:
         prelude += weak_control + "->toro_object = " + temporary + ";\n";
         prelude += weak_control + "->toro_weak_count = 1;\n";
         prelude += finalizer + " = " + finalize_name(name) + ";\n";
+        if (!virtual_slots(class_root(name)).empty()) {
+            prelude += class_header_access(temporary, name, "toro_vtable")
+                + " = &" + vtable_instance_name(name) + ";\n";
+        }
 
         for (const auto& [owner, field_pointer] : effective_class_fields(name)) {
             const auto& field = *field_pointer;
@@ -2687,13 +2897,9 @@ private:
                 "type '" + receiver.type.nominal_name + "' has no method named '"
                     + member.member + "'");
         }
-        if (receiver.type.kind == CValueKind::Class
-            && has_runtime_override(receiver.type.nominal_name, member.member)) {
-            throw_backend_error(
-                current_location_,
-                "virtual dispatch is not supported by the C backend for method '"
-                    + method_owner + "." + member.member + "'");
-        }
+        const auto virtual_slot = receiver.type.kind == CValueKind::Class
+            ? find_virtual_slot(receiver.type.nominal_name, member.member)
+            : std::nullopt;
         if (receiver.type.kind == CValueKind::Struct
             && !receiver.pointer && !receiver.addressable) {
             throw_backend_error(
@@ -2702,7 +2908,6 @@ private:
         }
         const auto ordered = order_arguments(
             call, method_info->declaration->parameters);
-        std::string code = method_name(method_owner, member.member) + "(";
         std::string prelude = receiver.prelude;
         std::vector<ValueInfo> owned_arguments;
         std::string receiver_code;
@@ -2719,12 +2924,23 @@ private:
                 ? receiver.code
                 : "&(" + receiver.code + ")";
         }
-        if (receiver.type.kind == CValueKind::Class
-            && method_owner != receiver.type.nominal_name) {
-            receiver_code = class_upcast(
-                receiver_code, receiver.type.nominal_name, method_owner);
+        std::string code;
+        if (virtual_slot) {
+            const std::string vtable = class_header_access(
+                receiver_code, receiver.type.nominal_name, "toro_vtable");
+            const std::string control = class_header_access(
+                receiver_code, receiver.type.nominal_name, "toro_weak_control");
+            code = vtable + "->" + virtual_slot_name(
+                virtual_slot->declaration_owner, member.member) + "("
+                + control + "->toro_object";
+        } else {
+            if (receiver.type.kind == CValueKind::Class
+                && method_owner != receiver.type.nominal_name) {
+                receiver_code = class_upcast(
+                    receiver_code, receiver.type.nominal_name, method_owner);
+            }
+            code = method_name(method_owner, member.member) + "(" + receiver_code;
         }
-        code += receiver_code;
         for (std::size_t index = 0; index < ordered.size(); ++index) {
             const auto argument = emit_expression(
                 *ordered[index]->value, method_info->parameter_types[index]);

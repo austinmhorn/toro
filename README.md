@@ -155,6 +155,7 @@ Build and run through temporary artifacts:
 ./build/toro run examples/lifecycle.toro
 ./build/toro run examples/init.toro
 ./build/toro run examples/class_inheritance.toro
+./build/toro run examples/virtual_dispatch.toro
 ```
 
 `run` forwards program output and returns its exit status. Its temporary C source
@@ -165,8 +166,8 @@ conditions and returns, bad construction fields, invalid member access, method
 argument errors, and visibility violations. Construction supplies zero values
 for primitive and nullable fields, honors explicit field defaults, and requires
 non-null named fields that cannot be safely defaulted. Generic instances are
-invariant, so different concrete argument lists are distinct types. Runtime
-virtual dispatch and flow-sensitive null narrowing are not implemented yet.
+invariant, so different concrete argument lists are distinct types.
+Flow-sensitive null narrowing is not implemented yet.
 Functions and methods may overload by parameter types and
 arity; resolution prefers exact matches over base/interface compatibility and
 reports missing or ambiguous matches. Explicit `as` casts support numeric
@@ -221,8 +222,14 @@ ARC/weak/finalizer header. Derived-to-base upcasts therefore preserve object
 identity, and a base-typed final release invokes the most-derived finalizer.
 Destruction runs derived lifecycle cleanup before base lifecycle cleanup, then
 releases all derived and inherited strong/weak fields exactly once. Inherited
-non-virtual methods use static calls with a safe base-pointer view.
-Initializer overloading, base-initializer chaining, virtual dispatch, interfaces,
+non-virtual methods use static calls with a safe base-pointer view. Hierarchies
+with virtual methods store deterministic dispatch metadata in the shared root
+header. Concrete-class vtables use receiver-adjusting thunks, so calls through
+derived or base references, parameters, returns, and `self` select the
+most-derived override. Abstract bodyless virtual methods require a concrete
+implementation. `destroy()` stays outside virtual dispatch and follows the
+deterministic derived-to-base lifecycle path.
+Initializer overloading, base-initializer chaining, runtime interfaces,
 generic classes, class-valued enum/Result payloads, and field access through a
 temporary class reference remain explicit backend errors.
 

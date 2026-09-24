@@ -224,8 +224,9 @@ Interface methods are signatures without bodies. `virtual` and `override` are
 explicit method modifiers. An abstract class may leave virtual methods bodyless.
 Overrides must match an inherited virtual method exactly, and concrete classes
 must implement inherited abstract methods. Implementing classes and structs must
-provide matching public interface methods. Runtime virtual dispatch belongs to
-a later phase.
+provide matching public interface methods. The native backend dispatches class
+virtual methods through deterministic per-concrete-class vtables. Runtime
+interface dispatch remains a later phase.
 
 ### Generics
 
@@ -372,6 +373,17 @@ they are reassigned, cleared, or their owner is destroyed.
 ARC does not collect strong reference cycles. A strong parent-to-child edge plus
 a weak child-to-parent edge cleans up, while two strong edges may leak.
 
+Single-inheritance class hierarchies share one ARC/weak/finalizer header in the
+embedded root object. When a hierarchy declares virtual methods, that header
+also stores the concrete class vtable. Slots are identified by their declaring
+class and declaration order; overrides reuse inherited slots. Generated thunks
+start from the control block's most-derived object pointer and adjust it to the
+class that implements the selected method. This preserves dynamic dispatch
+through base references, parameters, returned references, and `self`, while
+ordinary non-virtual methods remain statically dispatched. Lifecycle
+`destroy()` declarations are never vtable entries and continue to run once in
+derived-to-base order during final release.
+
 Primitive types map directly to C:
 
 ```text
@@ -387,8 +399,8 @@ field: explicit source defaults take priority, while omitted `int`, `dec`,
 `bool`, and `string` fields use `0`, `0.0`, `false`, and `""`. Omitted nested
 struct values remain unsupported unless explicitly supplied.
 
-Generic classes and structs, method overloads, conversions, interfaces,
-virtual dispatch, nullable non-class fields, collections, thread-safe ARC, and
+Generic classes and structs, method overloads, conversions, runtime interfaces,
+nullable non-class fields, collections, thread-safe ARC, and
 cyclic-reference collection are not lowered yet. Enum and
 Result payloads may use primitives, supported non-generic structs, supported
 enums, or supported nested Results; other payload types produce a backend
@@ -451,7 +463,7 @@ direction is rejected.
 Class `init` declarations provide constructor-specific parameters and must
 definitely initialize required fields. Native single-inheritance construction
 supports inherited fields when no base initializer call is required. Base
-initializer chaining, virtual dispatch, monomorphization, and generic runtime
+initializer chaining, runtime interface dispatch, monomorphization, and generic runtime
 construction are not implemented yet.
 
 ### Nullable types
