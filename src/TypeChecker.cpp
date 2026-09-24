@@ -789,6 +789,21 @@ void TypeChecker::check_statement(const Stmt& statement)
             }
         }
         if (initializer) {
+            auto base_name = declaration.base_type
+                ? std::optional<std::string>{declaration.base_type->name}
+                : std::nullopt;
+            while (base_name) {
+                const auto* base = find_nominal_type(*base_name);
+                if (!base) {
+                    break;
+                }
+                for (const auto& field_name : base->field_order) {
+                    if (base->fields.at(field_name).required) {
+                        required_initializer_fields.insert(field_name);
+                    }
+                }
+                base_name = base->base;
+            }
             using AssignedFields = std::unordered_set<std::string>;
             std::function<AssignedFields(
                 const std::vector<std::unique_ptr<Stmt>>&,

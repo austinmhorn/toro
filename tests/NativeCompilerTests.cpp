@@ -442,6 +442,62 @@ void test_class_initializer_runtime_behavior()
         "generated init program produced unexpected output");
 }
 
+void test_class_inheritance_runtime_behavior()
+{
+    const auto c_source = generate(
+        "class Companion {\n"
+        "    public label: string\n"
+        "    function destroy() { print(\"companion destroyed\") }\n"
+        "}\n"
+        "class Animal {\n"
+        "    public name: string\n"
+        "    public companion: Companion?\n"
+        "    public weak observer: Companion?\n"
+        "    public function get_name() -> string { return self.name }\n"
+        "    function destroy() { print(\"animal destroyed\") }\n"
+        "}\n"
+        "class Dog : Animal {\n"
+        "    public age: int\n"
+        "    public function birthday() { self.age = self.age + 1 }\n"
+        "    function destroy() { print(\"dog destroyed\") }\n"
+        "}\n"
+        "class Watcher { public weak animal: Animal? }\n"
+        "function show(animal: Animal) { print(animal.get_name()) }\n"
+        "function upcast(dog: Dog) -> Animal { return dog }\n"
+        "function main() {\n"
+        "    watcher := Watcher()\n"
+        "    {\n"
+        "        companion := Companion(label: \"friend\")\n"
+        "        dog := Dog(\n"
+        "            name: \"Rex\",\n"
+        "            companion: companion,\n"
+        "            observer: companion,\n"
+        "            age: 4\n"
+        "        )\n"
+        "        watcher.animal = dog\n"
+        "        print(watcher.animal != null)\n"
+        "        print(dog.name)\n"
+        "        print(dog.get_name())\n"
+        "        dog.birthday()\n"
+        "        print(dog.age)\n"
+        "        animal: Animal = dog\n"
+        "        animal.name = \"Max\"\n"
+        "        print(dog.name)\n"
+        "        show(dog)\n"
+        "        returned := upcast(dog)\n"
+        "        print(returned.get_name())\n"
+        "    }\n"
+        "    print(watcher.animal == null)\n"
+        "}\n");
+    const auto [status, output] = capture_run(toro::NativeCompiler(), c_source);
+    expect(status == 0, "generated inheritance program did not exit successfully");
+    expect(
+        output
+            == "true\nRex\nRex\n5\nMax\nMax\nMax\n"
+               "dog destroyed\nanimal destroyed\ncompanion destroyed\ntrue\n",
+        "generated inheritance program produced unexpected output");
+}
+
 void test_compile_failure_reporting()
 {
     const auto directory = make_test_directory();
@@ -464,8 +520,17 @@ void test_unsupported_backend_feature()
 {
     try {
         static_cast<void>(generate(
-            "class Base {}\n"
-            "class Unsupported : Base {}\n"));
+            "class Base {\n"
+            "    public virtual function value() -> int { return 1 }\n"
+            "}\n"
+            "class Child : Base {\n"
+            "    public override function value() -> int { return 2 }\n"
+            "}\n"
+            "function main() {\n"
+            "    child := Child()\n"
+            "    base: Base = child\n"
+            "    print(base.value())\n"
+            "}\n"));
     } catch (const std::runtime_error& error) {
         expect(
             std::string_view(error.what()).find("backend error")
@@ -501,6 +566,7 @@ int main()
         test_class_arc_runtime_behavior();
         test_class_lifecycle_and_weak_runtime_behavior();
         test_class_initializer_runtime_behavior();
+        test_class_inheritance_runtime_behavior();
         test_compile_failure_reporting();
         test_unsupported_backend_feature();
         test_temporary_cleanup();

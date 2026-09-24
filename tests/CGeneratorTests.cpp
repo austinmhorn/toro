@@ -482,17 +482,18 @@ void test_class_lifecycle_and_weak_lowering()
         "strong field retain");
     expect_contains(
         output,
-        "toro_class_5_Child_release(toro_value->toro_field_child);",
+        "toro_class_5_Child_release((toro_value)->toro_field_child);",
         "strong field teardown");
 
     const auto parent_release = output.find(
-        "static void toro_class_6_Parent_release(toro_class_6_Parent* toro_value)\n{");
+        "static void toro_class_6_Parent_finalize(void* toro_raw_value)\n{");
     const auto invalidate = output.find(
         "toro_control->toro_object = NULL;", parent_release);
     const auto destroy = output.find(
-        "toro_method_6_Parent_destroy(toro_value);", parent_release);
+        "toro_method_6_Parent_destroy(toro_value);",
+        parent_release);
     const auto release_field = output.find(
-        "toro_class_5_Child_release(toro_value->toro_field_child);");
+        "toro_class_5_Child_release((toro_value)->toro_field_child);");
     const auto free_object = output.find("free(toro_value);", release_field);
     if (!(invalidate != std::string::npos && destroy != std::string::npos
             && release_field != std::string::npos
@@ -501,6 +502,58 @@ void test_class_lifecycle_and_weak_lowering()
         throw std::runtime_error(
             "class finalization order was not invalidate, destroy, fields, free");
     }
+}
+
+void test_class_inheritance_lowering()
+{
+    const auto output = generate(
+        "class Animal {\n"
+        "    public name: string\n"
+        "    public function get_name() -> string { return self.name }\n"
+        "    function destroy() { print(\"animal destroyed\") }\n"
+        "}\n"
+        "class Dog : Animal {\n"
+        "    public age: int\n"
+        "    function destroy() { print(\"dog destroyed\") }\n"
+        "}\n"
+        "function accept(animal: Animal) { print(animal.get_name()) }\n"
+        "function main() {\n"
+        "    dog := Dog(name: \"Rex\", age: 4)\n"
+        "    print(dog.name)\n"
+        "    print(dog.get_name())\n"
+        "    animal: Animal = dog\n"
+        "    animal.name = \"Max\"\n"
+        "    accept(dog)\n"
+        "}\n");
+
+    expect_contains(output, "void (*toro_finalize)(void*);", "dynamic finalizer slot");
+    expect_contains(
+        output,
+        "struct toro_class_3_Dog\n{\n"
+        "    toro_class_6_Animal toro_base;\n"
+        "    int64_t toro_field_age;",
+        "embedded base and derived field layout");
+    expect_contains(
+        output,
+        "toro_method_6_Animal_get_name((&(",
+        "inherited non-virtual method call");
+    expect_contains(
+        output,
+        "toro_class_6_Animal* toro_var_animal = (&(",
+        "derived-to-base upcast");
+    expect_contains(
+        output,
+        "toro_method_3_Dog_destroy(toro_value);",
+        "most-derived destroy");
+    expect_contains(
+        output,
+        "toro_method_6_Animal_destroy((&(toro_value)->toro_base));",
+        "base destroy chaining");
+    expect_contains(
+        output,
+        "(toro_value)->toro_base.toro_finalize((toro_value)->toro_base."
+        "toro_weak_control->toro_object);",
+        "dynamic final release");
 }
 
 void test_class_initializer_lowering()
@@ -585,8 +638,23 @@ void test_unsupported_features()
         "class Box<T> { public value: T }\n",
         "generic classes are not supported by the C backend");
     expect_backend_error(
-        "class Base {}\nclass Child : Base {}\n",
-        "class inheritance is not supported by the C backend");
+        "class Base { init(value: int) {} }\n"
+        "class Child : Base {}\n"
+        "function main() { child := Child() }\n",
+        "requires unsupported base initializer chaining");
+    expect_backend_error(
+        "class Base {\n"
+        "    public virtual function value() -> int { return 1 }\n"
+        "}\n"
+        "class Child : Base {\n"
+        "    public override function value() -> int { return 2 }\n"
+        "}\n"
+        "function main() {\n"
+        "    child := Child()\n"
+        "    base: Base = child\n"
+        "    print(base.value())\n"
+        "}\n",
+        "virtual dispatch is not supported by the C backend");
     expect_backend_error(
         "interface Runnable { function run() }\n"
         "class Worker implements Runnable { public function run() {} }\n",
@@ -657,6 +725,7 @@ int main()
         test_distinct_result_instances();
         test_class_arc_lowering();
         test_class_lifecycle_and_weak_lowering();
+        test_class_inheritance_lowering();
         test_class_initializer_lowering();
         test_unsupported_features();
         test_generated_c_compiles();

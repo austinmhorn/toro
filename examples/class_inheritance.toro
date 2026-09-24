@@ -1,0 +1,64 @@
+class Companion {
+    public label: string
+
+    function destroy() {
+        print("companion destroyed")
+    }
+}
+
+class Animal {
+    public name: string
+    public companion: Companion?
+    public weak observer: Companion?
+
+    public function get_name() -> string {
+        return self.name
+    }
+
+    function destroy() {
+        print("animal destroyed")
+    }
+}
+
+class Dog : Animal {
+    public age: int
+
+    public function birthday() {
+        self.age = self.age + 1
+    }
+
+    function destroy() {
+        print("dog destroyed")
+    }
+}
+
+function show(animal: Animal) {
+    print(animal.get_name())
+}
+
+function upcast(dog: Dog) -> Animal {
+    return dog
+}
+
+function main() {
+    companion := Companion(label: "friend")
+    dog := Dog(
+        name: "Rex",
+        companion: companion,
+        observer: companion,
+        age: 4
+    )
+
+    print(dog.name)
+    print(dog.get_name())
+    dog.birthday()
+    print(dog.age)
+
+    animal: Animal = dog
+    animal.name = "Max"
+    print(dog.name)
+    show(dog)
+
+    returned := upcast(dog)
+    print(returned.get_name())
+}

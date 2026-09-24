@@ -692,6 +692,17 @@ void test_class_initializers()
         "parent := Parent()\n"
         "child := Child(parent: parent)\n"
         "parent.child = child\n");
+    expect_valid(
+        "class Child {}\n"
+        "class Base { public child: Child }\n"
+        "class Derived : Base {\n"
+        "    init(child: Child) { self.child = child }\n"
+        "}\n");
+    expect_error(
+        "class Child {}\n"
+        "class Base { public child: Child }\n"
+        "class Derived : Base { init() {} }\n",
+        "does not definitely initialize required field 'child'");
 }
 
 void test_inheritance_and_subtyping()

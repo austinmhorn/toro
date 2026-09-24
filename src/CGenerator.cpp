@@ -79,6 +79,7 @@ struct ClassFieldInfo {
 
 struct ClassInfo {
     const ClassDeclarationStmt* declaration;
+    std::optional<std::string> base_name;
     std::vector<ClassFieldInfo> fields;
     std::unordered_map<std::string, std::size_t> field_indices;
     std::unordered_map<std::string, MethodInfo> methods;
@@ -183,6 +184,11 @@ std::string retain_name(std::string_view name)
 std::string release_name(std::string_view name)
 {
     return class_name(name) + "_release";
+}
+
+std::string finalize_name(std::string_view name)
+{
+    return class_name(name) + "_finalize";
 }
 
 std::string enum_name(std::string_view name)
@@ -364,10 +370,17 @@ public:
             output += '\n';
         }
         for (const auto* declaration : class_order_) {
+            output += "static void " + finalize_name(declaration->name)
+                + "(void* toro_raw_value);\n";
             output += "static void " + retain_name(declaration->name) + "("
                 + class_name(declaration->name) + "* toro_value);\n";
             output += "static void " + release_name(declaration->name) + "("
                 + class_name(declaration->name) + "* toro_value);\n";
+            if (classes_.at(declaration->name).methods.contains("destroy")) {
+                output += "static void " + method_name(declaration->name, "destroy")
+                    + "(" + class_name(declaration->name)
+                    + "* toro_self);\n";
+            }
         }
         if (!class_order_.empty()) {
             output += '\n';
@@ -507,6 +520,173 @@ private:
             });
     }
 
+    bool is_class_base_of(
+        const std::string& base_name,
+        const std::string& derived_name) const
+    {
+        if (base_name == derived_name) {
+            return true;
+        }
+        auto current = classes_.at(derived_name).base_name;
+        while (current) {
+            if (*current == base_name) {
+                return true;
+            }
+            current = classes_.at(*current).base_name;
+        }
+        return false;
+    }
+
+    std::string class_path_to_base(
+        const std::string& derived_name,
+        const std::string& base_name) const
+    {
+        std::string path;
+        std::string current = derived_name;
+        while (current != base_name) {
+            const auto& info = classes_.at(current);
+            if (!info.base_name) {
+                throw_backend_error(
+                    current_location_,
+                    "cannot form class upcast from '" + derived_name + "' to '"
+                        + base_name + "'");
+            }
+            path += "toro_base.";
+            current = *info.base_name;
+        }
+        return path;
+    }
+
+    std::string class_member_access(
+        const std::string& expression,
+        const std::string& static_type,
+        const std::string& owner,
+        const std::string& member) const
+    {
+        return "(" + expression + ")->"
+            + class_path_to_base(static_type, owner) + member;
+    }
+
+    std::string class_header_access(
+        const std::string& expression,
+        const std::string& static_type,
+        const std::string& member) const
+    {
+        std::string root = static_type;
+        while (classes_.at(root).base_name) {
+            root = *classes_.at(root).base_name;
+        }
+        return class_member_access(expression, static_type, root, member);
+    }
+
+    std::string class_upcast(
+        std::string expression,
+        const std::string& derived_name,
+        const std::string& base_name) const
+    {
+        std::string current = derived_name;
+        while (current != base_name) {
+            const auto& info = classes_.at(current);
+            if (!info.base_name) {
+                throw_backend_error(
+                    current_location_,
+                    "cannot form class upcast from '" + derived_name + "' to '"
+                        + base_name + "'");
+            }
+            expression = "(&(" + expression + ")->toro_base)";
+            current = *info.base_name;
+        }
+        return expression;
+    }
+
+    std::vector<std::pair<std::string, const ClassFieldInfo*>>
+    effective_class_fields(const std::string& name) const
+    {
+        std::vector<std::pair<std::string, const ClassFieldInfo*>> fields;
+        const auto& info = classes_.at(name);
+        if (info.base_name) {
+            fields = effective_class_fields(*info.base_name);
+        }
+        for (const auto& field : info.fields) {
+            const auto duplicate = std::ranges::find_if(
+                fields,
+                [&](const auto& inherited) {
+                    return inherited.second->declaration->name
+                        == field.declaration->name;
+                });
+            if (duplicate != fields.end()) {
+                throw_backend_error(
+                    field.declaration->location,
+                    "inherited field shadowing is not supported by the C backend: '"
+                        + name + "." + field.declaration->name + "'");
+            }
+            fields.emplace_back(name, &field);
+        }
+        return fields;
+    }
+
+    std::optional<std::pair<std::string, const ClassFieldInfo*>> find_class_field(
+        const std::string& name,
+        const std::string& field_name_value) const
+    {
+        const auto& info = classes_.at(name);
+        if (const auto field = info.field_indices.find(field_name_value);
+            field != info.field_indices.end()) {
+            return std::pair<std::string, const ClassFieldInfo*>{
+                name, &info.fields[field->second]};
+        }
+        return info.base_name
+            ? find_class_field(*info.base_name, field_name_value)
+            : std::nullopt;
+    }
+
+    std::optional<std::pair<std::string, const MethodInfo*>> find_class_method(
+        const std::string& name,
+        const std::string& method_name_value) const
+    {
+        const auto& info = classes_.at(name);
+        if (const auto method = info.methods.find(method_name_value);
+            method != info.methods.end()) {
+            return std::pair<std::string, const MethodInfo*>{
+                name, &method->second};
+        }
+        return info.base_name
+            ? find_class_method(*info.base_name, method_name_value)
+            : std::nullopt;
+    }
+
+    std::optional<std::string> base_initializer_owner(
+        const std::string& name) const
+    {
+        auto current = classes_.at(name).base_name;
+        while (current) {
+            const auto& info = classes_.at(*current);
+            if (info.methods.contains("init")) {
+                return current;
+            }
+            current = info.base_name;
+        }
+        return std::nullopt;
+    }
+
+    bool has_runtime_override(
+        const std::string& static_type,
+        const std::string& method_name_value) const
+    {
+        return std::ranges::any_of(
+            classes_,
+            [&](const auto& entry) {
+                const auto& [candidate_name, candidate] = entry;
+                if (candidate_name == static_type
+                    || !is_class_base_of(static_type, candidate_name)) {
+                    return false;
+                }
+                const auto method = candidate.methods.find(method_name_value);
+                return method != candidate.methods.end()
+                    && method->second.declaration->is_override;
+            });
+    }
+
     static bool statement_guarantees_return(const Stmt& statement)
     {
         switch (statement.kind) {
@@ -589,18 +769,22 @@ private:
                         declaration.location,
                         "generic classes are not supported by the C backend");
                 }
-                if (declaration.base_type) {
-                    throw_backend_error(
-                        declaration.location,
-                        "class inheritance is not supported by the C backend");
-                }
                 if (!declaration.interfaces.empty()) {
                     throw_backend_error(
                         declaration.location,
                         "class interface implementations are not supported by the C backend");
                 }
                 classes_.emplace(
-                    declaration.name, ClassInfo{&declaration, {}, {}, {}});
+                    declaration.name,
+                    ClassInfo{
+                        &declaration,
+                        declaration.base_type
+                            ? std::optional<std::string>{declaration.base_type->name}
+                            : std::nullopt,
+                        {},
+                        {},
+                        {},
+                    });
                 class_order_.push_back(&declaration);
                 nominal_order_.push_back(
                     CValueType{CValueKind::Class, declaration.name});
@@ -696,10 +880,10 @@ private:
                         method.location,
                         "generic class methods are not supported by the C backend");
                 }
-                if (method.is_virtual || method.is_override || !method.body) {
+                if (!method.body) {
                     throw_backend_error(
                         method.location,
-                        "virtual, override, or bodyless class methods are not supported by the C backend");
+                        "bodyless class methods are not supported by the C backend");
                 }
                 MethodInfo method_info{&method, void_type, {}};
                 if (method.return_type) {
@@ -928,6 +1112,11 @@ private:
         std::string output;
         if (type.kind == CValueKind::Class) {
             const auto& info = classes_.at(name);
+            const auto fields = effective_class_fields(name);
+            if (info.base_name) {
+                output += emit_type_definition(
+                    CValueType{CValueKind::Class, *info.base_name}, state);
+            }
             for (const auto& field : info.fields) {
                 if (field.type.kind == CValueKind::Struct
                     || field.type.kind == CValueKind::Enum
@@ -937,8 +1126,13 @@ private:
             }
             const std::string object = class_name(name);
             output += "struct " + object + "\n{\n";
-            output += "    uint64_t toro_strong_count;\n";
-            output += "    toro_weak_control* toro_weak_control;\n";
+            if (info.base_name) {
+                output += "    " + class_name(*info.base_name) + " toro_base;\n";
+            } else {
+                output += "    uint64_t toro_strong_count;\n";
+                output += "    toro_weak_control* toro_weak_control;\n";
+                output += "    void (*toro_finalize)(void*);\n";
+            }
             for (const auto& field : info.fields) {
                 output += "    "
                     + std::string(field.declaration->is_weak
@@ -948,39 +1142,67 @@ private:
                     + field_name(field.declaration->name) + ";\n";
             }
             output += "};\n\n";
-            const auto destroy = info.methods.find("destroy");
-            if (destroy != info.methods.end()) {
-                output += "static void " + method_name(name, "destroy")
-                    + "(" + object + "* toro_self);\n\n";
+
+            output += "static void " + finalize_name(name)
+                + "(void* toro_raw_value)\n{\n";
+            output += "    " + object + "* toro_value = (" + object
+                + "*)toro_raw_value;\n";
+            output += "    toro_weak_control* toro_control = "
+                + class_header_access("toro_value", name, "toro_weak_control")
+                + ";\n";
+            output += "    toro_control->toro_object = NULL;\n";
+            std::string lifecycle_owner = name;
+            while (true) {
+                const auto& lifecycle_info = classes_.at(lifecycle_owner);
+                if (lifecycle_info.methods.contains("destroy")) {
+                    output += "    " + method_name(lifecycle_owner, "destroy")
+                        + "(" + class_upcast(
+                            "toro_value", name, lifecycle_owner) + ");\n";
+                }
+                if (!lifecycle_info.base_name) {
+                    break;
+                }
+                lifecycle_owner = *lifecycle_info.base_name;
             }
+            for (auto field = fields.rbegin(); field != fields.rend(); ++field) {
+                const std::string access = class_member_access(
+                    "toro_value",
+                    name,
+                    field->first,
+                    field_name(field->second->declaration->name));
+                if (field->second->declaration->is_weak) {
+                    output += "    toro_weak_clear(&" + access + ");\n";
+                } else if (field->second->type.kind == CValueKind::Class) {
+                    output += "    " + release_name(
+                        field->second->type.nominal_name) + "(" + access + ");\n";
+                }
+            }
+            output += "    if (--toro_control->toro_weak_count == 0) { free(toro_control); }\n";
+            output += "    free(toro_value);\n";
+            output += "}\n\n";
+
             output += "static void " + retain_name(name) + "(" + object
                 + "* toro_value)\n{\n";
             output += "    if (toro_value != NULL)\n    {\n";
-            output += "        if (toro_value->toro_strong_count == 0) { abort(); }\n";
-            output += "        ++toro_value->toro_strong_count;\n    }\n";
+            output += "        if ("
+                + class_header_access("toro_value", name, "toro_strong_count")
+                + " == 0) { abort(); }\n";
+            output += "        ++"
+                + class_header_access("toro_value", name, "toro_strong_count")
+                + ";\n    }\n";
             output += "}\n\n";
             output += "static void " + release_name(name) + "(" + object
                 + "* toro_value)\n{\n";
-            output += "    if (toro_value != NULL && --toro_value->toro_strong_count == 0)\n";
+            output += "    if (toro_value != NULL && --"
+                + class_header_access("toro_value", name, "toro_strong_count")
+                + " == 0)\n";
             output += "    {\n";
-            output += "        toro_weak_control* toro_control = toro_value->toro_weak_control;\n";
-            output += "        toro_control->toro_object = NULL;\n";
-            if (destroy != info.methods.end()) {
-                output += "        " + method_name(name, "destroy")
-                    + "(toro_value);\n";
-            }
-            for (const auto& field : info.fields) {
-                const std::string access = "toro_value->"
-                    + field_name(field.declaration->name);
-                if (field.declaration->is_weak) {
-                    output += "        toro_weak_clear(&" + access + ");\n";
-                } else if (field.type.kind == CValueKind::Class) {
-                    output += "        " + release_name(field.type.nominal_name)
-                        + "(" + access + ");\n";
-                }
-            }
-            output += "        if (--toro_control->toro_weak_count == 0) { free(toro_control); }\n";
-            output += "        free(toro_value);\n    }\n";
+            output += "        "
+                + class_header_access("toro_value", name, "toro_finalize")
+                + "(" + class_header_access(
+                    "toro_value", name, "toro_weak_control")
+                + "->toro_object);\n";
+            output += "    }\n";
             output += "}\n\n";
             state[key] = 2;
             return output;
@@ -1522,6 +1744,27 @@ private:
         const Expr& expression,
         std::optional<CValueType> expected_type = std::nullopt)
     {
+        auto result = emit_expression_impl(expression, expected_type);
+        if (expected_type
+            && expected_type->kind == CValueKind::Class
+            && result.type.kind == CValueKind::Class
+            && is_class_base_of(
+                expected_type->nominal_name, result.type.nominal_name)) {
+            if (expected_type->nominal_name != result.type.nominal_name) {
+                result.code = class_upcast(
+                    result.code,
+                    result.type.nominal_name,
+                    expected_type->nominal_name);
+            }
+            result.type = *expected_type;
+        }
+        return result;
+    }
+
+    GeneratedExpression emit_expression_impl(
+        const Expr& expression,
+        std::optional<CValueType> expected_type)
+    {
         switch (expression.kind) {
         case ExprKind::Integer:
             return {static_cast<const IntegerExpr&>(expression).value, int_type};
@@ -2007,24 +2250,36 @@ private:
         const CallExpr& call)
     {
         const auto& info = classes_.at(name);
+        if (const auto base_initializer = base_initializer_owner(name)) {
+            throw_backend_error(
+                current_location_,
+                "construction of derived class '" + name
+                    + "' requires unsupported base initializer chaining for '"
+                    + *base_initializer + "'");
+        }
         if (const auto initializer = info.methods.find("init");
             initializer != info.methods.end()) {
             return emit_initialized_class_construction(
-                name, call, info, initializer->second);
+                name, call, initializer->second);
         }
-        std::vector<const CallArgument*> arguments(info.fields.size(), nullptr);
+        const auto fields = effective_class_fields(name);
+        std::vector<const CallArgument*> arguments(fields.size(), nullptr);
         std::size_t positional_index = 0;
         for (const auto& argument : call.arguments) {
             std::size_t field_index = positional_index;
             if (argument.name) {
-                const auto found = info.field_indices.find(*argument.name);
-                if (found == info.field_indices.end()) {
+                const auto found = std::ranges::find_if(
+                    fields,
+                    [&](const auto& field) {
+                        return field.second->declaration->name == *argument.name;
+                    });
+                if (found == fields.end()) {
                     throw_backend_error(
                         current_location_,
                         "class '" + name + "' has no field named '"
                             + *argument.name + "'");
                 }
-                field_index = found->second;
+                field_index = static_cast<std::size_t>(found - fields.begin());
             } else {
                 while (positional_index < arguments.size()
                     && arguments[positional_index] != nullptr) {
@@ -2045,15 +2300,20 @@ private:
         std::string prelude = c_type_name(type) + " " + temporary
             + " = malloc(sizeof(*" + temporary + "));\n";
         prelude += "if (" + temporary + " == NULL) { abort(); }\n";
-        prelude += temporary + "->toro_strong_count = 1;\n";
-        prelude += temporary + "->toro_weak_control = malloc(sizeof(*"
-            + temporary + "->toro_weak_control));\n";
-        prelude += "if (" + temporary + "->toro_weak_control == NULL) { abort(); }\n";
-        prelude += temporary + "->toro_weak_control->toro_object = "
-            + temporary + ";\n";
-        prelude += temporary + "->toro_weak_control->toro_weak_count = 1;\n";
-        for (std::size_t index = 0; index < info.fields.size(); ++index) {
-            const auto& field = info.fields[index];
+        const std::string strong_count = class_header_access(
+            temporary, name, "toro_strong_count");
+        const std::string weak_control = class_header_access(
+            temporary, name, "toro_weak_control");
+        const std::string finalizer = class_header_access(
+            temporary, name, "toro_finalize");
+        prelude += strong_count + " = 1;\n";
+        prelude += weak_control + " = malloc(sizeof(*" + weak_control + "));\n";
+        prelude += "if (" + weak_control + " == NULL) { abort(); }\n";
+        prelude += weak_control + "->toro_object = " + temporary + ";\n";
+        prelude += weak_control + "->toro_weak_count = 1;\n";
+        prelude += finalizer + " = " + finalize_name(name) + ";\n";
+        for (std::size_t index = 0; index < fields.size(); ++index) {
+            const auto& field = *fields[index].second;
             GeneratedExpression value{"", field.type};
             if (arguments[index]) {
                 value = emit_expression(*arguments[index]->value, field.type);
@@ -2064,8 +2324,11 @@ private:
                     zero_value(field.type, field.declaration->location), field.type};
             }
             prelude += value.prelude;
-            const std::string access = temporary + "->"
-                + field_name(field.declaration->name);
+            const std::string access = class_member_access(
+                temporary,
+                name,
+                fields[index].first,
+                field_name(field.declaration->name));
             if (field.declaration->is_weak) {
                 const std::string weak_value =
                     "toro_weak_value_" + std::to_string(temporary_index_++);
@@ -2073,8 +2336,9 @@ private:
                     + " = " + value.code + ";\n";
                 prelude += access + ".toro_control = NULL;\n";
                 prelude += "toro_weak_set(&" + access + ", " + weak_value
-                    + " == NULL ? NULL : " + weak_value
-                    + "->toro_weak_control);\n";
+                    + " == NULL ? NULL : " + class_header_access(
+                        weak_value, field.type.nominal_name, "toro_weak_control")
+                    + ");\n";
                 if (value.owned) {
                     prelude += release_name(value.type.nominal_name)
                         + "(" + weak_value + ");\n";
@@ -2093,7 +2357,6 @@ private:
     GeneratedExpression emit_initialized_class_construction(
         const std::string& name,
         const CallExpr& call,
-        const ClassInfo& info,
         const MethodInfo& initializer)
     {
         const CValueType type{CValueKind::Class, name};
@@ -2102,17 +2365,26 @@ private:
         std::string prelude = c_type_name(type) + " " + temporary
             + " = malloc(sizeof(*" + temporary + "));\n";
         prelude += "if (" + temporary + " == NULL) { abort(); }\n";
-        prelude += temporary + "->toro_strong_count = 1;\n";
-        prelude += temporary + "->toro_weak_control = malloc(sizeof(*"
-            + temporary + "->toro_weak_control));\n";
-        prelude += "if (" + temporary + "->toro_weak_control == NULL) { abort(); }\n";
-        prelude += temporary + "->toro_weak_control->toro_object = "
-            + temporary + ";\n";
-        prelude += temporary + "->toro_weak_control->toro_weak_count = 1;\n";
+        const std::string strong_count = class_header_access(
+            temporary, name, "toro_strong_count");
+        const std::string weak_control = class_header_access(
+            temporary, name, "toro_weak_control");
+        const std::string finalizer = class_header_access(
+            temporary, name, "toro_finalize");
+        prelude += strong_count + " = 1;\n";
+        prelude += weak_control + " = malloc(sizeof(*" + weak_control + "));\n";
+        prelude += "if (" + weak_control + " == NULL) { abort(); }\n";
+        prelude += weak_control + "->toro_object = " + temporary + ";\n";
+        prelude += weak_control + "->toro_weak_count = 1;\n";
+        prelude += finalizer + " = " + finalize_name(name) + ";\n";
 
-        for (const auto& field : info.fields) {
-            const std::string access = temporary + "->"
-                + field_name(field.declaration->name);
+        for (const auto& [owner, field_pointer] : effective_class_fields(name)) {
+            const auto& field = *field_pointer;
+            const std::string access = class_member_access(
+                temporary,
+                name,
+                owner,
+                field_name(field.declaration->name));
             if (field.declaration->is_weak) {
                 prelude += access + ".toro_control = NULL;\n";
             }
@@ -2144,8 +2416,9 @@ private:
                 prelude += c_type_name(field.type) + " " + weak_value
                     + " = " + value.code + ";\n";
                 prelude += "toro_weak_set(&" + access + ", " + weak_value
-                    + " == NULL ? NULL : " + weak_value
-                    + "->toro_weak_control);\n";
+                    + " == NULL ? NULL : " + class_header_access(
+                        weak_value, field.type.nominal_name, "toro_weak_control")
+                    + ");\n";
                 if (value.owned) {
                     prelude += release_name(value.type.nominal_name)
                         + "(" + weak_value + ");\n";
@@ -2235,17 +2508,20 @@ private:
                     current_location_,
                     "field access through a temporary class reference is not supported by the C backend");
             }
-            const auto& info = classes_.at(object.type.nominal_name);
-            const auto field = info.field_indices.find(member.member);
-            if (field == info.field_indices.end()) {
+            const auto field = find_class_field(
+                object.type.nominal_name, member.member);
+            if (!field) {
                 throw_backend_error(
                     current_location_,
                     "class '" + object.type.nominal_name + "' has no field named '"
                         + member.member + "'");
             }
-            const auto& field_info = info.fields[field->second];
-            const std::string access = "(" + object.code + ")->"
-                + field_name(member.member);
+            const auto& field_info = *field->second;
+            const std::string access = class_member_access(
+                object.code,
+                object.type.nominal_name,
+                field->first,
+                field_name(member.member));
             if (field_info.declaration->is_weak) {
                 return {
                     "((" + c_type_name(field_info.type)
@@ -2292,19 +2568,22 @@ private:
                 assignment.location,
                 "field assignment through a temporary class reference is not supported by the C backend");
         }
-        const auto& info = classes_.at(object.type.nominal_name);
-        const auto field = info.field_indices.find(assignment.target->member);
-        if (field == info.field_indices.end()) {
+        const auto field = find_class_field(
+            object.type.nominal_name, assignment.target->member);
+        if (!field) {
             throw_backend_error(
                 assignment.location,
                 "class '" + object.type.nominal_name + "' has no field named '"
                     + assignment.target->member + "'");
         }
-        const auto& field_info = info.fields[field->second];
+        const auto& field_info = *field->second;
         const auto value = emit_expression(*assignment.value, field_info.type);
         const std::string prefix = indent(depth);
-        const std::string access = "(" + object.code + ")->"
-            + field_name(assignment.target->member);
+        const std::string access = class_member_access(
+            object.code,
+            object.type.nominal_name,
+            field->first,
+            field_name(assignment.target->member));
         std::string output = indent_prelude(object.prelude + value.prelude, depth);
         if (field_info.declaration->is_weak) {
             const std::string temporary =
@@ -2312,7 +2591,9 @@ private:
             output += prefix + c_type_name(field_info.type) + " " + temporary
                 + " = " + value.code + ";\n";
             output += prefix + "toro_weak_set(&" + access + ", " + temporary
-                + " == NULL ? NULL : " + temporary + "->toro_weak_control);\n";
+                + " == NULL ? NULL : " + class_header_access(
+                    temporary, field_info.type.nominal_name, "toro_weak_control")
+                + ");\n";
             if (value.owned) {
                 output += prefix + release_name(value.type.nominal_name)
                     + "(" + temporary + ");\n";
@@ -2387,15 +2668,31 @@ private:
                 current_location_,
                 "init cannot be invoked directly");
         }
-        const auto* methods = receiver.type.kind == CValueKind::Struct
-            ? &structs_.at(receiver.type.nominal_name).methods
-            : &classes_.at(receiver.type.nominal_name).methods;
-        const auto method = methods->find(member.member);
-        if (method == methods->end()) {
+        const MethodInfo* method_info = nullptr;
+        std::string method_owner = receiver.type.nominal_name;
+        if (receiver.type.kind == CValueKind::Struct) {
+            const auto& methods = structs_.at(receiver.type.nominal_name).methods;
+            const auto method = methods.find(member.member);
+            if (method != methods.end()) {
+                method_info = &method->second;
+            }
+        } else if (const auto method = find_class_method(
+                       receiver.type.nominal_name, member.member)) {
+            method_owner = method->first;
+            method_info = method->second;
+        }
+        if (!method_info) {
             throw_backend_error(
                 current_location_,
                 "type '" + receiver.type.nominal_name + "' has no method named '"
                     + member.member + "'");
+        }
+        if (receiver.type.kind == CValueKind::Class
+            && has_runtime_override(receiver.type.nominal_name, member.member)) {
+            throw_backend_error(
+                current_location_,
+                "virtual dispatch is not supported by the C backend for method '"
+                    + method_owner + "." + member.member + "'");
         }
         if (receiver.type.kind == CValueKind::Struct
             && !receiver.pointer && !receiver.addressable) {
@@ -2404,10 +2701,11 @@ private:
                 "struct method receiver must be an addressable value");
         }
         const auto ordered = order_arguments(
-            call, method->second.declaration->parameters);
-        std::string code = method_name(receiver.type.nominal_name, member.member) + "(";
+            call, method_info->declaration->parameters);
+        std::string code = method_name(method_owner, member.member) + "(";
         std::string prelude = receiver.prelude;
         std::vector<ValueInfo> owned_arguments;
+        std::string receiver_code;
         if (receiver.type.kind == CValueKind::Class && receiver.owned) {
             const std::string temporary =
                 "toro_receiver_class_" + std::to_string(temporary_index_++);
@@ -2415,15 +2713,21 @@ private:
                 + " = " + receiver.code + ";\n";
             owned_arguments.push_back(
                 ValueInfo{receiver.type, temporary, false, true});
-            code += temporary;
+            receiver_code = temporary;
         } else {
-            code += receiver.type.kind == CValueKind::Class || receiver.pointer
+            receiver_code = receiver.type.kind == CValueKind::Class || receiver.pointer
                 ? receiver.code
                 : "&(" + receiver.code + ")";
         }
+        if (receiver.type.kind == CValueKind::Class
+            && method_owner != receiver.type.nominal_name) {
+            receiver_code = class_upcast(
+                receiver_code, receiver.type.nominal_name, method_owner);
+        }
+        code += receiver_code;
         for (std::size_t index = 0; index < ordered.size(); ++index) {
             const auto argument = emit_expression(
-                *ordered[index]->value, method->second.parameter_types[index]);
+                *ordered[index]->value, method_info->parameter_types[index]);
             prelude += argument.prelude;
             code += ", ";
             if (argument.type.kind == CValueKind::Class && argument.owned) {
@@ -2441,7 +2745,7 @@ private:
         code += ")";
         return complete_call(
             std::move(code),
-            method->second.return_type,
+            method_info->return_type,
             std::move(prelude),
             std::move(owned_arguments));
     }

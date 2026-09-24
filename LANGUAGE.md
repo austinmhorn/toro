@@ -337,7 +337,8 @@ its operand in a temporary, checks the tag once, extracts the success payload,
 or returns a freshly tagged error Result from the enclosing function.
 
 Non-generic classes lower to heap-allocated C objects containing a strong
-reference count and their instance fields. Class variables store pointers, so
+reference count, weak-control pointer, most-derived finalizer, and their instance
+fields. Class variables store pointers, so
 copying a class value preserves object identity rather than copying fields.
 Construction creates one strong reference. Owned locals and class parameters
 retain borrowed references, assignments release replaced references, returns
@@ -345,6 +346,17 @@ preserve the returned lifetime, and lexical-scope exit releases owned locals.
 The generated release helper frees the object when its count reaches zero.
 Class methods receive the same object pointer as `self`, so field mutations are
 visible through every alias.
+
+Single inheritance uses a prefix-compatible embedded-base object layout. A
+derived object embeds its immediate base as its first member and adds its own
+fields afterward, while base and derived references share the same header,
+strong count, weak-control state, and allocation address.
+Implicit derived-to-base conversion is therefore a pointer view, not a second
+allocation. Releasing through any view invokes the stored most-derived finalizer.
+That finalizer invalidates weak references, runs `destroy()` declarations from
+most-derived class to base class, releases derived and inherited fields once,
+and frees the single allocation. Inherited non-virtual methods are statically
+called with the appropriate base view.
 
 Strong class-reference fields participate in ARC: initialization and assignment
 retain borrowed targets, replacement releases the previous target, and owner
@@ -376,7 +388,7 @@ field: explicit source defaults take priority, while omitted `int`, `dec`,
 struct values remain unsupported unless explicitly supplied.
 
 Generic classes and structs, method overloads, conversions, interfaces,
-inheritance, nullable non-class fields, collections, thread-safe ARC, and
+virtual dispatch, nullable non-class fields, collections, thread-safe ARC, and
 cyclic-reference collection are not lowered yet. Enum and
 Result payloads may use primitives, supported non-generic structs, supported
 enums, or supported nested Results; other payload types produce a backend
@@ -436,8 +448,11 @@ accessible only within their declaring type. Derived values are assignable to
 their base class and implemented interfaces, but assignment in the opposite
 direction is rejected.
 
-Constructor-specific `init` behavior, virtual dispatch, monomorphization, and
-runtime construction are not implemented yet.
+Class `init` declarations provide constructor-specific parameters and must
+definitely initialize required fields. Native single-inheritance construction
+supports inherited fields when no base initializer call is required. Base
+initializer chaining, virtual dispatch, monomorphization, and generic runtime
+construction are not implemented yet.
 
 ### Nullable types
 

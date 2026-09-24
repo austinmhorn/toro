@@ -31,6 +31,7 @@ and postfix `?` propagation are also lowered when both payload types are
 backend-supported. Non-generic classes lower to heap objects with identity and
 generated strong-reference ARC operations. Class construction executes a single
 `init` method after allocating the object and establishing all field defaults.
+Single class inheritance uses one shared object identity and ARC lifetime.
 
 ## Build
 
@@ -129,6 +130,7 @@ Generate C after parsing and checking a source file:
 ./build/toro emit-c examples/class_arc.toro
 ./build/toro emit-c examples/lifecycle.toro
 ./build/toro emit-c examples/init.toro
+./build/toro emit-c examples/class_inheritance.toro
 ```
 
 Build a native executable with the host C compiler:
@@ -152,6 +154,7 @@ Build and run through temporary artifacts:
 ./build/toro run examples/class_arc.toro
 ./build/toro run examples/lifecycle.toro
 ./build/toro run examples/init.toro
+./build/toro run examples/class_inheritance.toro
 ```
 
 `run` forwards program output and returns its exit status. Its temporary C source
@@ -213,9 +216,15 @@ non-null fields without defaults must be assigned by `init` on every reachable
 completion path. Classes without `init` retain field-based construction.
 Initializers use the dedicated `init(...) { ... }` lifecycle syntax;
 `function init(...)` is rejected.
-Initializer overloading, inheritance/base initialization, interfaces, generic
-classes, class-valued enum/Result payloads, and field access through a temporary
-class reference remain explicit backend errors.
+Derived objects use a prefix-compatible embedded-base layout containing one
+ARC/weak/finalizer header. Derived-to-base upcasts therefore preserve object
+identity, and a base-typed final release invokes the most-derived finalizer.
+Destruction runs derived lifecycle cleanup before base lifecycle cleanup, then
+releases all derived and inherited strong/weak fields exactly once. Inherited
+non-virtual methods use static calls with a safe base-pointer view.
+Initializer overloading, base-initializer chaining, virtual dispatch, interfaces,
+generic classes, class-valued enum/Result payloads, and field access through a
+temporary class reference remain explicit backend errors.
 
 ## Logical operators
 
