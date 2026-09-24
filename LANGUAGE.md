@@ -179,8 +179,10 @@ class Player {
 }
 ```
 
-`init` and `destroy` have no runtime semantics yet. A class may declare one
-parameterless `destroy()` method, and it cannot declare a return type.
+`init` execution remains deferred. A class may declare one parameterless
+`destroy()` method, and it cannot declare a return type. The native backend runs
+`destroy()` exactly once at final strong release, before owned fields and object
+storage are freed. `self` and fields remain usable during that call.
 
 ### Interfaces and inheritance
 
@@ -334,6 +336,20 @@ The generated release helper frees the object when its count reaches zero.
 Class methods receive the same object pointer as `self`, so field mutations are
 visible through every alias.
 
+Strong class-reference fields participate in ARC: initialization and assignment
+retain borrowed targets, replacement releases the previous target, and owner
+destruction releases each strong field after `destroy()` returns. Nullable class
+fields use `NULL` as their zero value. A field declared with `weak` must have a
+nullable class type. It stores a reference-counted weak control block rather than
+a raw object pointer, never increments the object's strong count, and loads the
+control block's object pointer. Final strong release nulls that pointer before
+running `destroy()`, so every surviving weak field immediately reads as `null`
+without touching freed storage. Weak slots keep the control block alive until
+they are reassigned, cleared, or their owner is destroyed.
+
+ARC does not collect strong reference cycles. A strong parent-to-child edge plus
+a weak child-to-parent edge cleans up, while two strong edges may leak.
+
 Primitive types map directly to C:
 
 ```text
@@ -350,13 +366,12 @@ field: explicit source defaults take priority, while omitted `int`, `dec`,
 struct values remain unsupported unless explicitly supplied.
 
 Generic classes and structs, method overloads, conversions, interfaces,
-inheritance, nullable fields, collections, weak references, lifecycle method
-execution, and cyclic-reference collection are not lowered yet. Enum and
+inheritance, nullable non-class fields, collections, thread-safe ARC, and
+cyclic-reference collection are not lowered yet. Enum and
 Result payloads may use primitives, supported non-generic structs, supported
 enums, or supported nested Results; other payload types produce a backend
-diagnostic. Class-reference fields and class-valued enum/Result payloads remain
-unsupported so ownership is never guessed. `init` and `destroy()` runtime
-execution are deferred. Method receivers and argument forms that cannot yet be
+diagnostic. Class-valued enum/Result payloads remain unsupported so ownership is
+never guessed. `init` execution remains deferred. Method receivers and argument forms that cannot yet be
 owned safely are materialized and released around the call; temporary class
 field access remains rejected rather than lowered to invalid C.
 

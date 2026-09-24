@@ -1,0 +1,32 @@
+class Child {
+    public name: string
+    public weak parent: Parent?
+
+    function destroy() {
+        print("child destroyed")
+        if self.parent == null {
+            print("parent cleared")
+        }
+    }
+}
+
+class Parent {
+    public child: Child?
+
+    function destroy() {
+        print("parent destroyed")
+        if self.child != null {
+            print("child attached")
+        }
+    }
+}
+
+function main() {
+    parent := Parent()
+    child := Child(name: "toro")
+
+    parent.child = child
+    child.parent = parent
+
+    print(child.parent != null)
+}

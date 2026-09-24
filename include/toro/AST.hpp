@@ -550,17 +550,20 @@ struct StructDeclarationStmt final : Stmt {
 struct ClassField final : ClassMember {
     ClassField(
         Visibility visibility,
+        bool is_weak,
         SourceLocation location,
         std::string name,
         TypeReference type,
         std::unique_ptr<Expr> default_value)
         : ClassMember(ClassMemberKind::Field, visibility, location)
+        , is_weak(is_weak)
         , name(std::move(name))
         , type(std::move(type))
         , default_value(std::move(default_value))
     {
     }
 
+    bool is_weak;
     std::string name;
     TypeReference type;
     std::unique_ptr<Expr> default_value;

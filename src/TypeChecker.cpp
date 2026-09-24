@@ -755,6 +755,15 @@ void TypeChecker::check_statement(const Stmt& statement)
                 const auto& field = static_cast<const ClassField&>(*member);
                 const Type declared = resolve_type(field.type);
                 reject_standalone_null_type(declared, field.type.location);
+                if (field.is_weak) {
+                    const auto* target = find_nominal_type(declared.name);
+                    if (!declared.nullable || declared.kind != TypeKind::Unknown
+                        || !target || target->kind != NominalKind::Class) {
+                        throw_type_error(
+                            field.location,
+                            "weak fields require a nullable class type");
+                    }
+                }
                 if (field.default_value) {
                     const Type actual = require_value(
                         check_expression(*field.default_value, declared), field.location);

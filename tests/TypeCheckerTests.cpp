@@ -76,6 +76,20 @@ void test_assignment_types()
         "value = 20\n");
 }
 
+void test_weak_field_types()
+{
+    expect_valid(
+        "class Parent {}\n"
+        "class Child { weak parent: Parent? }\n");
+    expect_error(
+        "class Parent {}\n"
+        "class Child { weak parent: Parent }\n",
+        "weak fields require a nullable class type");
+    expect_error(
+        "class Child { weak count: int? }\n",
+        "weak fields require a nullable class type");
+}
+
 void test_arithmetic_and_comparisons()
 {
     expect_valid(
@@ -1457,6 +1471,7 @@ int main()
     try {
         test_primitive_inference_and_explicit_types();
         test_assignment_types();
+        test_weak_field_types();
         test_arithmetic_and_comparisons();
         test_logical_operators_and_conditions();
         test_function_arguments();

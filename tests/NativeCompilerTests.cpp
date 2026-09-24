@@ -349,6 +349,63 @@ void test_class_arc_runtime_behavior()
         "generated class ARC program produced unexpected output");
 }
 
+void test_class_lifecycle_and_weak_runtime_behavior()
+{
+    const auto c_source = generate(
+        "class Target {\n"
+        "    public name: string\n"
+        "    function destroy() { print(self.name) }\n"
+        "}\n"
+        "class Watcher {\n"
+        "    public weak target: Target?\n"
+        "    function destroy() { print(\"watcher destroyed\") }\n"
+        "}\n"
+        "class Holder { public child: Target? }\n"
+        "class RequiredHolder { public child: Target }\n"
+        "class Child {\n"
+        "    public weak parent: Parent?\n"
+        "    function destroy() {\n"
+        "        print(\"child destroyed\")\n"
+        "        if self.parent == null { print(\"child saw null\") }\n"
+        "    }\n"
+        "}\n"
+        "class Parent {\n"
+        "    public child: Child?\n"
+        "    function destroy() { print(\"parent destroyed\") }\n"
+        "}\n"
+        "function main() {\n"
+        "    watcher := Watcher()\n"
+        "    {\n"
+        "        first := Target(name: \"first destroyed\")\n"
+        "        second := Target(name: \"second destroyed\")\n"
+        "        holder := Holder()\n"
+        "        required := RequiredHolder(child: first)\n"
+        "        watcher.target = first\n"
+        "        print(watcher.target != null)\n"
+        "        watcher.target = second\n"
+        "        holder.child = first\n"
+        "        holder.child = second\n"
+        "        holder.child = null\n"
+        "    }\n"
+        "    print(watcher.target == null)\n"
+        "    {\n"
+        "        parent := Parent()\n"
+        "        child := Child()\n"
+        "        parent.child = child\n"
+        "        child.parent = parent\n"
+        "        print(child.parent != null)\n"
+        "    }\n"
+        "}\n");
+    const auto [status, output] = capture_run(toro::NativeCompiler(), c_source);
+    expect(status == 0, "generated lifecycle program did not exit successfully");
+    expect(
+        output
+            == "true\nsecond destroyed\nfirst destroyed\ntrue\ntrue\n"
+               "parent destroyed\nchild destroyed\nchild saw null\n"
+               "watcher destroyed\n",
+        "generated lifecycle program produced unexpected output");
+}
+
 void test_compile_failure_reporting()
 {
     const auto directory = make_test_directory();
@@ -407,6 +464,7 @@ int main()
         test_enum_runtime_behavior();
         test_result_runtime_behavior();
         test_class_arc_runtime_behavior();
+        test_class_lifecycle_and_weak_runtime_behavior();
         test_compile_failure_reporting();
         test_unsupported_backend_feature();
         test_temporary_cleanup();

@@ -36,7 +36,8 @@ private:
     [[nodiscard]] std::vector<GenericParameter> parse_generic_parameters();
     [[nodiscard]] TypeReference parse_type_reference(
         const char* message = "expected type name");
-    [[nodiscard]] std::unique_ptr<ClassMember> parse_class_field(Visibility visibility);
+    [[nodiscard]] std::unique_ptr<ClassMember> parse_class_field(
+        Visibility visibility, bool is_weak);
     [[nodiscard]] std::unique_ptr<ClassMember> parse_method_declaration(
         Visibility visibility,
         bool is_virtual,

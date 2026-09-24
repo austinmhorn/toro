@@ -126,6 +126,7 @@ Generate C after parsing and checking a source file:
 ./build/toro emit-c examples/enums.toro
 ./build/toro emit-c examples/results.toro
 ./build/toro emit-c examples/class_arc.toro
+./build/toro emit-c examples/lifecycle.toro
 ```
 
 Build a native executable with the host C compiler:
@@ -147,6 +148,7 @@ Build and run through temporary artifacts:
 ./build/toro run examples/enums.toro
 ./build/toro run examples/results.toro
 ./build/toro run examples/class_arc.toro
+./build/toro run examples/lifecycle.toro
 ```
 
 `run` forwards program output and returns its exit status. Its temporary C source
@@ -186,16 +188,24 @@ deterministically prefixed C identifiers and emits a C entry-point wrapper for a
 toro `main`. Enums lower to deterministic tagged unions; construction selects a
 tag and payload, while exhaustive `handle` statements lower to `switch` blocks
 with case-scoped payload bindings. Generic structs, interfaces, conversion
-overloads, nullable fields, Results containing unsupported runtime payloads, and
+overloads, unsupported nullable value fields, Results containing unsupported runtime payloads, and
 other runtime types outside this subset fail with a backend diagnostic instead
 of producing partial or incorrect C. Non-generic classes use heap-backed pointer
 identity. Construction begins with one strong reference; local copies and class
 parameters retain, replacement and lexical-scope exit release, and the final
 release frees the object. Primitive and supported value fields, field access and
 assignment, methods, `self`, and class-valued function parameters/returns are
-lowered. `init`, `destroy()`, inheritance, interfaces, generic classes,
-class-reference fields or enum/Result payloads, and field access through a
-temporary class reference remain explicit backend errors.
+lowered. Strong class-reference fields retain their targets and release replaced
+or owned values. Nullable class fields accept `null`. A class `destroy()` method
+runs once after its weak control block is invalidated but before its strong and
+weak fields are cleaned and object storage is freed. Weak fields must have a
+nullable class type; they use zeroing control-block references, do not retain
+their target, and safely read as `null` after target destruction. Parent-strong
+to child / child-weak to parent graphs therefore clean up normally. Strong
+reference cycles can still leak because toro does not yet include a cycle
+collector. `init`, inheritance, interfaces, generic classes, class-valued
+enum/Result payloads, and field access through a temporary class reference remain
+explicit backend errors.
 
 ## Logical operators
 

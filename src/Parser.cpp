@@ -347,6 +347,7 @@ void append_statement_dump(const Stmt& statement, std::size_t depth, std::string
             if (member->kind == ClassMemberKind::Field) {
                 const auto& field = static_cast<const ClassField&>(*member);
                 output += member_indentation + visibility_name(field.visibility)
+                    + (field.is_weak ? " weak" : "")
                     + " Field(" + field.name + ": " + format_type(field.type) + ")\n";
                 if (field.default_value) {
                     output += std::string((depth + 2) * 2, ' ') + "Default\n";
@@ -936,6 +937,7 @@ std::unique_ptr<Stmt> Parser::parse_class_declaration(bool is_abstract)
 
         bool is_virtual = false;
         bool is_override = false;
+        const bool is_weak = match({TokenType::Weak});
         if (match({TokenType::Virtual})) {
             is_virtual = true;
         } else if (match({TokenType::Override})) {
@@ -943,6 +945,9 @@ std::unique_ptr<Stmt> Parser::parse_class_declaration(bool is_abstract)
         }
         if (check(TokenType::Virtual) || check(TokenType::Override)) {
             throw_parse_error(peek(), "method may have only one virtual or override modifier");
+        }
+        if (is_weak && !check(TokenType::Identifier)) {
+            throw_parse_error(peek(), "weak may only modify a class field");
         }
 
         if (check(TokenType::Overload)) {
@@ -961,7 +966,7 @@ std::unique_ptr<Stmt> Parser::parse_class_declaration(bool is_abstract)
             members.push_back(parse_method_declaration(
                 visibility, is_virtual, is_override, saw_destroy));
         } else if (!is_virtual && !is_override && check(TokenType::Identifier)) {
-            members.push_back(parse_class_field(visibility));
+            members.push_back(parse_class_field(visibility, is_weak));
         } else {
             throw_parse_error(peek(), "expected class field or method");
         }
@@ -1135,7 +1140,8 @@ TypeReference Parser::parse_type_reference(const char* message)
     return type;
 }
 
-std::unique_ptr<ClassMember> Parser::parse_class_field(Visibility visibility)
+std::unique_ptr<ClassMember> Parser::parse_class_field(
+    Visibility visibility, bool is_weak)
 {
     Token name = advance();
     consume(TokenType::Colon, "expected ':' after class field name");
@@ -1150,6 +1156,7 @@ std::unique_ptr<ClassMember> Parser::parse_class_field(Visibility visibility)
     require_statement_end();
     return std::make_unique<ClassField>(
         visibility,
+        is_weak,
         SourceLocation{name.line, name.column},
         std::move(name.lexeme),
         std::move(type),

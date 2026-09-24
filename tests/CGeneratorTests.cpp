@@ -448,6 +448,61 @@ void test_class_arc_lowering()
         "class self field access");
 }
 
+void test_class_lifecycle_and_weak_lowering()
+{
+    const auto output = generate(
+        "class Child {\n"
+        "    public weak parent: Parent?\n"
+        "    function destroy() { print(\"child destroyed\") }\n"
+        "}\n"
+        "class Parent {\n"
+        "    public child: Child?\n"
+        "    function destroy() {\n"
+        "        print(\"parent destroyed\")\n"
+        "        if self.child != null { print(\"child attached\") }\n"
+        "    }\n"
+        "}\n"
+        "class RequiredParent { public child: Child }\n"
+        "function main() {\n"
+        "    parent := Parent()\n"
+        "    child := Child()\n"
+        "    parent.child = child\n"
+        "    required := RequiredParent(child: child)\n"
+        "    child.parent = parent\n"
+        "    print(child.parent != null)\n"
+        "}\n");
+
+    expect_contains(output, "typedef struct toro_weak_control", "weak control block");
+    expect_contains(output, "toro_weak_ref toro_field_parent;", "weak field slot");
+    expect_contains(output, "toro_weak_set(", "weak assignment helper");
+    expect_contains(output, "toro_weak_load(", "safe weak read helper");
+    expect_contains(
+        output,
+        "toro_class_5_Child_retain(toro_field_class_",
+        "strong field retain");
+    expect_contains(
+        output,
+        "toro_class_5_Child_release(toro_value->toro_field_child);",
+        "strong field teardown");
+
+    const auto parent_release = output.find(
+        "static void toro_class_6_Parent_release(toro_class_6_Parent* toro_value)\n{");
+    const auto invalidate = output.find(
+        "toro_control->toro_object = NULL;", parent_release);
+    const auto destroy = output.find(
+        "toro_method_6_Parent_destroy(toro_value);", parent_release);
+    const auto release_field = output.find(
+        "toro_class_5_Child_release(toro_value->toro_field_child);");
+    const auto free_object = output.find("free(toro_value);", release_field);
+    if (!(invalidate != std::string::npos && destroy != std::string::npos
+            && release_field != std::string::npos
+            && free_object != std::string::npos && invalidate < destroy
+            && destroy < release_field && release_field < free_object)) {
+        throw std::runtime_error(
+            "class finalization order was not invalidate, destroy, fields, free");
+    }
+}
+
 void test_unsupported_features()
 {
     expect_backend_error(
@@ -488,8 +543,11 @@ void test_unsupported_features()
         "function consume(result: Result<Resource, string>) {}\n",
         "class-reference Result payloads are not supported by the C backend");
     expect_backend_error(
-        "class Resource { function destroy() {} }\n",
-        "destroy() runtime invocation is not supported by the C backend");
+        "class Resource {\n"
+        "    function destroy() {}\n"
+        "    function invoke() { self.destroy() }\n"
+        "}\n",
+        "destroy() cannot be invoked directly");
     expect_backend_error(
         "class Box<T> { public value: T }\n",
         "generic classes are not supported by the C backend");
@@ -507,8 +565,8 @@ void test_unsupported_features()
         "}\n",
         "class conversion overloads are not supported by the C backend");
     expect_backend_error(
-        "class Node { public next: Node }\n",
-        "class-reference fields are not supported by the C backend");
+        "class Node { weak next: Node }\n",
+        "weak fields require a nullable class type");
     expect_backend_error(
         "function consume(result: Result<int?, string>) {}\n",
         "nullable type 'int?' is not supported by the C backend");
@@ -565,6 +623,7 @@ int main()
         test_result_construction_handle_and_propagation();
         test_distinct_result_instances();
         test_class_arc_lowering();
+        test_class_lifecycle_and_weak_lowering();
         test_unsupported_features();
         test_generated_c_compiles();
     } catch (const std::exception& error) {

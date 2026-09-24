@@ -54,6 +54,21 @@ void test_literals_and_identifier()
     expect_dump("answer", "Identifier(answer)\n");
 }
 
+void test_weak_class_field()
+{
+    const auto program = parse_program(
+        "class Parent {}\n"
+        "class Child { public weak parent: Parent? }\n");
+    expect(program.statements.size() == 2, "expected two class declarations");
+    const auto& child = static_cast<const toro::ClassDeclarationStmt&>(
+        *program.statements[1]);
+    expect(child.members.size() == 1, "expected one weak field");
+    const auto& field = static_cast<const toro::ClassField&>(*child.members[0]);
+    expect(field.is_weak, "weak field modifier was not retained");
+    expect(field.type.nullable, "weak field type should remain nullable");
+    expect(field.type.name == "Parent", "weak field target type was not retained");
+}
+
 void test_unary_minus()
 {
     expect_dump("-10", "Unary(-)\n  Integer(10)\n");
@@ -1680,6 +1695,7 @@ int main()
 {
     try {
         test_literals_and_identifier();
+        test_weak_class_field();
         test_unary_minus();
         test_result_propagation();
         test_multiplication_before_addition();
