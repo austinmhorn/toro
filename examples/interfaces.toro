@@ -1,0 +1,90 @@
+interface Named {
+    function name() -> string
+    function rename(value: string)
+}
+
+interface Counted {
+    function count() -> int
+}
+
+interface Described {
+    function description() -> string
+}
+
+struct Label implements Named {
+    value: string
+
+    function name() -> string {
+        return self.value
+    }
+
+    function rename(value: string) {
+        self.value = value
+    }
+}
+
+class Entity implements Named {
+    public value: string
+
+    public virtual function name() -> string {
+        return self.value
+    }
+
+    public function rename(value: string) {
+        self.value = value
+    }
+
+    public function description() -> string {
+        return self.value
+    }
+}
+
+class Worker : Entity implements Counted, Described {
+    public amount: int
+
+    public override function name() -> string {
+        return "worker"
+    }
+
+    public function count() -> int {
+        return self.amount
+    }
+
+    destroy() {
+        print("worker destroyed")
+    }
+}
+
+function show(value: Named) {
+    print(value.name())
+}
+
+function make_label() -> Named {
+    return Label(value: "label")
+}
+
+function make_worker() -> Named {
+    return Worker(value: "entity", amount: 3)
+}
+
+function main() {
+    named := make_label()
+    show(named)
+
+    worker := Worker(value: "entity", amount: 7)
+    show(worker)
+
+    counted: Counted = worker
+    print(counted.count())
+
+    described: Described = worker
+    print(described.description())
+
+    named = worker
+    named.rename("renamed")
+    print(named.name())
+    print(worker.value)
+
+    returned := make_worker()
+    print(returned.name())
+}

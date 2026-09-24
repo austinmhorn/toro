@@ -1,6 +1,7 @@
 # Toro Roadmap
 
-This roadmap reflects the current language direction after completion of the core semantic system and native runtime work through virtual dispatch.
+This roadmap reflects the current language direction after completion of the
+core semantic system and native runtime work through runtime interfaces.
 
 Toro's long-term thesis is:
 
@@ -39,7 +40,8 @@ Completed foundations include:
 - zeroing weak references;
 - `init` / `destroy`;
 - single-inheritance runtime;
-- virtual dispatch runtime.
+- virtual dispatch runtime;
+- runtime interface values and dispatch for classes and structs.
 
 The current implementation prioritizes correct semantics over advanced optimization.
 
@@ -47,9 +49,9 @@ The current implementation prioritizes correct semantics over advanced optimizat
 
 # Phase 6 — Complete the native runtime
 
-## 6.11 Runtime interfaces
+## 6.11 Runtime interfaces — completed
 
-Implement interface values and dispatch at runtime.
+Interface values and dispatch now execute natively.
 
 Goals:
 

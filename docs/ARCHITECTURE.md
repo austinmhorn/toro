@@ -220,12 +220,28 @@ Non-virtual methods remain statically dispatched.
 
 `destroy()` is not virtual; lifecycle cleanup remains deterministic derived-to-base.
 
+### Runtime interfaces
+
+Each interface lowers to a deterministic value struct and vtable. Class-backed
+interface values store the existing class reference with retain/release callbacks;
+they do not allocate a second object and therefore preserve ARC, weak-reference,
+inheritance, and identity behavior. Struct-backed interface values store an
+inline union member and copy with ordinary Toro value semantics.
+
+Generated per-implementer thunks isolate dispatch adaptation from ordinary
+expression lowering. Class thunks use the existing class vtable when an
+interface requirement is implemented by a virtual method, so most-derived
+overrides remain effective. Struct thunks call the concrete receiver directly.
+Interface parameters, returns, locals, reassignment, inherited implementations,
+and multiple interfaces use the same representation.
+
 ## Current known runtime boundaries
 
-At the completion of the current virtual-dispatch milestone, important unsupported or deferred runtime features include:
+After the runtime-interface milestone, important unsupported or deferred runtime features include:
 
-- runtime interfaces;
 - generic function, struct, and class runtime lowering/monomorphization;
+- generic interfaces and generic interface methods;
+- interface-valued fields;
 - function/method overload lowering where the backend does not yet support it;
 - user-defined conversion overload lowering;
 - RTTI/dynamic casts;

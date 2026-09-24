@@ -226,8 +226,10 @@ explicit method modifiers. An abstract class may leave virtual methods bodyless.
 Overrides must match an inherited virtual method exactly, and concrete classes
 must implement inherited abstract methods. Implementing classes and structs must
 provide matching public interface methods. The native backend dispatches class
-virtual methods through deterministic per-concrete-class vtables. Runtime
-interface dispatch remains a later phase.
+virtual methods through deterministic per-concrete-class vtables. Interface
+values also dispatch natively through deterministic per-interface vtables.
+Class-backed interface values preserve the original object identity and ARC
+lifetime; struct-backed interface values store an inline value copy.
 
 ### Generics
 
@@ -385,6 +387,16 @@ ordinary non-virtual methods remain statically dispatched. Lifecycle
 `destroy()` declarations are never vtable entries and continue to run once in
 derived-to-base order during final release.
 
+Interface values use a deterministic C struct containing an interface vtable
+pointer and backing storage. A class-backed value stores a reference to the
+existing class object plus retain/release callbacks, so conversion does not
+create a second object or lifetime. A struct-backed value stores its struct copy
+inline, preserving Toro value semantics. Each implementing type has a generated
+interface thunk table. Class thunks retain virtual dispatch where applicable,
+including inherited implementations and most-derived overrides; struct thunks
+call the concrete value receiver directly. Interface parameters, returns,
+variables, reassignment, and multiple interfaces are supported.
+
 Primitive types map directly to C:
 
 ```text
@@ -400,8 +412,9 @@ field: explicit source defaults take priority, while omitted `int`, `dec`,
 `bool`, and `string` fields use `0`, `0.0`, `false`, and `""`. Omitted nested
 struct values remain unsupported unless explicitly supplied.
 
-Generic classes and structs, method overloads, conversions, runtime interfaces,
-nullable non-class fields, collections, thread-safe ARC, and
+Generic classes and structs, method overloads, conversions, generic interfaces
+and interface methods, interface-valued fields, nullable non-class fields,
+collections, thread-safe ARC, and
 cyclic-reference collection are not lowered yet. Enum and
 Result payloads may use primitives, supported non-generic structs, supported
 enums, or supported nested Results; other payload types produce a backend
@@ -464,8 +477,8 @@ direction is rejected.
 Class `init` declarations provide constructor-specific parameters and must
 definitely initialize required fields. Native single-inheritance construction
 supports inherited fields when no base initializer call is required. Base
-initializer chaining, runtime interface dispatch, monomorphization, and generic runtime
-construction are not implemented yet.
+initializer chaining, monomorphization, and generic runtime construction are not
+implemented yet.
 
 ### Nullable types
 

@@ -136,6 +136,7 @@ Generate C after parsing and checking a source file:
 ./build/toro emit-c examples/init.toro
 ./build/toro emit-c examples/class_inheritance.toro
 ./build/toro emit-c examples/virtual_dispatch.toro
+./build/toro emit-c examples/interfaces.toro
 ```
 
 Build a native executable with the host C compiler:
@@ -161,6 +162,7 @@ Build and run through temporary artifacts:
 ./build/toro run examples/init.toro
 ./build/toro run examples/class_inheritance.toro
 ./build/toro run examples/virtual_dispatch.toro
+./build/toro run examples/interfaces.toro
 ```
 
 `run` forwards program output and returns its exit status. Its temporary C source
@@ -199,7 +201,7 @@ methods lower to prefixed functions with an internal receiver pointer. It uses
 deterministically prefixed C identifiers and emits a C entry-point wrapper for a
 Toro `main`. Enums lower to deterministic tagged unions; construction selects a
 tag and payload, while exhaustive `handle` statements lower to `switch` blocks
-with case-scoped payload bindings. Generic structs, interfaces, conversion
+with case-scoped payload bindings. Generic structs, conversion
 overloads, unsupported nullable value fields, Results containing unsupported runtime payloads, and
 other runtime types outside this subset fail with a backend diagnostic instead
 of producing partial or incorrect C. Non-generic classes use heap-backed pointer
@@ -235,8 +237,14 @@ derived or base references, parameters, returns, and `self` select the
 most-derived override. Abstract bodyless virtual methods require a concrete
 implementation. `destroy()` stays outside virtual dispatch and follows the
 deterministic derived-to-base lifecycle path.
-Initializer overloading, base-initializer chaining, runtime interfaces,
-generic classes, class-valued enum/Result payloads, and field access through a
+Interface values use deterministic interface vtables. Class-backed values keep
+the existing object reference and participate in the same ARC/weak lifetime;
+struct-backed values keep an inline copy and preserve value semantics. Native
+interface conversion, calls, parameters, returns, reassignment, multiple
+interfaces, inherited implementations, and virtual overrides are supported.
+Initializer overloading, base-initializer chaining, generic interfaces and
+interface methods, interface-valued fields, generic classes, class-valued
+enum/Result payloads, and field access through a
 temporary class reference remain explicit backend errors.
 
 ## Logical operators

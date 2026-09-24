@@ -657,6 +657,80 @@ void test_class_initializer_lowering()
     expect_contains(output, "toro_weak_set(", "weak field assignment in initializer");
 }
 
+void test_interface_lowering()
+{
+    const auto output = generate(
+        "interface Named {\n"
+        "    function name() -> string\n"
+        "    function rename(value: string)\n"
+        "}\n"
+        "interface Counted { function count() -> int }\n"
+        "interface Described { function description() -> string }\n"
+        "struct Label implements Named {\n"
+        "    value: string\n"
+        "    function name() -> string { return self.value }\n"
+        "    function rename(value: string) { self.value = value }\n"
+        "}\n"
+        "class Entity implements Named {\n"
+        "    public value: string\n"
+        "    public virtual function name() -> string { return self.value }\n"
+        "    public function rename(value: string) { self.value = value }\n"
+        "    public function description() -> string { return self.value }\n"
+        "}\n"
+        "class Worker : Entity implements Counted, Described {\n"
+        "    public amount: int\n"
+        "    public override function name() -> string { return \"worker\" }\n"
+        "    public function count() -> int { return self.amount }\n"
+        "}\n"
+        "function show(value: Named) { print(value.name()) }\n"
+        "function return_named(worker: Worker) -> Named { return worker }\n"
+        "function main() {\n"
+        "    label: Named = Label(value: \"label\")\n"
+        "    worker := Worker(value: \"entity\", amount: 4)\n"
+        "    named: Named = worker\n"
+        "    counted: Counted = worker\n"
+        "    described: Described = worker\n"
+        "    show(label)\n"
+        "    print(named.name())\n"
+        "    print(counted.count())\n"
+        "    print(described.description())\n"
+        "    named = return_named(worker)\n"
+        "}\n");
+
+    expect_contains(
+        output,
+        "struct toro_interface_5_Named",
+        "interface value representation");
+    expect_contains(
+        output,
+        "toro_struct_Label toro_struct_value_5_Label;",
+        "inline struct interface storage");
+    expect_contains(
+        output,
+        "void (*toro_retain)(void*);",
+        "class-backed interface retain callback");
+    expect_contains(
+        output,
+        "toro_interface_vtable_instance_5_Named_6_Worker",
+        "inherited interface implementation table");
+    expect_contains(
+        output,
+        "->toro_virtual_6_Entity_name(",
+        "interface thunk virtual dispatch");
+    expect_contains(
+        output,
+        "toro_interface_5_Named_retain(&toro_var_named)",
+        "interface reassignment ownership");
+    expect_contains(
+        output,
+        ".toro_interface_slot_7_Counted_count",
+        "multiple interface dispatch tables");
+    expect_contains(
+        output,
+        "toro_method_6_Entity_description(",
+        "inherited non-virtual interface implementation");
+}
+
 void test_unsupported_features()
 {
     expect_backend_error(
@@ -703,14 +777,17 @@ void test_unsupported_features()
         "class Box<T> { public value: T }\n",
         "generic classes are not supported by the C backend");
     expect_backend_error(
+        "interface Box<T> { function value() -> T }\n",
+        "generic interfaces are not supported by the C backend");
+    expect_backend_error(
+        "interface Named { function name() -> string }\n"
+        "struct Holder { value: Named }\n",
+        "interface-valued struct fields are not supported by the C backend");
+    expect_backend_error(
         "class Base { init(value: int) {} }\n"
         "class Child : Base {}\n"
         "function main() { child := Child() }\n",
         "requires unsupported base initializer chaining");
-    expect_backend_error(
-        "interface Runnable { function run() }\n"
-        "class Worker implements Runnable { public function run() {} }\n",
-        "class interface implementations are not supported by the C backend");
     expect_backend_error(
         "class Named {\n"
         "    public name: string\n"
@@ -780,6 +857,7 @@ int main()
         test_class_inheritance_lowering();
         test_virtual_dispatch_lowering();
         test_class_initializer_lowering();
+        test_interface_lowering();
         test_unsupported_features();
         test_generated_c_compiles();
     } catch (const std::exception& error) {

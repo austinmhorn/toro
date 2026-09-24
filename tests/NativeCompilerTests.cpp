@@ -545,6 +545,72 @@ void test_virtual_dispatch_runtime_behavior()
         "generated virtual dispatch program produced unexpected output");
 }
 
+void test_interface_runtime_behavior()
+{
+    const auto c_source = generate(
+        "interface Named {\n"
+        "    function name() -> string\n"
+        "    function rename(value: string)\n"
+        "}\n"
+        "interface Counted { function count() -> int }\n"
+        "interface Described { function description() -> string }\n"
+        "struct Label implements Named {\n"
+        "    value: string\n"
+        "    function name() -> string { return self.value }\n"
+        "    function rename(value: string) { self.value = value }\n"
+        "}\n"
+        "class Entity implements Named {\n"
+        "    public value: string\n"
+        "    public virtual function name() -> string { return self.value }\n"
+        "    public function rename(value: string) { self.value = value }\n"
+        "    public function description() -> string { return self.value }\n"
+        "}\n"
+        "class Worker : Entity implements Counted, Described {\n"
+        "    public amount: int\n"
+        "    public override function name() -> string { return \"worker\" }\n"
+        "    public function count() -> int { return self.amount }\n"
+        "    destroy() { print(\"worker destroyed\") }\n"
+        "}\n"
+        "class Watcher { public weak entity: Entity? }\n"
+        "function show(value: Named) { print(value.name()) }\n"
+        "function return_named(worker: Worker) -> Named { return worker }\n"
+        "function main() {\n"
+        "    label := Label(value: \"label\")\n"
+        "    named_label: Named = label\n"
+        "    label.value = \"changed\"\n"
+        "    named_label.rename(\"interface label\")\n"
+        "    show(named_label)\n"
+        "    print(label.value)\n"
+        "    watcher := Watcher()\n"
+        "    {\n"
+        "        worker := Worker(value: \"entity\", amount: 4)\n"
+        "        watcher.entity = worker\n"
+        "        print(watcher.entity != null)\n"
+        "        named: Named = worker\n"
+        "        named.rename(\"renamed\")\n"
+        "        print(worker.value)\n"
+        "        show(named)\n"
+        "        counted: Counted = worker\n"
+        "        print(counted.count())\n"
+        "        described: Described = worker\n"
+        "        print(described.description())\n"
+        "        returned := return_named(worker)\n"
+        "        named = returned\n"
+        "        print(named.name())\n"
+        "        show(Worker(value: \"temporary\", amount: 1))\n"
+        "    }\n"
+        "    print(watcher.entity == null)\n"
+        "}\n");
+    const auto [status, output] = capture_run(toro::NativeCompiler(), c_source);
+    expect(status == 0, "generated interface program did not exit successfully");
+    expect(
+        output
+            == "interface label\nchanged\ntrue\nrenamed\nworker\n4\n"
+               "renamed\nworker\nworker\n"
+               "worker destroyed\nworker destroyed\ntrue\n",
+        "generated interface program produced unexpected output");
+}
+
 void test_compile_failure_reporting()
 {
     const auto directory = make_test_directory();
@@ -567,8 +633,7 @@ void test_unsupported_backend_feature()
 {
     try {
         static_cast<void>(generate(
-            "interface Runnable { function run() }\n"
-            "class Worker implements Runnable { public function run() {} }\n"));
+            "function identity<T>(value: T) -> T { return value }\n"));
     } catch (const std::runtime_error& error) {
         expect(
             std::string_view(error.what()).find("backend error")
@@ -606,6 +671,7 @@ int main()
         test_class_initializer_runtime_behavior();
         test_class_inheritance_runtime_behavior();
         test_virtual_dispatch_runtime_behavior();
+        test_interface_runtime_behavior();
         test_compile_failure_reporting();
         test_unsupported_backend_feature();
         test_temporary_cleanup();
