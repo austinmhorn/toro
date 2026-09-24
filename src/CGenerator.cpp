@@ -12,11 +12,22 @@
 namespace toro {
 namespace {
 
-enum class CValueKind { Int, Dec, Bool, String, Struct, Enum, Void };
+enum class CValueKind { Int, Dec, Bool, String, Struct, Enum, Result, Void };
 
 struct CValueType {
     CValueKind kind;
     std::string nominal_name;
+    std::vector<CValueType> arguments;
+
+    CValueType(
+        CValueKind kind,
+        std::string nominal_name = {},
+        std::vector<CValueType> arguments = {})
+        : kind(kind)
+        , nominal_name(std::move(nominal_name))
+        , arguments(std::move(arguments))
+    {
+    }
 
     bool operator==(const CValueType&) const = default;
 };
@@ -68,11 +79,31 @@ struct EnumInfo {
     std::unordered_map<std::string, std::size_t> variant_indices;
 };
 
+struct ResultInfo {
+    CValueType type;
+    SourceLocation location;
+};
+
 struct GeneratedExpression {
     std::string code;
     CValueType type;
     bool addressable{false};
     bool pointer{false};
+    std::string prelude;
+
+    GeneratedExpression(
+        std::string code,
+        CValueType type,
+        bool addressable = false,
+        bool pointer = false,
+        std::string prelude = {})
+        : code(std::move(code))
+        , type(std::move(type))
+        , addressable(addressable)
+        , pointer(pointer)
+        , prelude(std::move(prelude))
+    {
+    }
 };
 
 [[noreturn]] void throw_backend_error(
@@ -87,6 +118,26 @@ struct GeneratedExpression {
 std::string indent(std::size_t depth)
 {
     return std::string(depth * 4, ' ');
+}
+
+std::string indent_prelude(std::string_view prelude, std::size_t depth)
+{
+    std::string output;
+    std::size_t start = 0;
+    while (start < prelude.size()) {
+        const std::size_t newline = prelude.find('\n', start);
+        const std::size_t length = newline == std::string_view::npos
+            ? prelude.size() - start
+            : newline - start;
+        output += indent(depth);
+        output.append(prelude.substr(start, length));
+        output += '\n';
+        if (newline == std::string_view::npos) {
+            break;
+        }
+        start = newline + 1;
+    }
+    return output;
 }
 
 std::string function_name(std::string_view name)
@@ -120,6 +171,34 @@ std::string enum_payload_name(std::string_view variant)
     return "toro_variant_" + std::string(variant);
 }
 
+std::string type_mangle(const CValueType& type)
+{
+    switch (type.kind) {
+    case CValueKind::Int: return "i";
+    case CValueKind::Dec: return "d";
+    case CValueKind::Bool: return "b";
+    case CValueKind::String: return "s";
+    case CValueKind::Struct:
+        return "s" + std::to_string(type.nominal_name.size()) + "_"
+            + type.nominal_name;
+    case CValueKind::Enum:
+        return "e" + std::to_string(type.nominal_name.size()) + "_"
+            + type.nominal_name;
+    case CValueKind::Result:
+        return "r" + std::to_string(type_mangle(type.arguments[0]).size()) + "_"
+            + type_mangle(type.arguments[0]) + "_"
+            + std::to_string(type_mangle(type.arguments[1]).size()) + "_"
+            + type_mangle(type.arguments[1]);
+    case CValueKind::Void: return "v";
+    }
+    return "unknown";
+}
+
+std::string result_name(const CValueType& type)
+{
+    return "toro_result_" + type_mangle(type);
+}
+
 std::string field_name(std::string_view name)
 {
     return "toro_field_" + std::string(name);
@@ -150,6 +229,7 @@ std::string c_type_name(CValueType type)
     case CValueKind::String: return "const char*";
     case CValueKind::Struct: return struct_name(type.nominal_name);
     case CValueKind::Enum: return enum_name(type.nominal_name);
+    case CValueKind::Result: return result_name(type);
     case CValueKind::Void: return "void";
     }
     return "void";
@@ -180,6 +260,7 @@ public:
     {
         collect_types(program);
         collect_functions(program);
+        collect_local_types(program);
 
         std::string output =
             "#include <stdbool.h>\n"
@@ -195,13 +276,21 @@ public:
             output += "typedef struct " + enum_name(enum_declaration->name)
                 + " " + enum_name(enum_declaration->name) + ";\n";
         }
-        if (!struct_order_.empty() || !enum_order_.empty()) {
+        for (const auto& result : result_order_) {
+            output += "typedef struct " + result_name(result.type) + " "
+                + result_name(result.type) + ";\n";
+        }
+        if (!struct_order_.empty() || !enum_order_.empty()
+            || !result_order_.empty()) {
             output += '\n';
         }
 
         std::unordered_map<std::string, int> definition_state;
         for (const auto& type : nominal_order_) {
             output += emit_type_definition(type, definition_state);
+        }
+        for (const auto& result : result_order_) {
+            output += emit_type_definition(result.type, definition_state);
         }
 
         for (const auto& statement : program.statements) {
@@ -396,9 +485,34 @@ private:
         }
     }
 
-    CValueType lower_type(const TypeReference& type) const
+    CValueType lower_type(const TypeReference& type)
     {
-        if (type.nullable || !type.arguments.empty()) {
+        if (type.nullable) {
+            throw_backend_error(
+                type.location,
+                "nullable type '" + type.name
+                    + "?' is not supported by the C backend");
+        }
+        if (type.name == "Result") {
+            if (type.arguments.size() != 2) {
+                throw_backend_error(
+                    type.location, "Result requires exactly two type arguments");
+            }
+            CValueType result{
+                CValueKind::Result,
+                {},
+                {lower_type(type.arguments[0]), lower_type(type.arguments[1])},
+            };
+            if (std::ranges::none_of(
+                    result_order_,
+                    [&](const ResultInfo& existing) {
+                        return existing.type == result;
+                    })) {
+                result_order_.push_back(ResultInfo{result, type.location});
+            }
+            return result;
+        }
+        if (!type.arguments.empty()) {
             throw_backend_error(
                 type.location,
                 "type '" + type.name + "' is not supported by the C backend");
@@ -426,31 +540,138 @@ private:
             "type '" + type.name + "' is not supported by the C backend");
     }
 
+    void collect_local_types(const Program& program)
+    {
+        for (const auto& statement : program.statements) {
+            collect_local_types(*statement);
+        }
+        for (const auto* declaration : struct_order_) {
+            for (const auto& method : declaration->methods) {
+                const auto& method_declaration =
+                    static_cast<const MethodDeclaration&>(*method);
+                if (method_declaration.body) {
+                    collect_local_types(*method_declaration.body);
+                }
+            }
+        }
+    }
+
+    void collect_local_types(const Stmt& statement)
+    {
+        switch (statement.kind) {
+        case StmtKind::VariableDeclaration: {
+            const auto& declaration =
+                static_cast<const VariableDeclarationStmt&>(statement);
+            if (declaration.explicit_type) {
+                static_cast<void>(lower_type(*declaration.explicit_type));
+            }
+            return;
+        }
+        case StmtKind::FunctionDeclaration:
+            collect_local_types(
+                *static_cast<const FunctionDeclarationStmt&>(statement).body);
+            return;
+        case StmtKind::Block:
+            for (const auto& nested : static_cast<const BlockStmt&>(statement).statements) {
+                collect_local_types(*nested);
+            }
+            return;
+        case StmtKind::If: {
+            const auto& conditional = static_cast<const IfStmt&>(statement);
+            collect_local_types(*conditional.then_block);
+            if (conditional.else_branch) {
+                collect_local_types(*conditional.else_branch);
+            }
+            return;
+        }
+        case StmtKind::While:
+            collect_local_types(*static_cast<const WhileStmt&>(statement).body);
+            return;
+        case StmtKind::ForIn:
+            collect_local_types(*static_cast<const ForInStmt&>(statement).body);
+            return;
+        case StmtKind::Handle:
+            for (const auto& handle_case :
+                static_cast<const HandleStmt&>(statement).cases) {
+                collect_local_types(*handle_case.body);
+            }
+            return;
+        case StmtKind::Assignment:
+        case StmtKind::MemberAssignment:
+        case StmtKind::Expression:
+        case StmtKind::Return:
+        case StmtKind::Stop:
+        case StmtKind::Continue:
+        case StmtKind::EnumDeclaration:
+        case StmtKind::StructDeclaration:
+        case StmtKind::ClassDeclaration:
+        case StmtKind::InterfaceDeclaration:
+            return;
+        }
+    }
+
     std::string emit_type_definition(
         const CValueType& type,
         std::unordered_map<std::string, int>& state) const
     {
         const std::string& name = type.nominal_name;
-        if (state[name] == 2) {
+        const std::string key = c_type_name(type);
+        if (state[key] == 2) {
             return {};
         }
-        if (state[name] == 1) {
-            const SourceLocation location = type.kind == CValueKind::Struct
-                ? structs_.at(name).declaration->location
-                : enums_.at(name).declaration->location;
+        if (state[key] == 1) {
+            SourceLocation location{1, 1};
+            if (type.kind == CValueKind::Struct) {
+                location = structs_.at(name).declaration->location;
+            } else if (type.kind == CValueKind::Enum) {
+                location = enums_.at(name).declaration->location;
+            } else if (const auto result = std::ranges::find_if(
+                           result_order_,
+                           [&](const ResultInfo& info) {
+                               return info.type == type;
+                           });
+                       result != result_order_.end()) {
+                location = result->location;
+            }
             throw_backend_error(
                 location,
                 "recursive by-value type layout is not supported by the C backend: '"
-                    + name + "'");
+                    + key + "'");
         }
-        state[name] = 1;
+        state[key] = 1;
         std::string output;
+        if (type.kind == CValueKind::Result) {
+            for (const auto& argument : type.arguments) {
+                if (argument.kind == CValueKind::Struct
+                    || argument.kind == CValueKind::Enum
+                    || argument.kind == CValueKind::Result) {
+                    output += emit_type_definition(argument, state);
+                }
+            }
+            const std::string result = result_name(type);
+            output += "typedef enum " + result + "_tag\n{\n";
+            output += "    " + result + "_tag_ok,\n";
+            output += "    " + result + "_tag_error\n";
+            output += "} " + result + "_tag;\n\n";
+            output += "struct " + result + "\n{\n";
+            output += "    " + result + "_tag toro_tag;\n";
+            output += "    union\n    {\n";
+            output += "        " + c_type_name(type.arguments[0])
+                + " toro_ok;\n";
+            output += "        " + c_type_name(type.arguments[1])
+                + " toro_error;\n";
+            output += "    } toro_payload;\n";
+            output += "};\n\n";
+            state[key] = 2;
+            return output;
+        }
         if (type.kind == CValueKind::Enum) {
             const auto& info = enums_.at(name);
             for (const auto& variant : info.variants) {
                 if (variant.payload_type
                     && (variant.payload_type->kind == CValueKind::Struct
-                        || variant.payload_type->kind == CValueKind::Enum)) {
+                        || variant.payload_type->kind == CValueKind::Enum
+                        || variant.payload_type->kind == CValueKind::Result)) {
                     output += emit_type_definition(*variant.payload_type, state);
                 }
             }
@@ -484,14 +705,15 @@ private:
                 output += "    } toro_payload;\n";
             }
             output += "};\n\n";
-            state[name] = 2;
+            state[key] = 2;
             return output;
         }
 
         const auto& info = structs_.at(name);
         for (const auto& field : info.fields) {
             if (field.type.kind == CValueKind::Struct
-                || field.type.kind == CValueKind::Enum) {
+                || field.type.kind == CValueKind::Enum
+                || field.type.kind == CValueKind::Result) {
                 output += emit_type_definition(field.type, state);
             }
         }
@@ -505,7 +727,7 @@ private:
             }
         }
         output += "};\n\n";
-        state[name] = 2;
+        state[key] = 2;
         return output;
     }
 
@@ -552,6 +774,7 @@ private:
         scopes_.clear();
         push_scope();
         const auto& info = functions_.at(function.name);
+        current_return_type_ = info.return_type;
         for (std::size_t index = 0; index < function.parameters.size(); ++index) {
             scopes_.back().emplace(
                 function.parameters[index].name,
@@ -565,6 +788,7 @@ private:
         output += emit_statement_list(function.body->statements, 1);
         output += "}\n";
         pop_scope();
+        current_return_type_.reset();
         return output;
     }
 
@@ -576,6 +800,7 @@ private:
         current_location_ = method.location;
         scopes_.clear();
         push_scope();
+        current_return_type_ = info.return_type;
         scopes_.back().emplace(
             "self",
             ValueInfo{
@@ -596,6 +821,7 @@ private:
         output += emit_statement_list(method.body->statements, 1);
         output += "}\n";
         pop_scope();
+        current_return_type_.reset();
         return output;
     }
 
@@ -618,19 +844,24 @@ private:
         case StmtKind::VariableDeclaration: {
             const auto& declaration =
                 static_cast<const VariableDeclarationStmt&>(statement);
-            const auto initializer = emit_expression(*declaration.initializer);
-            const CValueType type = declaration.explicit_type
-                ? lower_type(*declaration.explicit_type)
-                : initializer.type;
+            const std::optional<CValueType> declared_type = declaration.explicit_type
+                ? std::optional<CValueType>{lower_type(*declaration.explicit_type)}
+                : std::nullopt;
+            const auto initializer = emit_expression(
+                *declaration.initializer, declared_type);
+            const CValueType type = declared_type.value_or(initializer.type);
             const std::string c_name = variable_name(declaration.name);
             scopes_.back().emplace(declaration.name, ValueInfo{type, c_name});
-            return prefix + c_type_name(type) + " " + c_name + " = "
+            return indent_prelude(initializer.prelude, depth)
+                + prefix + c_type_name(type) + " " + c_name + " = "
                 + initializer.code + ";\n";
         }
         case StmtKind::Assignment: {
             const auto& assignment = static_cast<const AssignmentStmt&>(statement);
-            const auto value = emit_expression(*assignment.value);
-            return prefix + find_value(assignment.name).c_name + " = "
+            const auto& target = find_value(assignment.name);
+            const auto value = emit_expression(*assignment.value, target.type);
+            return indent_prelude(value.prelude, depth)
+                + prefix + target.c_name + " = "
                 + value.code + ";\n";
         }
         case StmtKind::MemberAssignment: {
@@ -642,20 +873,25 @@ private:
                     statement.location,
                     "struct field assignment requires an addressable receiver");
             }
-            const auto value = emit_expression(*assignment.value);
-            return prefix + target.code + " = " + value.code + ";\n";
+            const auto value = emit_expression(*assignment.value, target.type);
+            return indent_prelude(target.prelude + value.prelude, depth)
+                + prefix + target.code + " = " + value.code + ";\n";
         }
         case StmtKind::Expression: {
             const auto& expression = static_cast<const ExpressionStmt&>(statement);
-            return prefix + emit_expression(*expression.expression).code + ";\n";
+            const auto value = emit_expression(*expression.expression);
+            return indent_prelude(value.prelude, depth)
+                + prefix + value.code + ";\n";
         }
         case StmtKind::Return: {
             const auto& return_statement = static_cast<const ReturnStmt&>(statement);
             if (!return_statement.value) {
                 return prefix + "return;\n";
             }
-            return prefix + "return "
-                + emit_expression(*return_statement.value).code + ";\n";
+            const auto value = emit_expression(
+                *return_statement.value, current_return_type_);
+            return indent_prelude(value.prelude, depth)
+                + prefix + "return " + value.code + ";\n";
         }
         case StmtKind::Block:
             return emit_block(static_cast<const BlockStmt&>(statement), depth);
@@ -663,9 +899,22 @@ private:
             return emit_if(static_cast<const IfStmt&>(statement), depth);
         case StmtKind::While: {
             const auto& loop = static_cast<const WhileStmt&>(statement);
-            std::string output = prefix + "while ("
-                + emit_expression(*loop.condition).code + ") ";
-            output += emit_braced_block(*loop.body, depth);
+            const auto condition = emit_expression(*loop.condition);
+            if (condition.prelude.empty()) {
+                std::string output = prefix + "while (" + condition.code + ") ";
+                output += emit_braced_block(*loop.body, depth);
+                return output;
+            }
+            push_scope();
+            std::string output = prefix + "while (true)\n" + prefix + "{\n";
+            output += indent_prelude(condition.prelude, depth + 1);
+            output += indent(depth + 1) + "if (!(" + condition.code + "))\n";
+            output += indent(depth + 1) + "{\n";
+            output += indent(depth + 2) + "break;\n";
+            output += indent(depth + 1) + "}\n";
+            output += emit_statement_list(loop.body->statements, depth + 1);
+            output += prefix + "}\n";
+            pop_scope();
             return output;
         }
         case StmtKind::FunctionDeclaration:
@@ -705,17 +954,19 @@ private:
 
     std::string emit_if(const IfStmt& conditional, std::size_t depth)
     {
-        std::string output = indent(depth) + "if ("
-            + emit_expression(*conditional.condition).code + ") ";
+        const auto condition = emit_expression(*conditional.condition);
+        std::string output = indent_prelude(condition.prelude, depth);
+        output += indent(depth) + "if (" + condition.code + ") ";
         output += emit_braced_block(*conditional.then_block, depth);
         if (conditional.else_branch) {
             output.resize(output.size() - 1);
             output += " else ";
             if (conditional.else_branch->kind == StmtKind::If) {
-                std::string nested = emit_if(
-                    static_cast<const IfStmt&>(*conditional.else_branch), depth);
-                nested.erase(0, indent(depth).size());
-                output += nested;
+                output += "{\n";
+                output += emit_if(
+                    static_cast<const IfStmt&>(*conditional.else_branch),
+                    depth + 1);
+                output += indent(depth) + "}\n";
             } else {
                 const auto& block =
                     static_cast<const BlockStmt&>(*conditional.else_branch);
@@ -728,15 +979,16 @@ private:
     std::string emit_handle(const HandleStmt& handle, std::size_t depth)
     {
         const auto handled = emit_expression(*handle.expression);
-        if (handled.type.kind != CValueKind::Enum) {
+        if (handled.type.kind != CValueKind::Enum
+            && handled.type.kind != CValueKind::Result) {
             throw_backend_error(
                 handle.location,
-                "handle lowering requires a supported enum value; Result is not supported by the C backend");
+                "handle lowering requires a supported enum or Result value");
         }
-        const auto& info = enums_.at(handled.type.nominal_name);
         const std::string temporary =
             "toro_handle_value_" + std::to_string(temporary_index_++);
-        std::string output = indent(depth) + "{\n";
+        std::string output = indent_prelude(handled.prelude, depth);
+        output += indent(depth) + "{\n";
         output += indent(depth + 1) + c_type_name(handled.type) + " "
             + temporary + " = " + handled.code + ";\n";
         output += indent(depth + 1) + "switch (" + temporary
@@ -744,29 +996,48 @@ private:
 
         for (const auto& handle_case : handle.cases) {
             current_location_ = handle_case.location;
-            const auto variant = info.variant_indices.find(handle_case.variant_name);
-            if (variant == info.variant_indices.end()) {
-                throw_backend_error(
-                    handle_case.location,
-                    "enum '" + handled.type.nominal_name
-                        + "' has no backend variant named '"
-                        + handle_case.variant_name + "'");
+            std::optional<CValueType> payload_type;
+            std::string tag;
+            std::string payload;
+            if (handled.type.kind == CValueKind::Enum) {
+                const auto& info = enums_.at(handled.type.nominal_name);
+                const auto variant =
+                    info.variant_indices.find(handle_case.variant_name);
+                if (variant == info.variant_indices.end()) {
+                    throw_backend_error(
+                        handle_case.location,
+                        "enum '" + handled.type.nominal_name
+                            + "' has no backend variant named '"
+                            + handle_case.variant_name + "'");
+                }
+                payload_type = info.variants[variant->second].payload_type;
+                tag = enum_tag_name(
+                    handled.type.nominal_name, handle_case.variant_name);
+                payload = enum_payload_name(handle_case.variant_name);
+            } else {
+                const bool is_ok = handle_case.variant_name == "ok";
+                const bool is_error = handle_case.variant_name == "error";
+                if (!is_ok && !is_error) {
+                    throw_backend_error(
+                        handle_case.location,
+                        "Result has no backend variant named '"
+                            + handle_case.variant_name + "'");
+                }
+                payload_type = handled.type.arguments[is_ok ? 0 : 1];
+                tag = result_name(handled.type)
+                    + (is_ok ? "_tag_ok" : "_tag_error");
+                payload = is_ok ? "toro_ok" : "toro_error";
             }
-            const auto& variant_info = info.variants[variant->second];
-            output += indent(depth + 1) + "case "
-                + enum_tag_name(
-                    handled.type.nominal_name, handle_case.variant_name)
-                + ": {\n";
+            output += indent(depth + 1) + "case " + tag + ": {\n";
             push_scope();
-            if (handle_case.binding_name && variant_info.payload_type) {
+            if (handle_case.binding_name && payload_type) {
                 const std::string binding = variable_name(*handle_case.binding_name);
                 scopes_.back().emplace(
                     *handle_case.binding_name,
-                    ValueInfo{*variant_info.payload_type, binding});
-                output += indent(depth + 2) + c_type_name(*variant_info.payload_type)
+                    ValueInfo{*payload_type, binding});
+                output += indent(depth + 2) + c_type_name(*payload_type)
                     + " " + binding + " = " + temporary
-                    + ".toro_payload."
-                    + enum_payload_name(handle_case.variant_name) + ";\n";
+                    + ".toro_payload." + payload + ";\n";
             }
             output += emit_statement_list(handle_case.body->statements, depth + 2);
             output += indent(depth + 2) + "break;\n";
@@ -778,7 +1049,9 @@ private:
         return output;
     }
 
-    GeneratedExpression emit_expression(const Expr& expression)
+    GeneratedExpression emit_expression(
+        const Expr& expression,
+        std::optional<CValueType> expected_type = std::nullopt)
     {
         switch (expression.kind) {
         case ExprKind::Integer:
@@ -803,12 +1076,19 @@ private:
         case ExprKind::Unary: {
             const auto& unary = static_cast<const UnaryExpr&>(expression);
             const auto operand = emit_expression(*unary.operand);
-            return {"(-" + operand.code + ")", operand.type};
+            return {
+                "(-" + operand.code + ")",
+                operand.type,
+                false,
+                false,
+                operand.prelude,
+            };
         }
         case ExprKind::Binary:
             return emit_binary(static_cast<const BinaryExpr&>(expression));
         case ExprKind::Call:
-            return emit_call(static_cast<const CallExpr&>(expression));
+            return emit_call(
+                static_cast<const CallExpr&>(expression), expected_type);
         case ExprKind::MemberAccess:
             return emit_member_access(
                 static_cast<const MemberAccessExpr&>(expression));
@@ -823,10 +1103,16 @@ private:
                 inner.type,
                 inner.addressable,
                 inner.pointer,
+                inner.prelude,
             };
         }
         case ExprKind::Null:
+            throw_backend_error(
+                current_location_,
+                "null values are not supported by the C backend");
         case ExprKind::Propagation:
+            return emit_propagation(
+                static_cast<const PropagationExpr&>(expression));
         case ExprKind::Cast:
             throw_backend_error(
                 current_location_,
@@ -839,13 +1125,37 @@ private:
     {
         const auto left = emit_expression(*binary.left);
         const auto right = emit_expression(*binary.right);
+        if (!right.prelude.empty()
+            && (binary.operator_token.type == TokenType::And
+                || binary.operator_token.type == TokenType::Or)) {
+            const bool is_and = binary.operator_token.type == TokenType::And;
+            const std::string temporary =
+                "toro_logical_value_" + std::to_string(temporary_index_++);
+            std::string prelude = left.prelude;
+            prelude += "bool " + temporary + " = "
+                + (is_and ? "false" : "true") + ";\n";
+            prelude += "if (" + std::string(is_and ? "" : "!") + "("
+                + left.code + ")) {\n";
+            prelude += indent_prelude(right.prelude, 1);
+            prelude += "    " + temporary + " = " + right.code + ";\n";
+            prelude += "}\n";
+            return {
+                temporary,
+                bool_type,
+                false,
+                false,
+                std::move(prelude),
+            };
+        }
         if (left.type.kind == CValueKind::Struct
             || left.type.kind == CValueKind::Enum
+            || left.type.kind == CValueKind::Result
             || right.type.kind == CValueKind::Struct
-            || right.type.kind == CValueKind::Enum) {
+            || right.type.kind == CValueKind::Enum
+            || right.type.kind == CValueKind::Result) {
             throw_backend_error(
                 current_location_,
-                "operators on struct or enum values are not supported by the C backend");
+                "operators on aggregate values are not supported by the C backend");
         }
         if ((binary.operator_token.type == TokenType::Equal
                 || binary.operator_token.type == TokenType::NotEqual)
@@ -857,6 +1167,9 @@ private:
             return {
                 "(strcmp(" + left.code + ", " + right.code + ")" + comparison + ")",
                 bool_type,
+                false,
+                false,
+                left.prelude + right.prelude,
             };
         }
 
@@ -883,11 +1196,22 @@ private:
         return {
             "(" + left.code + " " + operation + " " + right.code + ")",
             result_type,
+            false,
+            false,
+            left.prelude + right.prelude,
         };
     }
 
-    GeneratedExpression emit_call(const CallExpr& call)
+    GeneratedExpression emit_call(
+        const CallExpr& call,
+        std::optional<CValueType> expected_type)
     {
+        if (call.callee->kind == ExprKind::Identifier) {
+            const auto& callee = static_cast<const IdentifierExpr&>(*call.callee);
+            if (callee.name == "ok" || callee.name == "error") {
+                return emit_result_construction(callee.name, call, expected_type);
+            }
+        }
         if (!call.generic_arguments.empty()) {
             throw_backend_error(
                 current_location_,
@@ -925,14 +1249,92 @@ private:
             call, function->second.declaration->parameters);
 
         std::string code = function_name(callee.name) + "(";
+        std::string prelude;
         for (std::size_t index = 0; index < ordered.size(); ++index) {
             if (index != 0) {
                 code += ", ";
             }
-            code += emit_expression(*ordered[index]->value).code;
+            const auto argument = emit_expression(
+                *ordered[index]->value, function->second.parameter_types[index]);
+            prelude += argument.prelude;
+            code += argument.code;
         }
         code += ")";
-        return {std::move(code), function->second.return_type};
+        return {
+            std::move(code),
+            function->second.return_type,
+            false,
+            false,
+            std::move(prelude),
+        };
+    }
+
+    GeneratedExpression emit_result_construction(
+        const std::string& constructor,
+        const CallExpr& call,
+        const std::optional<CValueType>& expected_type)
+    {
+        if (!expected_type || expected_type->kind != CValueKind::Result) {
+            throw_backend_error(
+                current_location_,
+                "cannot lower '" + constructor
+                    + "' without an expected Result<T, E> type");
+        }
+        if (call.arguments.size() != 1) {
+            throw_backend_error(
+                current_location_,
+                "Result constructor '" + constructor + "' requires one payload");
+        }
+        const bool is_ok = constructor == "ok";
+        const CValueType payload_type = expected_type->arguments[is_ok ? 0 : 1];
+        const auto payload = emit_expression(
+            *call.arguments.front().value, payload_type);
+        const std::string result = result_name(*expected_type);
+        return {
+            "(" + result + "){.toro_tag = " + result
+                + (is_ok ? "_tag_ok, .toro_payload.toro_ok = "
+                         : "_tag_error, .toro_payload.toro_error = ")
+                + payload.code + "}",
+            *expected_type,
+            false,
+            false,
+            payload.prelude,
+        };
+    }
+
+    GeneratedExpression emit_propagation(const PropagationExpr& propagation)
+    {
+        const auto value = emit_expression(*propagation.expression);
+        if (value.type.kind != CValueKind::Result) {
+            throw_backend_error(
+                current_location_, "operator '?' requires a Result value");
+        }
+        if (!current_return_type_
+            || current_return_type_->kind != CValueKind::Result) {
+            throw_backend_error(
+                current_location_,
+                "operator '?' requires a Result-returning function");
+        }
+        const std::string temporary =
+            "toro_result_value_" + std::to_string(temporary_index_++);
+        const std::string source_result = result_name(value.type);
+        const std::string target_result = result_name(*current_return_type_);
+        std::string prelude = value.prelude;
+        prelude += c_type_name(value.type) + " " + temporary + " = "
+            + value.code + ";\n";
+        prelude += "if (" + temporary + ".toro_tag == " + source_result
+            + "_tag_error) {\n";
+        prelude += "    return (" + target_result + "){.toro_tag = "
+            + target_result + "_tag_error, .toro_payload.toro_error = "
+            + temporary + ".toro_payload.toro_error};\n";
+        prelude += "}\n";
+        return {
+            temporary + ".toro_payload.toro_ok",
+            value.type.arguments[0],
+            true,
+            false,
+            std::move(prelude),
+        };
     }
 
     GeneratedExpression emit_enum_variant_construction(
@@ -969,11 +1371,16 @@ private:
         }
         std::string code = "(" + enum_name(enum_type) + "){.toro_tag = "
             + enum_tag_name(enum_type, variant_name) + ", .toro_payload."
-            + enum_payload_name(variant_name) + " = "
-            + emit_expression(*call.arguments.front().value).code + "}";
+            + enum_payload_name(variant_name) + " = ";
+        const auto payload = emit_expression(
+            *call.arguments.front().value, *variant_info.payload_type);
+        code += payload.code + "}";
         return {
             std::move(code),
             CValueType{CValueKind::Enum, enum_type},
+            false,
+            false,
+            payload.prelude,
         };
     }
 
@@ -1050,6 +1457,7 @@ private:
             arguments[field_index] = &argument;
         }
 
+        std::string prelude;
         std::string code = "(" + struct_name(name) + "){";
         if (info.fields.empty()) {
             code += ".toro_empty = 0";
@@ -1061,9 +1469,15 @@ private:
             const auto& field = info.fields[index];
             code += "." + field_name(field.declaration->name) + " = ";
             if (arguments[index]) {
-                code += emit_expression(*arguments[index]->value).code;
+                const auto value = emit_expression(
+                    *arguments[index]->value, field.type);
+                prelude += value.prelude;
+                code += value.code;
             } else if (field.declaration->default_value) {
-                code += emit_expression(*field.declaration->default_value).code;
+                const auto value = emit_expression(
+                    *field.declaration->default_value, field.type);
+                prelude += value.prelude;
+                code += value.code;
             } else {
                 code += zero_value(field.type, field.declaration->location);
             }
@@ -1072,6 +1486,9 @@ private:
         return {
             std::move(code),
             CValueType{CValueKind::Struct, name},
+            false,
+            false,
+            std::move(prelude),
         };
     }
 
@@ -1092,6 +1509,9 @@ private:
                 location,
                 "omitted enum field '" + type.nominal_name
                     + "' has no backend zero value");
+        case CValueKind::Result:
+            throw_backend_error(
+                location, "omitted Result field has no backend zero value");
         case CValueKind::Void:
             break;
         }
@@ -1118,6 +1538,8 @@ private:
                 + field_name(member.member),
             info.fields[field->second].type,
             object.addressable,
+            false,
+            object.prelude,
         };
     }
 
@@ -1177,11 +1599,21 @@ private:
             call, method->second.declaration->parameters);
         std::string code = method_name(receiver.type.nominal_name, member.member) + "(";
         code += receiver.pointer ? receiver.code : "&(" + receiver.code + ")";
-        for (const auto* argument : ordered) {
-            code += ", " + emit_expression(*argument->value).code;
+        std::string prelude = receiver.prelude;
+        for (std::size_t index = 0; index < ordered.size(); ++index) {
+            const auto argument = emit_expression(
+                *ordered[index]->value, method->second.parameter_types[index]);
+            prelude += argument.prelude;
+            code += ", " + argument.code;
         }
         code += ")";
-        return {std::move(code), method->second.return_type};
+        return {
+            std::move(code),
+            method->second.return_type,
+            false,
+            false,
+            std::move(prelude),
+        };
     }
 
     GeneratedExpression emit_print(const CallExpr& call)
@@ -1192,23 +1624,44 @@ private:
             return {
                 "printf(\"%lld\\n\", (long long)(" + value.code + "))",
                 void_type,
+                false,
+                false,
+                value.prelude,
             };
         case CValueKind::Dec:
-            return {"printf(\"%g\\n\", " + value.code + ")", void_type};
+            return {
+                "printf(\"%g\\n\", " + value.code + ")",
+                void_type,
+                false,
+                false,
+                value.prelude,
+            };
         case CValueKind::Bool:
             return {
                 "printf(\"%s\\n\", (" + value.code
                     + ") ? \"true\" : \"false\")",
                 void_type,
+                false,
+                false,
+                value.prelude,
             };
         case CValueKind::String:
-            return {"printf(\"%s\\n\", " + value.code + ")", void_type};
+            return {
+                "printf(\"%s\\n\", " + value.code + ")",
+                void_type,
+                false,
+                false,
+                value.prelude,
+            };
         case CValueKind::Struct:
             throw_backend_error(
                 current_location_, "printing struct values is not supported by the C backend");
         case CValueKind::Enum:
             throw_backend_error(
                 current_location_, "printing enum values is not supported by the C backend");
+        case CValueKind::Result:
+            throw_backend_error(
+                current_location_, "printing Result values is not supported by the C backend");
         case CValueKind::Void:
             throw_backend_error(
                 current_location_, "cannot print an expression without a value");
@@ -1242,9 +1695,11 @@ private:
     std::unordered_map<std::string, EnumInfo> enums_;
     std::vector<const EnumDeclarationStmt*> enum_order_;
     std::vector<CValueType> nominal_order_;
+    std::vector<ResultInfo> result_order_;
     std::unordered_map<std::string, FunctionInfo> functions_;
     std::vector<std::unordered_map<std::string, ValueInfo>> scopes_;
     std::size_t temporary_index_{0};
+    std::optional<CValueType> current_return_type_;
     SourceLocation current_location_{1, 1};
 };
 

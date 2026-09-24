@@ -124,7 +124,9 @@ function checked_age() -> Result<int, string> {
 ```
 
 Propagation does not unwrap nullable types and performs no automatic error
-conversion. Runtime representation and code generation remain deferred.
+conversion. The C backend lowers concrete Results whose success and error types
+are otherwise supported, evaluates a propagated expression once, and returns an
+error Result immediately on failure.
 
 ### Structs and members
 
@@ -316,6 +318,12 @@ Exhaustive `handle` statements lower to C `switch` statements, and payload
 bindings are local to their case block. Enum values retain ordinary value-copy
 semantics and may be passed to or returned from functions.
 
+Each concrete `Result<T, E>` similarly lowers to its own tagged union with `ok`
+and `error` payloads. Result parameters, returns, variables, copies, and
+exhaustive `handle` statements use normal C value semantics. Postfix `?` stores
+its operand in a temporary, checks the tag once, extracts the success payload,
+or returns a freshly tagged error Result from the enclosing function.
+
 Primitive types map directly to C:
 
 ```text
@@ -331,12 +339,12 @@ field: explicit source defaults take priority, while omitted `int`, `dec`,
 `bool`, and `string` fields use `0`, `0.0`, `false`, and `""`. Omitted nested
 struct values remain unsupported unless explicitly supplied.
 
-Classes, `Result<T, E>`, generic structs, method overloads, conversions,
-interfaces, inheritance, nullable fields, collections, and ARC are not lowered
-yet. Enum payloads may use primitives, supported non-generic structs, or other
-supported enums; other payload types produce a backend diagnostic. Method
-receivers that cannot safely be addressed are rejected rather than lowered to
-invalid C.
+Classes, generic structs, method overloads, conversions, interfaces,
+inheritance, nullable fields, collections, and ARC are not lowered yet. Enum and
+Result payloads may use primitives, supported non-generic structs, supported
+enums, or supported nested Results; other payload types produce a backend
+diagnostic. Method receivers that cannot safely be addressed are rejected rather
+than lowered to invalid C.
 
 The native toolchain can compile this generated source as C11. `toro build`
 writes a persistent executable, defaulting to the source filename stem in the

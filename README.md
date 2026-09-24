@@ -26,7 +26,9 @@ Enum variants use type-scoped access such as `Message::text("hello")` and
 `Message::quit`; `.` remains exclusively instance/member access.
 A minimal backend can emit portable C for the currently supported primitive
 procedural subset, non-generic value structs, and enums with exhaustive
-`handle` statements.
+`handle` statements. Concrete `Result<T, E>` values, exhaustive Result handling,
+and postfix `?` propagation are also lowered when both payload types are
+backend-supported.
 
 ## Build
 
@@ -121,6 +123,7 @@ Generate C after parsing and checking a source file:
 ./build/toro emit-c examples/hello.toro
 ./build/toro emit-c examples/structs.toro
 ./build/toro emit-c examples/enums.toro
+./build/toro emit-c examples/results.toro
 ```
 
 Build a native executable with the host C compiler:
@@ -140,6 +143,7 @@ Build and run through temporary artifacts:
 ./build/toro run examples/hello.toro
 ./build/toro run examples/structs.toro
 ./build/toro run examples/enums.toro
+./build/toro run examples/results.toro
 ```
 
 `run` forwards program output and returns its exit status. Its temporary C source
@@ -162,7 +166,9 @@ types such as `List<T>` and `Map<string, List<T>>`.
 Enum construction and exhaustive `handle` checking are also part of this pass.
 `ok(value)` and `error(value)` construct an expected `Result<T, E>`, while
 postfix `?` extracts the success type and propagates a compatible error from a
-function returning `Result`.
+function returning `Result`. The C backend gives each concrete Result instance a
+distinct tagged-union type. Propagation evaluates its operand once and returns a
+new error Result immediately when needed.
 Functions and concrete methods with declared return types must return on every
 reachable path. Complete `if`/`else` trees and exhaustive returning `handle`
 statements satisfy this requirement; loops are not assumed to execute.
@@ -177,9 +183,9 @@ deterministically prefixed C identifiers and emits a C entry-point wrapper for a
 toro `main`. Enums lower to deterministic tagged unions; construction selects a
 tag and payload, while exhaustive `handle` statements lower to `switch` blocks
 with case-scoped payload bindings. Generic structs, interfaces, conversion
-overloads, nullable fields, `Result<T, E>`, and other runtime types outside this
-subset fail with a backend diagnostic instead of producing partial or incorrect
-C.
+overloads, nullable fields, Results containing unsupported runtime payloads, and
+other runtime types outside this subset fail with a backend diagnostic instead
+of producing partial or incorrect C.
 
 ## Logical operators
 

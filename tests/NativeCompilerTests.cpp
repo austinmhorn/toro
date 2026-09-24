@@ -251,6 +251,58 @@ void test_enum_runtime_behavior()
         "generated enum program produced unexpected output");
 }
 
+void test_result_runtime_behavior()
+{
+    const auto c_source = generate(
+        "struct Point { x: int }\n"
+        "enum Failure { message(string) }\n"
+        "function make_point(valid: bool) -> Result<Point, Failure> {\n"
+        "    if valid { return ok(Point(4)) }\n"
+        "    return error(Failure::message(\"bad point\"))\n"
+        "}\n"
+        "function show_point(result: Result<Point, Failure>) {\n"
+        "    handle result {\n"
+        "        ok(point) { print(point.x) }\n"
+        "        error(failure) {\n"
+        "            handle failure {\n"
+        "                message(problem) { print(problem) }\n"
+        "            }\n"
+        "        }\n"
+        "    }\n"
+        "}\n"
+        "function nested(valid: bool) -> Result<Result<int, string>, string> {\n"
+        "    if valid {\n"
+        "        value: Result<int, string> = ok(9)\n"
+        "        return ok(value)\n"
+        "    }\n"
+        "    value: Result<int, string> = error(\"inner failure\")\n"
+        "    return ok(value)\n"
+        "}\n"
+        "function flatten(valid: bool) -> Result<int, string> {\n"
+        "    value := nested(valid)??\n"
+        "    return ok(value)\n"
+        "}\n"
+        "function show_number(result: Result<int, string>) {\n"
+        "    handle result {\n"
+        "        ok(value) { print(value) }\n"
+        "        error(problem) { print(problem) }\n"
+        "    }\n"
+        "}\n"
+        "function main() {\n"
+        "    point := make_point(true)\n"
+        "    copy := point\n"
+        "    show_point(copy)\n"
+        "    show_point(make_point(false))\n"
+        "    show_number(flatten(true))\n"
+        "    show_number(flatten(false))\n"
+        "}\n");
+    const auto [status, output] = capture_run(toro::NativeCompiler(), c_source);
+    expect(status == 0, "generated Result program did not exit successfully");
+    expect(
+        output == "4\nbad point\n9\ninner failure\n",
+        "generated Result program produced unexpected output");
+}
+
 void test_compile_failure_reporting()
 {
     const auto directory = make_test_directory();
@@ -306,6 +358,7 @@ int main()
         test_nonzero_exit_status();
         test_struct_runtime_behavior();
         test_enum_runtime_behavior();
+        test_result_runtime_behavior();
         test_compile_failure_reporting();
         test_unsupported_backend_feature();
         test_temporary_cleanup();

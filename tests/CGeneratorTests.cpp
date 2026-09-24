@@ -338,6 +338,69 @@ void test_enum_function_return_and_nested_payload_types()
         "enum value copy");
 }
 
+void test_result_construction_handle_and_propagation()
+{
+    const auto output = generate(
+        "function parse(valid: bool) -> Result<int, string> {\n"
+        "    if valid { return ok(7) }\n"
+        "    return error(\"bad\")\n"
+        "}\n"
+        "function forward(valid: bool) -> Result<int, string> {\n"
+        "    value := parse(valid)?\n"
+        "    return ok(value)\n"
+        "}\n"
+        "function show(result: Result<int, string>) {\n"
+        "    handle result {\n"
+        "        ok(value) { print(value) }\n"
+        "        error(problem) { print(problem) }\n"
+        "    }\n"
+        "}\n"
+        "function main() {\n"
+        "    success: Result<int, string> = forward(true)\n"
+        "    copy := success\n"
+        "    show(copy)\n"
+        "    show(forward(false))\n"
+        "}\n");
+
+    expect_contains(
+        output,
+        "typedef struct toro_result_r1_i_1_s toro_result_r1_i_1_s;",
+        "concrete Result declaration");
+    expect_contains(output, "toro_result_r1_i_1_s_tag_ok", "Result ok tag");
+    expect_contains(output, "int64_t toro_ok;", "Result ok payload");
+    expect_contains(output, "const char* toro_error;", "Result error payload");
+    expect_contains(
+        output,
+        ".toro_payload.toro_ok = 7",
+        "ok construction");
+    expect_contains(
+        output,
+        ".toro_payload.toro_error = \"bad\"",
+        "error construction");
+    expect_contains(
+        output,
+        "if (toro_result_value_0.toro_tag == "
+        "toro_result_r1_i_1_s_tag_error)",
+        "propagation error check");
+    expect_contains(
+        output,
+        "switch (toro_handle_value_1.toro_tag)",
+        "Result handle switch");
+    expect_contains(
+        output,
+        "toro_result_r1_i_1_s toro_var_copy = toro_var_success;",
+        "Result value copy");
+}
+
+void test_distinct_result_instances()
+{
+    const auto output = generate(
+        "function first() -> Result<int, string> { return ok(1) }\n"
+        "function second() -> Result<string, int> { return ok(\"two\") }\n");
+    expect_contains(output, "toro_result_r1_i_1_s", "first Result instance");
+    expect_contains(output, "toro_result_r1_s_1_i", "second Result instance");
+}
+
 void test_unsupported_features()
 {
     expect_backend_error(
@@ -357,7 +420,7 @@ void test_unsupported_features()
         "generic structs are not supported by the C backend");
     expect_backend_error(
         "struct MaybeOwner { owner: string? }\n",
-        "type 'string' is not supported by the C backend");
+        "nullable type 'string?' is not supported by the C backend");
     expect_backend_error(
         "struct Named {\n"
         "    name: string\n"
@@ -376,8 +439,12 @@ void test_unsupported_features()
         "enum Event { resource(Resource) }\n",
         "type 'Resource' is not supported by the C backend");
     expect_backend_error(
-        "function consume(result: Result<int, string>) {}\n",
-        "type 'Result' is not supported by the C backend");
+        "class Resource {}\n"
+        "function consume(result: Result<Resource, string>) {}\n",
+        "type 'Resource' is not supported by the C backend");
+    expect_backend_error(
+        "function consume(result: Result<int?, string>) {}\n",
+        "nullable type 'int?' is not supported by the C backend");
 }
 
 void test_generated_c_compiles()
@@ -428,6 +495,8 @@ int main()
         test_struct_methods();
         test_enum_representation_construction_and_handle();
         test_enum_function_return_and_nested_payload_types();
+        test_result_construction_handle_and_propagation();
+        test_distinct_result_instances();
         test_unsupported_features();
         test_generated_c_compiles();
     } catch (const std::exception& error) {

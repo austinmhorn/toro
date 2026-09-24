@@ -1,0 +1,36 @@
+function parse_age(text: string) -> Result<int, string> {
+    if text == "" {
+        return error("empty input")
+    }
+
+    return ok(28)
+}
+
+function load_age(text: string) -> Result<int, string> {
+    age := parse_age(text)?
+    return ok(age)
+}
+
+function double_age(text: string) -> Result<int, string> {
+    age := load_age(text)?
+    return ok(age * 2)
+}
+
+function report(result: Result<int, string>) {
+    handle result {
+        ok(value) {
+            print(value)
+        }
+
+        error(problem) {
+            print(problem)
+        }
+    }
+}
+
+function main() {
+    success: Result<int, string> = double_age("28")
+    copy := success
+    report(copy)
+    report(double_age(""))
+}
