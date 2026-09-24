@@ -1,5 +1,6 @@
 enum Message {
     text(string)
+    count(int)
     quit
 }
 
@@ -9,42 +10,21 @@ function process(message: Message) {
             print(value)
         }
 
+        count(value) {
+            print(value)
+        }
+
         quit {
-            return
-        }
-    }
-}
-
-function parse_age(text: string) -> Result<int, string> {
-    if text == "" {
-        return error("empty input")
-    }
-
-    return ok(28)
-}
-
-function checked_age() -> Result<int, string> {
-    age := parse_age("28")?
-    return ok(age)
-}
-
-function report_age(result: Result<int, string>) {
-    handle result {
-        ok(age) {
-            print(age)
-        }
-
-        error(problem) {
-            print(problem)
+            print("done")
         }
     }
 }
 
 function main() {
-    message := Message.text("hello")
-    quit := Message.quit
+    message := Message::text("hello")
+    count := Message::count(10)
+    quit := Message::quit
     process(message)
+    process(count)
     process(quit)
-    age_result: Result<int, string> = checked_age()
-    report_age(age_result)
 }

@@ -1102,38 +1102,50 @@ void test_enum_variant_construction()
         "    text(string)\n"
         "    quit\n"
         "}\n"
-        "message: Message = Message.text(\"hello\")\n"
-        "quit: Message = Message.quit\n");
+        "message: Message = Message::text(\"hello\")\n"
+        "quit: Message = Message::quit\n");
     expect_error(
         "enum Message {\n"
         "    text(string)\n"
         "}\n"
-        "message := Message.text()\n",
-        "Message.text' expects 1 payload argument, got 0");
+        "message := Message::text()\n",
+        "Message::text' expects 1 payload argument, got 0");
     expect_error(
         "enum Message {\n"
         "    text(string)\n"
         "}\n"
-        "message := Message.text(10)\n",
+        "message := Message::text(10)\n",
         "cannot assign value of type 'int' to type 'string'");
     expect_error(
         "enum Message {\n"
         "    quit\n"
         "}\n"
-        "message := Message.quit(10)\n",
-        "Message.quit' expects 0 payload arguments, got 1");
+        "message := Message::quit(10)\n",
+        "Message::quit' expects 0 payload arguments, got 1");
     expect_error(
         "enum Message {\n"
         "    quit\n"
         "}\n"
-        "message := Message.missing\n",
+        "message := Message::missing\n",
         "enum 'Message' has no variant named 'missing'");
     expect_error(
         "enum Message {\n"
         "    text(string)\n"
         "}\n"
-        "message := Message.text\n",
-        "Message.text' requires 1 payload argument");
+        "message := Message::text\n",
+        "Message::text' requires 1 payload argument");
+    expect_error(
+        "enum Message { quit }\n"
+        "message := Message.quit\n",
+        "enum variants must use '::'; '.' is instance member access");
+    expect_error(
+        "enum Message { text(string) }\n"
+        "message := Message.text(\"hello\")\n",
+        "enum variants must use '::'; '.' is instance member access");
+    expect_error(
+        "struct Message { value: int }\n"
+        "value := Message::value\n",
+        "'::' type-scoped access currently supports enum variants only");
 }
 
 void test_enum_identity()
@@ -1142,7 +1154,7 @@ void test_enum_identity()
         "enum Direction {\n"
         "    north\n"
         "}\n"
-        "direction: Direction = Direction.north\n");
+        "direction: Direction = Direction::north\n");
     expect_error(
         "enum Direction {\n"
         "    north\n"
@@ -1150,7 +1162,7 @@ void test_enum_identity()
         "enum Status {\n"
         "    north\n"
         "}\n"
-        "status: Status = Direction.north\n",
+        "status: Status = Direction::north\n",
         "cannot assign value of type 'Direction' to type 'Status'");
 }
 

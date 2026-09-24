@@ -122,6 +122,11 @@ void append_dump(const Expr& expression, std::size_t depth, std::string& output)
         output += std::string((depth + 1) * 2, ' ') + member.member + "\n";
         return;
     }
+    case ExprKind::TypeAccess: {
+        const auto& access = static_cast<const TypeAccessExpr&>(expression);
+        output += "TypeAccess(" + access.type_name + "::" + access.member + ")\n";
+        return;
+    }
     case ExprKind::Propagation: {
         const auto& propagation = static_cast<const PropagationExpr&>(expression);
         output += "Propagation(?)\n";
@@ -1374,6 +1379,17 @@ std::unique_ptr<Expr> Parser::parse_call()
                 TokenType::Identifier, "expected member name after '.'");
             expression = std::make_unique<MemberAccessExpr>(
                 std::move(expression), member.lexeme);
+        } else if (match({TokenType::DoubleColon})) {
+            if (expression->kind != ExprKind::Identifier) {
+                throw_parse_error(
+                    previous(), "type-scoped access requires a type name before '::'");
+            }
+            const std::string type_name =
+                static_cast<const IdentifierExpr&>(*expression).name;
+            const Token& member = consume(
+                TokenType::Identifier, "expected enum variant name after '::'");
+            expression = std::make_unique<TypeAccessExpr>(
+                type_name, member.lexeme);
         } else if (match({TokenType::Question})) {
             expression = std::make_unique<PropagationExpr>(
                 std::move(expression), previous());

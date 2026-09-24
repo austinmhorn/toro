@@ -12,11 +12,11 @@
 namespace toro {
 namespace {
 
-enum class CValueKind { Int, Dec, Bool, String, Struct, Void };
+enum class CValueKind { Int, Dec, Bool, String, Struct, Enum, Void };
 
 struct CValueType {
     CValueKind kind;
-    std::string struct_name;
+    std::string nominal_name;
 
     bool operator==(const CValueType&) const = default;
 };
@@ -57,6 +57,17 @@ struct StructInfo {
     std::unordered_map<std::string, MethodInfo> methods;
 };
 
+struct EnumVariantInfo {
+    const EnumVariant* declaration;
+    std::optional<CValueType> payload_type;
+};
+
+struct EnumInfo {
+    const EnumDeclarationStmt* declaration;
+    std::vector<EnumVariantInfo> variants;
+    std::unordered_map<std::string, std::size_t> variant_indices;
+};
+
 struct GeneratedExpression {
     std::string code;
     CValueType type;
@@ -88,6 +99,27 @@ std::string struct_name(std::string_view name)
     return "toro_struct_" + std::string(name);
 }
 
+std::string enum_name(std::string_view name)
+{
+    return "toro_enum_" + std::to_string(name.size()) + "_"
+        + std::string(name);
+}
+
+std::string enum_tag_type_name(std::string_view name)
+{
+    return enum_name(name) + "_tag";
+}
+
+std::string enum_tag_name(std::string_view enum_type, std::string_view variant)
+{
+    return enum_name(enum_type) + "_tag_" + std::string(variant);
+}
+
+std::string enum_payload_name(std::string_view variant)
+{
+    return "toro_variant_" + std::string(variant);
+}
+
 std::string field_name(std::string_view name)
 {
     return "toro_field_" + std::string(name);
@@ -116,7 +148,8 @@ std::string c_type_name(CValueType type)
     case CValueKind::Dec: return "double";
     case CValueKind::Bool: return "bool";
     case CValueKind::String: return "const char*";
-    case CValueKind::Struct: return struct_name(type.struct_name);
+    case CValueKind::Struct: return struct_name(type.nominal_name);
+    case CValueKind::Enum: return enum_name(type.nominal_name);
     case CValueKind::Void: return "void";
     }
     return "void";
@@ -145,7 +178,7 @@ class Generator {
 public:
     std::string generate(const Program& program)
     {
-        collect_structs(program);
+        collect_types(program);
         collect_functions(program);
 
         std::string output =
@@ -158,17 +191,22 @@ public:
             output += "typedef struct " + struct_name(struct_declaration->name)
                 + " " + struct_name(struct_declaration->name) + ";\n";
         }
-        if (!struct_order_.empty()) {
+        for (const auto& enum_declaration : enum_order_) {
+            output += "typedef struct " + enum_name(enum_declaration->name)
+                + " " + enum_name(enum_declaration->name) + ";\n";
+        }
+        if (!struct_order_.empty() || !enum_order_.empty()) {
             output += '\n';
         }
 
         std::unordered_map<std::string, int> definition_state;
-        for (const auto* declaration : struct_order_) {
-            output += emit_struct_definition(declaration->name, definition_state);
+        for (const auto& type : nominal_order_) {
+            output += emit_type_definition(type, definition_state);
         }
 
         for (const auto& statement : program.statements) {
-            if (statement->kind == StmtKind::StructDeclaration) {
+            if (statement->kind == StmtKind::StructDeclaration
+                || statement->kind == StmtKind::EnumDeclaration) {
                 continue;
             }
             if (statement->kind != StmtKind::FunctionDeclaration) {
@@ -192,12 +230,14 @@ public:
                 output += ";\n";
             }
         }
-        if (!program.statements.empty() || !struct_order_.empty()) {
+        if (!program.statements.empty() || !struct_order_.empty()
+            || !enum_order_.empty()) {
             output += '\n';
         }
 
         for (const auto& statement : program.statements) {
-            if (statement->kind == StmtKind::StructDeclaration) {
+            if (statement->kind == StmtKind::StructDeclaration
+                || statement->kind == StmtKind::EnumDeclaration) {
                 continue;
             }
             output += emit_function(
@@ -243,37 +283,40 @@ public:
     }
 
 private:
-    void collect_structs(const Program& program)
+    void collect_types(const Program& program)
     {
         for (const auto& statement : program.statements) {
-            if (statement->kind != StmtKind::StructDeclaration) {
-                continue;
+            if (statement->kind == StmtKind::StructDeclaration) {
+                const auto& declaration =
+                    static_cast<const StructDeclarationStmt&>(*statement);
+                if (!declaration.generic_parameters.empty()) {
+                    throw_backend_error(
+                        declaration.location,
+                        "generic structs are not supported by the C backend");
+                }
+                if (!declaration.interfaces.empty()) {
+                    throw_backend_error(
+                        declaration.location,
+                        "struct interface implementations are not supported by the C backend");
+                }
+                if (!declaration.conversions.empty()) {
+                    throw_backend_error(
+                        declaration.location,
+                        "struct conversion overloads are not supported by the C backend");
+                }
+                structs_.emplace(
+                    declaration.name, StructInfo{&declaration, {}, {}, {}});
+                struct_order_.push_back(&declaration);
+                nominal_order_.push_back(
+                    CValueType{CValueKind::Struct, declaration.name});
+            } else if (statement->kind == StmtKind::EnumDeclaration) {
+                const auto& declaration =
+                    static_cast<const EnumDeclarationStmt&>(*statement);
+                enums_.emplace(declaration.name, EnumInfo{&declaration, {}, {}});
+                enum_order_.push_back(&declaration);
+                nominal_order_.push_back(
+                    CValueType{CValueKind::Enum, declaration.name});
             }
-            const auto& declaration =
-                static_cast<const StructDeclarationStmt&>(*statement);
-            if (!declaration.generic_parameters.empty()) {
-                throw_backend_error(
-                    declaration.location,
-                    "generic structs are not supported by the C backend");
-            }
-            if (!declaration.interfaces.empty()) {
-                throw_backend_error(
-                    declaration.location,
-                    "struct interface implementations are not supported by the C backend");
-            }
-            if (!declaration.conversions.empty()) {
-                throw_backend_error(
-                    declaration.location,
-                    "struct conversion overloads are not supported by the C backend");
-            }
-            if (!structs_.emplace(
-                    declaration.name,
-                    StructInfo{&declaration, {}, {}, {}}).second) {
-                throw_backend_error(
-                    declaration.location,
-                    "duplicate struct '" + declaration.name + "' in C backend");
-            }
-            struct_order_.push_back(&declaration);
         }
 
         for (const auto* declaration : struct_order_) {
@@ -307,6 +350,19 @@ private:
                         "struct method overloads are not supported by the C backend: '"
                             + declaration->name + "." + method.name + "'");
                 }
+            }
+        }
+
+        for (const auto* declaration : enum_order_) {
+            auto& info = enums_.at(declaration->name);
+            for (const auto& variant : declaration->variants) {
+                info.variant_indices.emplace(variant.name, info.variants.size());
+                info.variants.push_back(EnumVariantInfo{
+                    &variant,
+                    variant.payload_type
+                        ? std::optional<CValueType>{lower_type(*variant.payload_type)}
+                        : std::nullopt,
+                });
             }
         }
     }
@@ -362,30 +418,81 @@ private:
         if (structs_.contains(type.name)) {
             return CValueType{CValueKind::Struct, type.name};
         }
+        if (enums_.contains(type.name)) {
+            return CValueType{CValueKind::Enum, type.name};
+        }
         throw_backend_error(
             type.location,
             "type '" + type.name + "' is not supported by the C backend");
     }
 
-    std::string emit_struct_definition(
-        const std::string& name,
+    std::string emit_type_definition(
+        const CValueType& type,
         std::unordered_map<std::string, int>& state) const
     {
+        const std::string& name = type.nominal_name;
         if (state[name] == 2) {
             return {};
         }
         if (state[name] == 1) {
+            const SourceLocation location = type.kind == CValueKind::Struct
+                ? structs_.at(name).declaration->location
+                : enums_.at(name).declaration->location;
             throw_backend_error(
-                structs_.at(name).declaration->location,
-                "recursive by-value struct layout is not supported by the C backend: '"
+                location,
+                "recursive by-value type layout is not supported by the C backend: '"
                     + name + "'");
         }
         state[name] = 1;
-        const auto& info = structs_.at(name);
         std::string output;
+        if (type.kind == CValueKind::Enum) {
+            const auto& info = enums_.at(name);
+            for (const auto& variant : info.variants) {
+                if (variant.payload_type
+                    && (variant.payload_type->kind == CValueKind::Struct
+                        || variant.payload_type->kind == CValueKind::Enum)) {
+                    output += emit_type_definition(*variant.payload_type, state);
+                }
+            }
+            output += "typedef enum " + enum_tag_type_name(name) + "\n{\n";
+            for (std::size_t index = 0; index < info.variants.size(); ++index) {
+                output += "    " + enum_tag_name(
+                    name, info.variants[index].declaration->name);
+                if (index + 1 != info.variants.size()) {
+                    output += ',';
+                }
+                output += '\n';
+            }
+            output += "} " + enum_tag_type_name(name) + ";\n\n";
+            output += "struct " + enum_name(name) + "\n{\n";
+            output += "    " + enum_tag_type_name(name) + " toro_tag;\n";
+            const bool has_payload = std::ranges::any_of(
+                info.variants,
+                [](const EnumVariantInfo& variant) {
+                    return variant.payload_type.has_value();
+                });
+            if (has_payload) {
+                output += "    union\n    {\n";
+                for (const auto& variant : info.variants) {
+                    if (variant.payload_type) {
+                        output += "        " + c_type_name(*variant.payload_type)
+                            + " "
+                            + enum_payload_name(variant.declaration->name)
+                            + ";\n";
+                    }
+                }
+                output += "    } toro_payload;\n";
+            }
+            output += "};\n\n";
+            state[name] = 2;
+            return output;
+        }
+
+        const auto& info = structs_.at(name);
         for (const auto& field : info.fields) {
-            if (field.type.kind == CValueKind::Struct) {
-                output += emit_struct_definition(field.type.struct_name, state);
+            if (field.type.kind == CValueKind::Struct
+                || field.type.kind == CValueKind::Enum) {
+                output += emit_type_definition(field.type, state);
             }
         }
         output += "struct " + struct_name(name) + "\n{\n";
@@ -569,13 +676,14 @@ private:
         case StmtKind::Stop:
         case StmtKind::Continue:
         case StmtKind::EnumDeclaration:
-        case StmtKind::Handle:
         case StmtKind::StructDeclaration:
         case StmtKind::ClassDeclaration:
         case StmtKind::InterfaceDeclaration:
             throw_backend_error(
                 statement.location,
                 "statement is not supported by the C backend");
+        case StmtKind::Handle:
+            return emit_handle(static_cast<const HandleStmt&>(statement), depth);
         }
         throw_backend_error(statement.location, "unknown statement");
     }
@@ -617,6 +725,59 @@ private:
         return output;
     }
 
+    std::string emit_handle(const HandleStmt& handle, std::size_t depth)
+    {
+        const auto handled = emit_expression(*handle.expression);
+        if (handled.type.kind != CValueKind::Enum) {
+            throw_backend_error(
+                handle.location,
+                "handle lowering requires a supported enum value; Result is not supported by the C backend");
+        }
+        const auto& info = enums_.at(handled.type.nominal_name);
+        const std::string temporary =
+            "toro_handle_value_" + std::to_string(temporary_index_++);
+        std::string output = indent(depth) + "{\n";
+        output += indent(depth + 1) + c_type_name(handled.type) + " "
+            + temporary + " = " + handled.code + ";\n";
+        output += indent(depth + 1) + "switch (" + temporary
+            + ".toro_tag)\n" + indent(depth + 1) + "{\n";
+
+        for (const auto& handle_case : handle.cases) {
+            current_location_ = handle_case.location;
+            const auto variant = info.variant_indices.find(handle_case.variant_name);
+            if (variant == info.variant_indices.end()) {
+                throw_backend_error(
+                    handle_case.location,
+                    "enum '" + handled.type.nominal_name
+                        + "' has no backend variant named '"
+                        + handle_case.variant_name + "'");
+            }
+            const auto& variant_info = info.variants[variant->second];
+            output += indent(depth + 1) + "case "
+                + enum_tag_name(
+                    handled.type.nominal_name, handle_case.variant_name)
+                + ": {\n";
+            push_scope();
+            if (handle_case.binding_name && variant_info.payload_type) {
+                const std::string binding = variable_name(*handle_case.binding_name);
+                scopes_.back().emplace(
+                    *handle_case.binding_name,
+                    ValueInfo{*variant_info.payload_type, binding});
+                output += indent(depth + 2) + c_type_name(*variant_info.payload_type)
+                    + " " + binding + " = " + temporary
+                    + ".toro_payload."
+                    + enum_payload_name(handle_case.variant_name) + ";\n";
+            }
+            output += emit_statement_list(handle_case.body->statements, depth + 2);
+            output += indent(depth + 2) + "break;\n";
+            pop_scope();
+            output += indent(depth + 1) + "}\n";
+        }
+        output += indent(depth + 1) + "}\n";
+        output += indent(depth) + "}\n";
+        return output;
+    }
+
     GeneratedExpression emit_expression(const Expr& expression)
     {
         switch (expression.kind) {
@@ -651,6 +812,9 @@ private:
         case ExprKind::MemberAccess:
             return emit_member_access(
                 static_cast<const MemberAccessExpr&>(expression));
+        case ExprKind::TypeAccess:
+            return emit_enum_variant_access(
+                static_cast<const TypeAccessExpr&>(expression));
         case ExprKind::Grouping: {
             const auto inner = emit_expression(
                 *static_cast<const GroupingExpr&>(expression).expression);
@@ -676,10 +840,12 @@ private:
         const auto left = emit_expression(*binary.left);
         const auto right = emit_expression(*binary.right);
         if (left.type.kind == CValueKind::Struct
-            || right.type.kind == CValueKind::Struct) {
+            || left.type.kind == CValueKind::Enum
+            || right.type.kind == CValueKind::Struct
+            || right.type.kind == CValueKind::Enum) {
             throw_backend_error(
                 current_location_,
-                "operators on struct values are not supported by the C backend");
+                "operators on struct or enum values are not supported by the C backend");
         }
         if ((binary.operator_token.type == TokenType::Equal
                 || binary.operator_token.type == TokenType::NotEqual)
@@ -727,9 +893,17 @@ private:
                 current_location_,
                 "generic calls are not supported by the C backend");
         }
+        if (call.callee->kind == ExprKind::TypeAccess) {
+            const auto& access =
+                static_cast<const TypeAccessExpr&>(*call.callee);
+            return emit_enum_variant_construction(
+                access.type_name, access.member, call);
+        }
         if (call.callee->kind == ExprKind::MemberAccess) {
+            const auto& member =
+                static_cast<const MemberAccessExpr&>(*call.callee);
             return emit_method_call(
-                call, static_cast<const MemberAccessExpr&>(*call.callee));
+                call, member);
         }
         if (call.callee->kind != ExprKind::Identifier) {
             throw_backend_error(current_location_, "unsupported call target");
@@ -759,6 +933,48 @@ private:
         }
         code += ")";
         return {std::move(code), function->second.return_type};
+    }
+
+    GeneratedExpression emit_enum_variant_construction(
+        const std::string& enum_type,
+        const std::string& variant_name,
+        const CallExpr& call)
+    {
+        const auto& info = enums_.at(enum_type);
+        const auto variant = info.variant_indices.find(variant_name);
+        if (variant == info.variant_indices.end()) {
+            throw_backend_error(
+                current_location_,
+                "enum '" + enum_type + "' has no variant named '"
+                    + variant_name + "'");
+        }
+        const auto& variant_info = info.variants[variant->second];
+        if (!variant_info.payload_type) {
+            if (!call.arguments.empty()) {
+                throw_backend_error(
+                    current_location_,
+                    "payload-free enum variant received a payload");
+            }
+            return {
+                "(" + enum_name(enum_type) + "){.toro_tag = "
+                    + enum_tag_name(enum_type, variant_name) + "}",
+                CValueType{CValueKind::Enum, enum_type},
+            };
+        }
+        if (call.arguments.size() != 1) {
+            throw_backend_error(
+                current_location_,
+                "enum variant '" + enum_type + "::" + variant_name
+                    + "' has an unsupported payload layout");
+        }
+        std::string code = "(" + enum_name(enum_type) + "){.toro_tag = "
+            + enum_tag_name(enum_type, variant_name) + ", .toro_payload."
+            + enum_payload_name(variant_name) + " = "
+            + emit_expression(*call.arguments.front().value).code + "}";
+        return {
+            std::move(code),
+            CValueType{CValueKind::Enum, enum_type},
+        };
     }
 
     std::vector<const CallArgument*> order_arguments(
@@ -869,7 +1085,12 @@ private:
         case CValueKind::Struct:
             throw_backend_error(
                 location,
-                "omitted struct field '" + type.struct_name
+                "omitted struct field '" + type.nominal_name
+                    + "' has no backend zero value");
+        case CValueKind::Enum:
+            throw_backend_error(
+                location,
+                "omitted enum field '" + type.nominal_name
                     + "' has no backend zero value");
         case CValueKind::Void:
             break;
@@ -884,12 +1105,12 @@ private:
             throw_backend_error(
                 current_location_, "field access requires a struct value");
         }
-        const auto& info = structs_.at(object.type.struct_name);
+        const auto& info = structs_.at(object.type.nominal_name);
         const auto field = info.field_indices.find(member.member);
         if (field == info.field_indices.end()) {
             throw_backend_error(
                 current_location_,
-                "struct '" + object.type.struct_name + "' has no field named '"
+                "struct '" + object.type.nominal_name + "' has no field named '"
                     + member.member + "'");
         }
         return {
@@ -897,6 +1118,36 @@ private:
                 + field_name(member.member),
             info.fields[field->second].type,
             object.addressable,
+        };
+    }
+
+    GeneratedExpression emit_enum_variant_access(const TypeAccessExpr& access)
+    {
+        const auto found_enum = enums_.find(access.type_name);
+        if (found_enum == enums_.end()) {
+            throw_backend_error(
+                current_location_,
+                "'::' type-scoped access currently supports enum variants only");
+        }
+        const auto variant =
+            found_enum->second.variant_indices.find(access.member);
+        if (variant == found_enum->second.variant_indices.end()) {
+            throw_backend_error(
+                current_location_,
+                "enum '" + access.type_name + "' has no variant named '"
+                    + access.member + "'");
+        }
+        const auto& variant_info = found_enum->second.variants[variant->second];
+        if (variant_info.payload_type) {
+            throw_backend_error(
+                current_location_,
+                "enum variant '" + access.type_name + "::" + access.member
+                    + "' requires a payload");
+        }
+        return {
+            "(" + enum_name(access.type_name) + "){.toro_tag = "
+                + enum_tag_name(access.type_name, access.member) + "}",
+            CValueType{CValueKind::Enum, access.type_name},
         };
     }
 
@@ -909,12 +1160,12 @@ private:
             throw_backend_error(
                 current_location_, "method calls require a struct receiver");
         }
-        const auto& struct_info = structs_.at(receiver.type.struct_name);
+        const auto& struct_info = structs_.at(receiver.type.nominal_name);
         const auto method = struct_info.methods.find(member.member);
         if (method == struct_info.methods.end()) {
             throw_backend_error(
                 current_location_,
-                "struct '" + receiver.type.struct_name + "' has no method named '"
+                "struct '" + receiver.type.nominal_name + "' has no method named '"
                     + member.member + "'");
         }
         if (!receiver.pointer && !receiver.addressable) {
@@ -924,7 +1175,7 @@ private:
         }
         const auto ordered = order_arguments(
             call, method->second.declaration->parameters);
-        std::string code = method_name(receiver.type.struct_name, member.member) + "(";
+        std::string code = method_name(receiver.type.nominal_name, member.member) + "(";
         code += receiver.pointer ? receiver.code : "&(" + receiver.code + ")";
         for (const auto* argument : ordered) {
             code += ", " + emit_expression(*argument->value).code;
@@ -955,6 +1206,9 @@ private:
         case CValueKind::Struct:
             throw_backend_error(
                 current_location_, "printing struct values is not supported by the C backend");
+        case CValueKind::Enum:
+            throw_backend_error(
+                current_location_, "printing enum values is not supported by the C backend");
         case CValueKind::Void:
             throw_backend_error(
                 current_location_, "cannot print an expression without a value");
@@ -985,8 +1239,12 @@ private:
 
     std::unordered_map<std::string, StructInfo> structs_;
     std::vector<const StructDeclarationStmt*> struct_order_;
+    std::unordered_map<std::string, EnumInfo> enums_;
+    std::vector<const EnumDeclarationStmt*> enum_order_;
+    std::vector<CValueType> nominal_order_;
     std::unordered_map<std::string, FunctionInfo> functions_;
     std::vector<std::unordered_map<std::string, ValueInfo>> scopes_;
+    std::size_t temporary_index_{0};
     SourceLocation current_location_{1, 1};
 };
 

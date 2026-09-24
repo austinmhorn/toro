@@ -69,9 +69,13 @@ enum Message {
     quit
 }
 
-message := Message.text("hello")
-quit := Message.quit
+message := Message::text("hello")
+quit := Message::quit
 ```
+
+`::` denotes type-scoped enum variant access. `.` is reserved for instance and
+member access, so the former `Message.text(...)` spelling is invalid. Other
+type-scoped features such as static methods are not defined yet.
 
 Payload-bearing variants require exactly one value of the declared type.
 Payload-free variants are values without arguments. Each constructed variant has
@@ -305,7 +309,12 @@ primitive `print(...)` calls. Non-generic structs may contain supported
 primitive or non-generic struct fields and method signatures. Construction,
 field access and assignment, nested field access, struct value copies, and
 method calls are lowered to C. Methods receive an internal pointer to their
-struct value so mutations through `self` update the source receiver.
+struct value so mutations through `self` update the source receiver. Enums lower
+to tagged C unions with one tag per variant and one union member per payload.
+Variant construction initializes the tag and optional payload explicitly.
+Exhaustive `handle` statements lower to C `switch` statements, and payload
+bindings are local to their case block. Enum values retain ordinary value-copy
+semantics and may be passed to or returned from functions.
 
 Primitive types map directly to C:
 
@@ -322,11 +331,12 @@ field: explicit source defaults take priority, while omitted `int`, `dec`,
 `bool`, and `string` fields use `0`, `0.0`, `false`, and `""`. Omitted nested
 struct values remain unsupported unless explicitly supplied.
 
-Classes, enums, Result, generic structs, method overloads, conversions,
+Classes, `Result<T, E>`, generic structs, method overloads, conversions,
 interfaces, inheritance, nullable fields, collections, and ARC are not lowered
-yet. Encountering one of these otherwise valid features produces a backend
-diagnostic. Method receivers that cannot safely be addressed are rejected
-rather than lowered to invalid C.
+yet. Enum payloads may use primitives, supported non-generic structs, or other
+supported enums; other payload types produce a backend diagnostic. Method
+receivers that cannot safely be addressed are rejected rather than lowered to
+invalid C.
 
 The native toolchain can compile this generated source as C11. `toro build`
 writes a persistent executable, defaulting to the source filename stem in the

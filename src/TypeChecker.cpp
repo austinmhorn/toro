@@ -832,6 +832,8 @@ Type TypeChecker::check_expression(
         const auto& member = static_cast<const MemberAccessExpr&>(expression);
         return check_member_access(member);
     }
+    case ExprKind::TypeAccess:
+        return check_type_access(static_cast<const TypeAccessExpr&>(expression));
     case ExprKind::Propagation:
         return check_propagation(static_cast<const PropagationExpr&>(expression));
     case ExprKind::Cast:
@@ -908,14 +910,27 @@ Type TypeChecker::check_call(
         return unknown_type;
     }
 
+    if (call.callee->kind == ExprKind::TypeAccess) {
+        const auto& access = static_cast<const TypeAccessExpr&>(*call.callee);
+        const auto* type_info = find_nominal_type(access.type_name);
+        if (!type_info || type_info->kind != NominalKind::Enum) {
+            throw_type_error(
+                current_location_,
+                "'::' type-scoped access currently supports enum variants only");
+        }
+        return check_enum_variant_call(
+            access.type_name, access.member, call, arguments, *type_info);
+    }
+
     if (call.callee->kind == ExprKind::MemberAccess) {
         const auto& member = static_cast<const MemberAccessExpr&>(*call.callee);
         if (member.object->kind == ExprKind::Identifier) {
             const auto& object = static_cast<const IdentifierExpr&>(*member.object);
             if (const auto* type_info = find_nominal_type(object.name);
                 type_info && type_info->kind == NominalKind::Enum) {
-                return check_enum_variant_call(
-                    object.name, member.member, call, arguments, *type_info);
+                throw_type_error(
+                    current_location_,
+                    "enum variants must use '::'; '.' is instance member access");
             }
         }
         return check_method_call(member, call, arguments);
@@ -1153,7 +1168,7 @@ Type TypeChecker::check_enum_variant_call(
 {
     if (!call.generic_arguments.empty()) {
         throw_type_error(
-            current_location_, "enum variant '" + enum_name + "." + variant_name
+            current_location_, "enum variant '" + enum_name + "::" + variant_name
                 + "' does not accept generic arguments");
     }
     const auto variant = type_info.variants.find(variant_name);
@@ -1165,7 +1180,7 @@ Type TypeChecker::check_enum_variant_call(
     const std::size_t expected_count = variant->second.payload_type ? 1U : 0U;
     if (arguments.size() != expected_count) {
         throw_type_error(
-            current_location_, "enum variant '" + enum_name + "." + variant_name
+            current_location_, "enum variant '" + enum_name + "::" + variant_name
                 + "' expects " + std::to_string(expected_count) + " payload argument"
                 + (expected_count == 1 ? "" : "s") + ", got "
                 + std::to_string(arguments.size()));
@@ -1458,18 +1473,9 @@ Type TypeChecker::check_member_access(const MemberAccessExpr& member)
         const auto& object = static_cast<const IdentifierExpr&>(*member.object);
         if (const auto* type_info = find_nominal_type(object.name);
             type_info && type_info->kind == NominalKind::Enum) {
-            const auto variant = type_info->variants.find(member.member);
-            if (variant == type_info->variants.end()) {
-                throw_type_error(
-                    current_location_, "enum '" + object.name
-                        + "' has no variant named '" + member.member + "'");
-            }
-            if (variant->second.payload_type) {
-                throw_type_error(
-                    current_location_, "enum variant '" + object.name + "."
-                        + member.member + "' requires 1 payload argument");
-            }
-            return Type{TypeKind::Unknown, false, false, object.name};
+            throw_type_error(
+                current_location_,
+                "enum variants must use '::'; '.' is instance member access");
         }
     }
     const Type object = require_value(check_expression(*member.object), current_location_);
@@ -1527,6 +1533,28 @@ Type TypeChecker::check_member_access(const MemberAccessExpr& member)
     throw_type_error(
         current_location_, "type '" + object.name + "' has no member named '"
             + member.member + "'");
+}
+
+Type TypeChecker::check_type_access(const TypeAccessExpr& access) const
+{
+    const auto* type_info = find_nominal_type(access.type_name);
+    if (!type_info || type_info->kind != NominalKind::Enum) {
+        throw_type_error(
+            current_location_,
+            "'::' type-scoped access currently supports enum variants only");
+    }
+    const auto variant = type_info->variants.find(access.member);
+    if (variant == type_info->variants.end()) {
+        throw_type_error(
+            current_location_, "enum '" + access.type_name
+                + "' has no variant named '" + access.member + "'");
+    }
+    if (variant->second.payload_type) {
+        throw_type_error(
+            current_location_, "enum variant '" + access.type_name + "::"
+                + access.member + "' requires 1 payload argument");
+    }
+    return Type{TypeKind::Unknown, false, false, access.type_name};
 }
 
 Type TypeChecker::check_binary(const BinaryExpr& binary)

@@ -97,9 +97,10 @@ void test_strings()
 void test_operators_and_punctuation()
 {
     const auto tokens = tokenize(
-        ":= -> = == != < <= > >= + - * / ( ) { } [ ] : , . ?");
+        ":= :: -> = == != < <= > >= + - * / ( ) { } [ ] : , . ?");
     constexpr std::array expected{
-        TokenType::Declare, TokenType::Arrow, TokenType::Assign, TokenType::Equal,
+        TokenType::Declare, TokenType::DoubleColon, TokenType::Arrow,
+        TokenType::Assign, TokenType::Equal,
         TokenType::NotEqual, TokenType::Less, TokenType::LessEqual, TokenType::Greater,
         TokenType::GreaterEqual, TokenType::Plus, TokenType::Minus, TokenType::Star,
         TokenType::Slash, TokenType::LeftParen, TokenType::RightParen,
@@ -112,6 +113,14 @@ void test_operators_and_punctuation()
     for (std::size_t index = 0; index < expected.size(); ++index) {
         expect(tokens[index].type == expected[index], "operator or punctuation classified incorrectly");
     }
+}
+
+void test_type_scoped_access_token()
+{
+    const auto tokens = tokenize("Message::text");
+    expect_token(tokens[0], TokenType::Identifier, "Message", 1, 1);
+    expect_token(tokens[1], TokenType::DoubleColon, "::", 1, 8);
+    expect_token(tokens[2], TokenType::Identifier, "text", 1, 10);
 }
 
 void test_line_and_column_tracking()
@@ -151,6 +160,7 @@ int main()
         test_numbers();
         test_strings();
         test_operators_and_punctuation();
+        test_type_scoped_access_token();
         test_line_and_column_tracking();
         test_failures();
     } catch (const std::exception& error) {

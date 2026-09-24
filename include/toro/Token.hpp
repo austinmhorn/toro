@@ -64,6 +64,7 @@ enum class TokenType {
     LeftBracket,
     RightBracket,
     Colon,
+    DoubleColon,
     Comma,
     Dot,
     Question,
@@ -135,6 +136,7 @@ struct Token {
     case TokenType::LeftBracket: return "LeftBracket";
     case TokenType::RightBracket: return "RightBracket";
     case TokenType::Colon: return "Colon";
+    case TokenType::DoubleColon: return "DoubleColon";
     case TokenType::Comma: return "Comma";
     case TokenType::Dot: return "Dot";
     case TokenType::Question: return "Question";

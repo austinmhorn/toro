@@ -965,6 +965,28 @@ void test_self_member_and_method_calls()
         "        get_health\n");
 }
 
+void test_enum_type_scoped_access()
+{
+    expect_program_dump(
+        "message := Message::text(\"hello\")\n"
+        "quit := Message::quit\n",
+        "VariableDeclaration(message)\n"
+        "  inferred\n"
+        "  Call\n"
+        "    TypeAccess(Message::text)\n"
+        "    String(hello)\n"
+        "\n"
+        "VariableDeclaration(quit)\n"
+        "  inferred\n"
+        "  TypeAccess(Message::quit)\n");
+
+    expect_dump(
+        "player.name",
+        "MemberAccess\n"
+        "  Identifier(player)\n"
+        "  name\n");
+}
+
 void test_interface_declaration()
 {
     expect_program_dump(
@@ -1705,6 +1727,7 @@ int main()
         test_class_fields_and_visibility();
         test_class_methods_init_and_destroy();
         test_self_member_and_method_calls();
+        test_enum_type_scoped_access();
         test_interface_declaration();
         test_abstract_class_and_virtual_method();
         test_class_inheritance_and_interfaces();

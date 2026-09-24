@@ -22,8 +22,11 @@ checker validates explicit or inferred generic construction, constraints, and
 substituted field and method types, including recursively nested generic types.
 Enum variants are typed constructors, and `handle` validates case payload
 bindings, variant identity, duplicate cases, and exhaustive coverage.
+Enum variants use type-scoped access such as `Message::text("hello")` and
+`Message::quit`; `.` remains exclusively instance/member access.
 A minimal backend can emit portable C for the currently supported primitive
-procedural subset and non-generic value structs.
+procedural subset, non-generic value structs, and enums with exhaustive
+`handle` statements.
 
 ## Build
 
@@ -117,6 +120,7 @@ Generate C after parsing and checking a source file:
 ```bash
 ./build/toro emit-c examples/hello.toro
 ./build/toro emit-c examples/structs.toro
+./build/toro emit-c examples/enums.toro
 ```
 
 Build a native executable with the host C compiler:
@@ -135,6 +139,7 @@ Build and run through temporary artifacts:
 ```bash
 ./build/toro run examples/hello.toro
 ./build/toro run examples/structs.toro
+./build/toro run examples/enums.toro
 ```
 
 `run` forwards program output and returns its exit status. Its temporary C source
@@ -169,9 +174,12 @@ source defaults or toro primitive zero values. Field access, chained access,
 assignment, value copies, and struct methods use native C value semantics;
 methods lower to prefixed functions with an internal receiver pointer. It uses
 deterministically prefixed C identifiers and emits a C entry-point wrapper for a
-toro `main`. Generic structs, interfaces, conversion overloads, nullable fields,
-and other runtime types outside this subset fail with a backend diagnostic
-instead of producing partial or incorrect C.
+toro `main`. Enums lower to deterministic tagged unions; construction selects a
+tag and payload, while exhaustive `handle` statements lower to `switch` blocks
+with case-scoped payload bindings. Generic structs, interfaces, conversion
+overloads, nullable fields, `Result<T, E>`, and other runtime types outside this
+subset fail with a backend diagnostic instead of producing partial or incorrect
+C.
 
 ## Logical operators
 

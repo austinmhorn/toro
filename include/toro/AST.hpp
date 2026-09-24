@@ -40,6 +40,7 @@ enum class ExprKind {
     Binary,
     Call,
     MemberAccess,
+    TypeAccess,
     Propagation,
     Cast,
     Grouping,
@@ -173,6 +174,18 @@ struct MemberAccessExpr final : Expr {
     }
 
     std::unique_ptr<Expr> object;
+    std::string member;
+};
+
+struct TypeAccessExpr final : Expr {
+    TypeAccessExpr(std::string type_name, std::string member)
+        : Expr(ExprKind::TypeAccess)
+        , type_name(std::move(type_name))
+        , member(std::move(member))
+    {
+    }
+
+    std::string type_name;
     std::string member;
 };
 

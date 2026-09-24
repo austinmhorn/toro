@@ -198,6 +198,59 @@ void test_struct_runtime_behavior()
         "generated struct program produced unexpected output");
 }
 
+void test_enum_runtime_behavior()
+{
+    const auto c_source = generate(
+        "struct Point { x: int }\n"
+        "enum Inner {\n"
+        "    number(int)\n"
+        "    text(string)\n"
+        "    none\n"
+        "}\n"
+        "enum Outer {\n"
+        "    nested(Inner)\n"
+        "    point(Point)\n"
+        "    done\n"
+        "}\n"
+        "function number_or_zero(value: Inner) -> int {\n"
+        "    handle value {\n"
+        "        number(number) { return number }\n"
+        "        text(text) { return 0 }\n"
+        "        none { return 0 }\n"
+        "    }\n"
+        "}\n"
+        "function make() -> Outer {\n"
+        "    return Outer::nested(Inner::number(7))\n"
+        "}\n"
+        "function show(value: Outer) {\n"
+        "    handle value {\n"
+        "        nested(inner) {\n"
+        "            handle inner {\n"
+        "                number(number) { print(number) }\n"
+        "                text(text) { print(text) }\n"
+        "                none { print(\"none\") }\n"
+        "            }\n"
+        "        }\n"
+        "        point(point) { print(point.x) }\n"
+        "        done { print(\"done\") }\n"
+        "    }\n"
+        "}\n"
+        "function main() {\n"
+        "    value := make()\n"
+        "    copy := value\n"
+        "    show(copy)\n"
+        "    copy = Outer::point(Point(3))\n"
+        "    show(copy)\n"
+        "    show(Outer::done)\n"
+        "    print(number_or_zero(Inner::number(8)))\n"
+        "}\n");
+    const auto [status, output] = capture_run(toro::NativeCompiler(), c_source);
+    expect(status == 0, "generated enum program did not exit successfully");
+    expect(
+        output == "7\n3\ndone\n8\n",
+        "generated enum program produced unexpected output");
+}
+
 void test_compile_failure_reporting()
 {
     const auto directory = make_test_directory();
@@ -252,6 +305,7 @@ int main()
         test_run_output_and_control_flow();
         test_nonzero_exit_status();
         test_struct_runtime_behavior();
+        test_enum_runtime_behavior();
         test_compile_failure_reporting();
         test_unsupported_backend_feature();
         test_temporary_cleanup();

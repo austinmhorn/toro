@@ -243,6 +243,101 @@ void test_struct_methods()
         "method result call");
 }
 
+void test_enum_representation_construction_and_handle()
+{
+    const auto output = generate(
+        "enum Value {\n"
+        "    integer(int)\n"
+        "    decimal(dec)\n"
+        "    flag(bool)\n"
+        "    text(string)\n"
+        "    empty\n"
+        "}\n"
+        "function show(value: Value) {\n"
+        "    handle value {\n"
+        "        integer(item) { print(item) }\n"
+        "        decimal(item) { print(item) }\n"
+        "        flag(item) { print(item) }\n"
+        "        text(item) { print(item) }\n"
+        "        empty { print(\"empty\") }\n"
+        "    }\n"
+        "}\n"
+        "function main() {\n"
+        "    value := Value::text(\"toro\")\n"
+        "    value = Value::empty\n"
+        "    show(value)\n"
+        "}\n");
+
+    expect_contains(
+        output,
+        "typedef enum toro_enum_5_Value_tag",
+        "enum tag declaration");
+    expect_contains(
+        output,
+        "struct toro_enum_5_Value",
+        "tagged enum structure");
+    expect_contains(output, "int64_t toro_variant_integer;", "integer payload");
+    expect_contains(output, "double toro_variant_decimal;", "decimal payload");
+    expect_contains(output, "bool toro_variant_flag;", "boolean payload");
+    expect_contains(output, "const char* toro_variant_text;", "string payload");
+    expect_contains(
+        output,
+        "(toro_enum_5_Value){.toro_tag = toro_enum_5_Value_tag_text, "
+        ".toro_payload.toro_variant_text = \"toro\"}",
+        "payload variant construction");
+    expect_contains(
+        output,
+        "toro_var_value = (toro_enum_5_Value){.toro_tag = "
+        "toro_enum_5_Value_tag_empty};",
+        "payload-free variant assignment");
+    expect_contains(
+        output,
+        "switch (toro_handle_value_0.toro_tag)",
+        "handle switch");
+    expect_contains(
+        output,
+        "const char* toro_var_item = "
+        "toro_handle_value_0.toro_payload.toro_variant_text;",
+        "scoped payload binding");
+}
+
+void test_enum_function_return_and_nested_payload_types()
+{
+    const auto output = generate(
+        "struct Point { x: int }\n"
+        "enum Inner { number(int) }\n"
+        "enum Outer {\n"
+        "    nested(Inner)\n"
+        "    point(Point)\n"
+        "    done\n"
+        "}\n"
+        "function make() -> Outer {\n"
+        "    return Outer::nested(Inner::number(7))\n"
+        "}\n"
+        "function main() {\n"
+        "    first := make()\n"
+        "    copy := first\n"
+        "    copy = Outer::point(Point(3))\n"
+        "}\n");
+
+    expect_contains(
+        output,
+        "toro_enum_5_Inner toro_variant_nested;",
+        "enum payload type");
+    expect_contains(
+        output,
+        "toro_struct_Point toro_variant_point;",
+        "struct payload type");
+    expect_contains(
+        output,
+        "static toro_enum_5_Outer toro_fn_make(void);",
+        "enum function return");
+    expect_contains(
+        output,
+        "toro_enum_5_Outer toro_var_copy = toro_var_first;",
+        "enum value copy");
+}
+
 void test_unsupported_features()
 {
     expect_backend_error(
@@ -276,6 +371,13 @@ void test_unsupported_features()
         "}\n"
         "function main() { Counter().increment() }\n",
         "receiver must be an addressable value");
+    expect_backend_error(
+        "class Resource {}\n"
+        "enum Event { resource(Resource) }\n",
+        "type 'Resource' is not supported by the C backend");
+    expect_backend_error(
+        "function consume(result: Result<int, string>) {}\n",
+        "type 'Result' is not supported by the C backend");
 }
 
 void test_generated_c_compiles()
@@ -324,6 +426,8 @@ int main()
         test_struct_definition_construction_and_members();
         test_nested_structs_and_value_copy();
         test_struct_methods();
+        test_enum_representation_construction_and_handle();
+        test_enum_function_return_and_nested_payload_types();
         test_unsupported_features();
         test_generated_c_compiles();
     } catch (const std::exception& error) {

@@ -172,7 +172,13 @@ void Lexer::scan_token()
             + std::to_string(token_column_) + ": invalid character '!'");
     case '<': add_token(match('=') ? TokenType::LessEqual : TokenType::Less); break;
     case '>': add_token(match('=') ? TokenType::GreaterEqual : TokenType::Greater); break;
-    case ':': add_token(match('=') ? TokenType::Declare : TokenType::Colon); break;
+    case ':':
+        if (match(':')) {
+            add_token(TokenType::DoubleColon);
+        } else {
+            add_token(match('=') ? TokenType::Declare : TokenType::Colon);
+        }
+        break;
     case '(': add_token(TokenType::LeftParen); break;
     case ')': add_token(TokenType::RightParen); break;
     case '{': add_token(TokenType::LeftBrace); break;

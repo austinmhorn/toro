@@ -130,6 +130,7 @@ private:
         Type& return_type,
         std::string& failure_reason) const;
     [[nodiscard]] Type check_member_access(const MemberAccessExpr& member);
+    [[nodiscard]] Type check_type_access(const TypeAccessExpr& access) const;
     [[nodiscard]] Type check_binary(const BinaryExpr& binary);
     [[nodiscard]] Type check_cast(const CastExpr& cast);
     void check_function(const FunctionDeclarationStmt& function);

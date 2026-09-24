@@ -238,6 +238,14 @@ void SemanticAnalyzer::analyze_expression(const Expr& expression)
     case ExprKind::MemberAccess:
         analyze_expression(*static_cast<const MemberAccessExpr&>(expression).object);
         return;
+    case ExprKind::TypeAccess: {
+        const auto& access = static_cast<const TypeAccessExpr&>(expression);
+        if (!resolve(access.type_name)) {
+            throw_semantic_error(
+                current_location_, "unknown type '" + access.type_name + "'");
+        }
+        return;
+    }
     case ExprKind::Propagation:
         analyze_expression(*static_cast<const PropagationExpr&>(expression).expression);
         return;
