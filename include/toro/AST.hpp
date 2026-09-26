@@ -1,6 +1,7 @@
 #pragma once
 
 #include "toro/Token.hpp"
+#include "toro/Type.hpp"
 
 #include <cstddef>
 #include <memory>
@@ -55,6 +56,7 @@ struct Expr {
     virtual ~Expr() = default;
 
     ExprKind kind;
+    mutable std::optional<Type> resolved_type;
 };
 
 struct IntegerExpr final : Expr {
@@ -163,6 +165,7 @@ struct CallExpr final : Expr {
     std::unique_ptr<Expr> callee;
     std::vector<TypeReference> generic_arguments;
     std::vector<CallArgument> arguments;
+    mutable std::vector<std::pair<std::string, Type>> resolved_substitutions;
 };
 
 struct MemberAccessExpr final : Expr {

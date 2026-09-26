@@ -910,26 +910,30 @@ Type TypeChecker::check_expression(
     const Expr& expression,
     std::optional<Type> expected_type)
 {
+    const auto resolved = [&](Type type) {
+        expression.resolved_type = type;
+        return type;
+    };
     switch (expression.kind) {
     case ExprKind::Integer:
-        return int_type;
+        return resolved(int_type);
     case ExprKind::Decimal:
-        return dec_type;
+        return resolved(dec_type);
     case ExprKind::String:
-        return string_type;
+        return resolved(string_type);
     case ExprKind::Bool:
-        return bool_type;
+        return resolved(bool_type);
     case ExprKind::Null:
-        return null_type;
+        return resolved(null_type);
     case ExprKind::Identifier: {
         const auto& identifier = static_cast<const IdentifierExpr&>(expression);
         if (const auto type = find_value(identifier.name)) {
-            return *type;
+            return resolved(*type);
         }
         if (!find_functions(identifier.name).empty() || identifier.name == "print") {
-            return unknown_type;
+            return resolved(unknown_type);
         }
-        return unknown_type;
+        return resolved(unknown_type);
     }
     case ExprKind::Unary: {
         const auto& unary = static_cast<const UnaryExpr&>(expression);
@@ -952,28 +956,29 @@ Type TypeChecker::check_expression(
                 "unary '-' requires a numeric operand, got '"
                     + std::string(type_name(operand)) + "'");
         }
-        return operand;
+        return resolved(operand);
     }
     case ExprKind::Binary:
-        return check_binary(static_cast<const BinaryExpr&>(expression));
+        return resolved(check_binary(static_cast<const BinaryExpr&>(expression)));
     case ExprKind::Call:
-        return check_call(static_cast<const CallExpr&>(expression), expected_type);
+        return resolved(check_call(
+            static_cast<const CallExpr&>(expression), expected_type));
     case ExprKind::MemberAccess: {
         const auto& member = static_cast<const MemberAccessExpr&>(expression);
-        return check_member_access(member);
+        return resolved(check_member_access(member));
     }
     case ExprKind::TypeAccess:
-        return check_type_access(static_cast<const TypeAccessExpr&>(expression));
+        return resolved(check_type_access(static_cast<const TypeAccessExpr&>(expression)));
     case ExprKind::Propagation:
-        return check_propagation(static_cast<const PropagationExpr&>(expression));
+        return resolved(check_propagation(static_cast<const PropagationExpr&>(expression)));
     case ExprKind::Cast:
-        return check_cast(static_cast<const CastExpr&>(expression));
+        return resolved(check_cast(static_cast<const CastExpr&>(expression)));
     case ExprKind::Grouping:
-        return check_expression(
+        return resolved(check_expression(
             *static_cast<const GroupingExpr&>(expression).expression,
-            std::move(expected_type));
+            std::move(expected_type)));
     }
-    return unknown_type;
+    return resolved(unknown_type);
 }
 
 Type TypeChecker::check_call(
@@ -1016,10 +1021,12 @@ Type TypeChecker::check_call(
         auto candidates = find_functions(callee.name);
         const bool has_function_candidates = !candidates.empty();
         if (has_function_candidates) {
-            return resolve_overload(
+            const auto resolution = resolve_overload(
                 "function", callee.name, call.arguments, arguments,
-                call.generic_arguments, candidates)
-                .return_type;
+                call.generic_arguments, candidates);
+            call.resolved_substitutions.assign(
+                resolution.substitutions.begin(), resolution.substitutions.end());
+            return resolution.return_type;
         }
 
         if (const auto* type_info = find_nominal_type(callee.name)) {
@@ -1169,18 +1176,32 @@ Type TypeChecker::check_construction(
     if (type_info.kind == NominalKind::Class) {
         if (const auto initializer = type_info.methods.find("init");
             initializer != type_info.methods.end()) {
+            std::vector<FunctionSignature> instantiated_signatures;
+            instantiated_signatures.reserve(initializer->second.size());
             std::vector<const FunctionSignature*> candidates;
             candidates.reserve(initializer->second.size());
             for (const auto& method : initializer->second) {
-                candidates.push_back(&method.signature);
+                instantiated_signatures.push_back(method.signature);
+                instantiated_signatures.back().generic_parameters =
+                    type_info.generic_parameters;
+                candidates.push_back(&instantiated_signatures.back());
             }
-            static_cast<void>(resolve_overload(
+            const auto resolution = resolve_overload(
                 "initializer", name + ".init", call.arguments, arguments,
-                {}, candidates));
+                call.generic_arguments, candidates);
+            call.resolved_substitutions.assign(
+                resolution.substitutions.begin(), resolution.substitutions.end());
             std::vector<Type> type_arguments;
-            type_arguments.reserve(call.generic_arguments.size());
-            for (const auto& argument : call.generic_arguments) {
-                type_arguments.push_back(resolve_type(argument));
+            type_arguments.reserve(type_info.generic_parameters.size());
+            for (const auto& parameter : type_info.generic_parameters) {
+                const auto argument = resolution.substitutions.find(parameter.name);
+                if (argument == resolution.substitutions.end()) {
+                    throw_type_error(
+                        current_location_,
+                        "cannot infer generic argument '" + parameter.name
+                            + "' for construction of '" + name + "'");
+                }
+                type_arguments.push_back(argument->second);
             }
             if (type_arguments.size() != type_info.generic_parameters.size()) {
                 throw_type_error(
@@ -1311,6 +1332,8 @@ Type TypeChecker::check_construction(
     for (const auto& parameter : type_info.generic_parameters) {
         type_arguments.push_back(substitutions.at(parameter.name));
     }
+    call.resolved_substitutions.assign(
+        substitutions.begin(), substitutions.end());
     return Type{
         TypeKind::Unknown, false, false, name, std::move(type_arguments)};
 }
@@ -1408,6 +1431,8 @@ Type TypeChecker::check_method_call(
     const auto resolution = resolve_overload(
         "method", object.name + "." + callee.member,
         call.arguments, arguments, call.generic_arguments, candidates);
+    call.resolved_substitutions.assign(
+        resolution.substitutions.begin(), resolution.substitutions.end());
     const auto selected = std::find_if(
         candidates.begin(), candidates.end(), [&](const FunctionSignature* signature) {
             return signature == resolution.signature;
@@ -1435,10 +1460,11 @@ TypeChecker::OverloadResolution TypeChecker::resolve_overload(
     std::string specific_failure;
     for (const auto* candidate : candidates) {
         Type return_type = candidate->return_type;
+        std::unordered_map<std::string, Type> substitutions;
         std::string failure_reason;
         const auto score = overload_score(
             call_arguments, arguments, generic_arguments, *candidate,
-            return_type, failure_reason);
+            return_type, substitutions, failure_reason);
         if (!score) {
             if (specific_failure.empty() && !failure_reason.empty()) {
                 specific_failure = std::move(failure_reason);
@@ -1447,9 +1473,11 @@ TypeChecker::OverloadResolution TypeChecker::resolve_overload(
         }
         if (best.empty() || *score < best_score) {
             best_score = *score;
-            best = {OverloadResolution{candidate, return_type}};
+            best = {OverloadResolution{
+                candidate, return_type, std::move(substitutions)}};
         } else if (*score == best_score) {
-            best.push_back(OverloadResolution{candidate, return_type});
+            best.push_back(OverloadResolution{
+                candidate, return_type, std::move(substitutions)});
         }
     }
     if (best.empty()) {
@@ -1521,6 +1549,7 @@ std::optional<int> TypeChecker::overload_score(
     const std::vector<TypeReference>& generic_arguments,
     const FunctionSignature& signature,
     Type& return_type,
+    std::unordered_map<std::string, Type>& resolved_substitutions,
     std::string& failure_reason) const
 {
     if (arguments.size() != signature.parameters.size()) {
@@ -1623,6 +1652,7 @@ std::optional<int> TypeChecker::overload_score(
     return_type = signature.return_type_reference
         ? substitute_type(*signature.return_type_reference, substitutions)
         : void_type;
+    resolved_substitutions = std::move(substitutions);
     return score;
 }
 

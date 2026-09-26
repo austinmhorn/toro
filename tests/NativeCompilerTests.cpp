@@ -629,19 +629,91 @@ void test_compile_failure_reporting()
     throw std::runtime_error("expected native C compilation failure");
 }
 
-void test_unsupported_backend_feature()
+void test_generic_runtime_behavior()
 {
-    try {
-        static_cast<void>(generate(
-            "function identity<T>(value: T) -> T { return value }\n"));
-    } catch (const std::runtime_error& error) {
-        expect(
-            std::string_view(error.what()).find("backend error")
-                != std::string_view::npos,
-            "unsupported feature did not produce a backend diagnostic");
-        return;
-    }
-    throw std::runtime_error("expected unsupported backend feature failure");
+    const auto c_source = generate(
+        "function identity<T>(value: T) -> T { return value }\n"
+        "struct Box<T> {\n"
+        "    value: T\n"
+        "    function echo<U>(value: U) -> U { return value }\n"
+        "}\n"
+        "class Resource {\n"
+        "    public name: string\n"
+        "    destroy() { print(\"resource destroyed\") }\n"
+        "}\n"
+        "class Holder<T> {\n"
+        "    public value: T\n"
+        "    init(value: T) { self.value = value }\n"
+        "    public function echo<U>(value: U) -> U { return value }\n"
+        "}\n"
+        "function pass<T>(value: T) -> T { return value }\n"
+        "function wrap<T>(value: T) -> Result<T, string> { return ok(value) }\n"
+        "function main() {\n"
+        "    number := identity(10)\n"
+        "    text := identity<string>(\"Toro\")\n"
+        "    boxed := Box(value: 42)\n"
+        "    zero := Box<int>()\n"
+        "    words := Box<string>(value: \"hello\")\n"
+        "    nested := Box<Box<int>>(value: pass(boxed))\n"
+        "    holder := Holder(number)\n"
+        "    resource := Resource(name: \"owned\")\n"
+        "    kept := pass(resource)\n"
+        "    resource_holder := Holder<Resource>(kept)\n"
+        "    nullable_holder := Holder<Resource?>(null)\n"
+        "    result := wrap<string>(\"result\")\n"
+        "    print(number)\n"
+        "    print(zero.value)\n"
+        "    print(text)\n"
+        "    print(boxed.echo<string>(words.value))\n"
+        "    print(nested.value.value)\n"
+        "    print(holder.value)\n"
+        "    print(holder.echo<string>(\"class method\"))\n"
+        "    print(resource_holder.value.name)\n"
+        "    print(nullable_holder.value == null)\n"
+        "    handle result {\n"
+        "        ok(value) { print(value) }\n"
+        "        error(problem) { print(problem) }\n"
+        "    }\n"
+        "}\n");
+    const auto [status, output] = capture_run(toro::NativeCompiler(), c_source);
+    expect(status == 0, "generated generic program did not exit successfully");
+    expect(
+        output == "10\n0\nToro\nhello\n42\n10\nclass method\nowned\ntrue\nresult\nresource destroyed\n",
+        "generated generic program produced unexpected output");
+}
+
+void test_generic_inheritance_interface_runtime_behavior()
+{
+    const auto c_source = generate(
+        "interface Named { function label() -> string }\n"
+        "struct Tag<T> implements Named {\n"
+        "    value: T\n"
+        "    text: string\n"
+        "    function label() -> string { return self.text }\n"
+        "}\n"
+        "class Base<T> implements Named {\n"
+        "    public value: T\n"
+        "    public virtual function label() -> string { return \"base\" }\n"
+        "}\n"
+        "class Child<T> : Base<T> {\n"
+        "    public override function label() -> string { return \"child\" }\n"
+        "    destroy() { print(\"child destroyed\") }\n"
+        "}\n"
+        "function return_base(value: Base<int>) -> Base<int> { return value }\n"
+        "function show(value: Named) { print(value.label()) }\n"
+        "function main() {\n"
+        "    child := Child<int>(value: 10)\n"
+        "    base := return_base(child)\n"
+        "    print(base.label())\n"
+        "    show(child)\n"
+        "    show(Tag<int>(value: 5, text: \"tag\"))\n"
+        "    print(child.value)\n"
+        "}\n");
+    const auto [status, output] = capture_run(toro::NativeCompiler(), c_source);
+    expect(status == 0, "generic inheritance program did not exit successfully");
+    expect(
+        output == "child\nchild\ntag\n10\nchild destroyed\n",
+        "generic inheritance/interface program produced unexpected output");
 }
 
 void test_temporary_cleanup()
@@ -673,7 +745,8 @@ int main()
         test_virtual_dispatch_runtime_behavior();
         test_interface_runtime_behavior();
         test_compile_failure_reporting();
-        test_unsupported_backend_feature();
+        test_generic_runtime_behavior();
+        test_generic_inheritance_interface_runtime_behavior();
         test_temporary_cleanup();
     } catch (const std::exception& error) {
         std::cerr << "native compiler test failure: " << error.what() << '\n';

@@ -25,10 +25,10 @@ bindings, variant identity, duplicate cases, and exhaustive coverage.
 Enum variants use type-scoped access such as `Message::text("hello")` and
 `Message::quit`; `.` remains exclusively instance/member access.
 A native backend emits portable C11 for the currently supported primitive
-procedural subset, non-generic value structs, and enums with exhaustive
+procedural subset, concrete value structs, and enums with exhaustive
 `handle` statements. Concrete `Result<T, E>` values, exhaustive Result handling,
 and postfix `?` propagation are also lowered when both payload types are
-backend-supported. Non-generic classes lower to heap objects with identity and
+backend-supported. Concrete classes lower to heap objects with identity and
 generated strong-reference ARC operations. Class construction executes a single
 `init` lifecycle declaration after allocating the object and establishing all
 field defaults.
@@ -36,6 +36,10 @@ Single class inheritance uses one shared object identity and ARC lifetime.
 Virtual methods dispatch through deterministic per-concrete-class vtables,
 including calls through base references, parameters, returned references, and
 `self`.
+Concrete generic functions, structs, classes, and methods are monomorphized
+with deterministic generated names. Their substituted fields, calls, returns,
+ARC, inheritance, virtual dispatch, and interface conversions reuse the same
+lowering as ordinary concrete declarations.
 
 ## Build
 
@@ -118,6 +122,15 @@ Parse generic declarations, constraints, types, and calls:
 ./build/toro ast examples/generics.toro
 ```
 
+Run the focused generic-runtime example:
+
+```bash
+./build/toro run examples/generics.toro
+./build/toro run examples/generic_runtime_probe.toro
+./build/toro run examples/generic_interface_probe.toro
+./build/toro run examples/generic_inheritance_probe.toro
+```
+
 Run the full semantic-analysis and type-checking pipeline on a source file:
 
 ```bash
@@ -194,17 +207,18 @@ statements satisfy this requirement; loops are not assumed to execute.
 
 The initial C backend lowers primitive variables, expressions, functions,
 returns, calls, `if`/`else`, `while`, primitive `print(...)` calls, and
-non-generic structs. Struct construction emits every field explicitly, applying
+concrete structs. Struct construction emits every field explicitly, applying
 source defaults or Toro primitive zero values. Field access, chained access,
 assignment, value copies, and struct methods use native C value semantics;
 methods lower to prefixed functions with an internal receiver pointer. It uses
 deterministically prefixed C identifiers and emits a C entry-point wrapper for a
 Toro `main`. Enums lower to deterministic tagged unions; construction selects a
 tag and payload, while exhaustive `handle` statements lower to `switch` blocks
-with case-scoped payload bindings. Generic structs, conversion
-overloads, unsupported nullable value fields, Results containing unsupported runtime payloads, and
+with case-scoped payload bindings. Concrete generic functions and types are
+monomorphized on demand. Conversion overloads, unsupported nullable value
+fields, Results containing unsupported runtime payloads, and
 other runtime types outside this subset fail with a backend diagnostic instead
-of producing partial or incorrect C. Non-generic classes use heap-backed pointer
+of producing partial or incorrect C. Classes use heap-backed pointer
 identity. Construction begins with one strong reference; local copies and class
 parameters retain, replacement and lexical-scope exit release, and the final
 release frees the object. Primitive and supported value fields, field access and
@@ -243,7 +257,7 @@ struct-backed values keep an inline copy and preserve value semantics. Native
 interface conversion, calls, parameters, returns, reassignment, multiple
 interfaces, inherited implementations, and virtual overrides are supported.
 Initializer overloading, base-initializer chaining, generic interfaces and
-interface methods, interface-valued fields, generic classes, class-valued
+interface methods, interface-valued fields, class-reference struct fields, class-valued
 enum/Result payloads, and field access through a
 temporary class reference remain explicit backend errors.
 

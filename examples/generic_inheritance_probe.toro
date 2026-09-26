@@ -1,0 +1,42 @@
+interface Named {
+    function label() -> string
+}
+
+class Base<T> implements Named {
+    public value: T
+
+    public virtual function label() -> string {
+        return "base"
+    }
+
+    public function echo<U>(value: U) -> U {
+        return value
+    }
+}
+
+class Child<T> : Base<T> {
+    public override function label() -> string {
+        return "child"
+    }
+
+    destroy() {
+        print("child destroyed")
+    }
+}
+
+function return_base(value: Base<int>) -> Base<int> {
+    return value
+}
+
+function show(value: Named) {
+    print(value.label())
+}
+
+function main() {
+    child := Child<int>(value: 10)
+    base := return_base(child)
+    print(base.label())
+    show(child)
+    print(child.echo<string>("inherited generic method"))
+    print(child.value)
+}

@@ -1071,6 +1071,13 @@ void test_generic_type_construction()
         "class Box<T> { public value: T }\n"
         "box: Box<int> = Box<int>(value: 10)\n"
         "zeroed: Box<int> = Box<int>()\n");
+    expect_valid(
+        "class Holder<T> {\n"
+        "    public value: T\n"
+        "    init(value: T) { self.value = value }\n"
+        "}\n"
+        "explicit: Holder<int> = Holder<int>(10)\n"
+        "inferred: Holder<string> = Holder(\"Toro\")\n");
     expect_error(
         "struct Pair<A, B> {\n"
         "    first: A\n"

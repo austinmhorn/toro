@@ -34,6 +34,7 @@ private:
     struct OverloadResolution {
         const FunctionSignature* signature;
         Type return_type;
+        std::unordered_map<std::string, Type> substitutions;
     };
 
     struct FieldInfo {
@@ -128,6 +129,7 @@ private:
         const std::vector<TypeReference>& generic_arguments,
         const FunctionSignature& signature,
         Type& return_type,
+        std::unordered_map<std::string, Type>& substitutions,
         std::string& failure_reason) const;
     [[nodiscard]] Type check_member_access(const MemberAccessExpr& member);
     [[nodiscard]] Type check_type_access(const TypeAccessExpr& access) const;

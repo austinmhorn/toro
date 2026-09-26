@@ -1,7 +1,8 @@
 # Toro Roadmap
 
 This roadmap reflects the current language direction after completion of the
-core semantic system and native runtime work through runtime interfaces.
+core semantic system and native runtime work through deterministic generic
+monomorphization.
 
 Toro's long-term thesis is:
 
@@ -63,7 +64,7 @@ Goals:
 - clear representation and dispatch strategy;
 - preserve existing ARC/inheritance behavior.
 
-## 6.12 Generic runtime lowering
+## 6.12 Generic runtime lowering — completed
 
 Lower concrete generic instantiations.
 
@@ -76,6 +77,11 @@ Goals:
 - generic constraints honored by the backend;
 - deterministic generated names;
 - no runtime type-erasure unless deliberately introduced later.
+
+The backend now specializes reachable concrete generic functions, structs,
+classes, and methods. Substitution flows through nested types, members, calls,
+and returns, while generic classes reuse the existing ARC, inheritance, virtual,
+interface, and lifecycle machinery.
 
 ## 6.13 Remaining overload/conversion runtime support
 

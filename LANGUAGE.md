@@ -277,7 +277,8 @@ type `int`, and `Store<User>.get_values()` may have type `List<User>`.
 Constructor inference rejects conflicting or insufficient bindings, and generic
 type constraints are checked after inference. Function inference uses the same
 recursive matching for shapes such as `List<T>`, `Map<string, T>`, and
-`Pair<A, List<B>>`. Monomorphization and runtime specialization remain deferred.
+`Pair<A, List<B>>`. The native backend monomorphizes each reachable concrete
+generic function, struct, class, and method instantiation.
 
 ### Name resolution
 
@@ -313,7 +314,8 @@ their target type. Functions without a return type have no completeness
 requirement.
 
 Concrete generic struct and class instances substitute their type arguments
-through fields and methods. Runtime specialization remains deferred. Concrete
+through fields and methods. Runtime specialization uses deterministic
+monomorphization. Concrete
 struct and class fields and methods are type checked, including inherited
 members and interface method signatures.
 
@@ -323,8 +325,8 @@ The initial backend emits C only after parsing, semantic analysis, and type
 checking succeed. Its current subset includes primitive variables and
 reassignment, arithmetic, comparisons, equality, logical expressions, unary
 minus, functions, parameters, returns, calls, `if`/`else`, `while`, and
-primitive `print(...)` calls. Non-generic structs may contain supported
-primitive or non-generic struct fields and method signatures. Construction,
+primitive `print(...)` calls. Concrete structs may contain supported
+primitive or concrete struct fields and method signatures. Construction,
 field access and assignment, nested field access, struct value copies, and
 method calls are lowered to C. Methods receive an internal pointer to their
 struct value so mutations through `self` update the source receiver. Enums lower
@@ -340,7 +342,7 @@ exhaustive `handle` statements use normal C value semantics. Postfix `?` stores
 its operand in a temporary, checks the tag once, extracts the success payload,
 or returns a freshly tagged error Result from the enclosing function.
 
-Non-generic classes lower to heap-allocated C objects containing a strong
+Concrete classes lower to heap-allocated C objects containing a strong
 reference count, weak-control pointer, most-derived finalizer, and their instance
 fields. Class variables store pointers, so
 copying a class value preserves object identity rather than copying fields.
@@ -397,6 +399,15 @@ including inherited implementations and most-derived overrides; struct thunks
 call the concrete value receiver directly. Interface parameters, returns,
 variables, reassignment, and multiple interfaces are supported.
 
+Reachable concrete generic instantiations are monomorphized at compile time.
+The backend substitutes generic parameters through function and method
+signatures and bodies, struct/class fields, nested generic types, construction,
+and returns. Every specialization receives a deterministic C name derived from
+the declaration name and recursively mangled concrete type arguments. Generic
+structs retain value semantics; generic classes retain the same ARC, weak,
+lifecycle, inheritance, virtual-dispatch, and interface behavior as ordinary
+concrete classes. No runtime type erasure or RTTI is introduced.
+
 Primitive types map directly to C:
 
 ```text
@@ -412,14 +423,14 @@ field: explicit source defaults take priority, while omitted `int`, `dec`,
 `bool`, and `string` fields use `0`, `0.0`, `false`, and `""`. Omitted nested
 struct values remain unsupported unless explicitly supplied.
 
-Generic classes and structs, method overloads, conversions, generic interfaces
-and interface methods, interface-valued fields, nullable non-class fields,
+Method overloads, conversions, generic interfaces and interface methods,
+interface-valued fields, class-reference struct fields, nullable non-class fields,
 collections, thread-safe ARC, and
 cyclic-reference collection are not lowered yet. Enum and
-Result payloads may use primitives, supported non-generic structs, supported
+Result payloads may use primitives, supported concrete structs, supported
 enums, or supported nested Results; other payload types produce a backend
 diagnostic. Class-valued enum/Result payloads remain unsupported so ownership is
-never guessed. Non-generic class `init` declarations execute after field storage is
+never guessed. Class `init` declarations execute after field storage is
 initialized. Method receivers and argument forms that cannot yet be owned safely
 are materialized and released around the call; temporary class field access
 remains rejected rather than lowered to invalid C.
@@ -448,8 +459,9 @@ derived overload set, while an identical derived signature remains subject to
 
 Generic candidates infer and substitute their type parameters, but remain ranked
 beneath exact concrete and compatible subtype/interface overloads. Multiple
-equally ranked generic candidates are ambiguous. Generic specialization is not
-implemented. The built-in `print(...)` behavior is unchanged.
+equally ranked generic candidates are ambiguous. Reachable concrete generic
+calls are specialized by the native backend after overload resolution. The
+built-in `print(...)` behavior is unchanged.
 
 ### Construction and members
 
@@ -477,8 +489,8 @@ direction is rejected.
 Class `init` declarations provide constructor-specific parameters and must
 definitely initialize required fields. Native single-inheritance construction
 supports inherited fields when no base initializer call is required. Base
-initializer chaining, monomorphization, and generic runtime construction are not
-implemented yet.
+initializer chaining remains unimplemented. Concrete generic construction uses
+the same field- or `init`-based runtime rules after substitution.
 
 ### Nullable types
 

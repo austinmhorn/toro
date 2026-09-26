@@ -120,7 +120,7 @@ The backend lowers supported expressions, variables, functions, calls, control f
 
 ### Structs
 
-Non-generic structs lower to C structs with value semantics.
+Concrete structs lower to C structs with value semantics.
 
 Supported behavior includes:
 
@@ -235,13 +235,27 @@ overrides remain effective. Struct thunks call the concrete receiver directly.
 Interface parameters, returns, locals, reassignment, inherited implementations,
 and multiple interfaces use the same representation.
 
+### Generic monomorphization
+
+The backend discovers reachable concrete generic calls and type instances from
+type-checker annotations, then monomorphizes them before emitting C. Function,
+struct, class, and method specializations retain their source declaration plus a
+concrete substitution map. Deterministic keys recursively mangle every concrete
+type argument and feed the existing C naming helpers.
+
+After substitution, specializations reuse ordinary lowering rather than a
+parallel runtime representation. Generic structs therefore remain values, and
+generic classes use the existing ARC/weak/lifecycle, inheritance, vtable, and
+interface paths. This is compile-time specialization only: the runtime gains no
+type descriptors, erasure layer, reflection, or RTTI.
+
 ## Current known runtime boundaries
 
-After the runtime-interface milestone, important unsupported or deferred runtime features include:
+After the generic-runtime milestone, important unsupported or deferred runtime features include:
 
-- generic function, struct, and class runtime lowering/monomorphization;
 - generic interfaces and generic interface methods;
 - interface-valued fields;
+- class-reference struct fields;
 - function/method overload lowering where the backend does not yet support it;
 - user-defined conversion overload lowering;
 - RTTI/dynamic casts;

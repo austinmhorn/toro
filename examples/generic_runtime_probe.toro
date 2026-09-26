@@ -1,0 +1,53 @@
+function identity<T>(value: T) -> T {
+    return value
+}
+
+struct Box<T> {
+    value: T
+
+    function echo<U>(value: U) -> U {
+        return value
+    }
+}
+
+class Holder<T> {
+    public value: T
+
+    init(value: T) {
+        self.value = value
+    }
+
+    public function echo<U>(value: U) -> U {
+        return value
+    }
+}
+
+class Resource {
+    public name: string
+
+    destroy() {
+        print("resource destroyed")
+    }
+}
+
+function pass<T>(value: T) -> T {
+    return value
+}
+
+function main() {
+    number := identity(10)
+    text := identity<string>("Toro")
+    boxed := Box(value: 42)
+    words := Box<string>(value: "hello")
+    nested := Box<Box<int>>(value: pass(boxed))
+    holder := Holder(number)
+    resource := Resource(name: "owned")
+    resource_holder := Holder<Resource>(pass(resource))
+
+    print(number)
+    print(text)
+    print(boxed.echo<string>(words.value))
+    print(nested.value.value)
+    print(holder.echo<int>(holder.value))
+    print(resource_holder.value.name)
+}

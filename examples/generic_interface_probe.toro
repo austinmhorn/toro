@@ -1,0 +1,36 @@
+interface Named {
+    function name() -> string
+}
+
+struct Label<T> implements Named {
+    value: T
+    text: string
+
+    function name() -> string {
+        return self.text
+    }
+}
+
+class NamedHolder<T> implements Named {
+    public label: string
+    public value: T
+
+    init(label: string, value: T) {
+        self.label = label
+        self.value = value
+    }
+
+    public function name() -> string {
+        return self.label
+    }
+}
+
+function show(value: Named) {
+    print(value.name())
+}
+
+function main() {
+    show(Label<int>(value: 5, text: "label"))
+    holder := NamedHolder("holder", 10)
+    show(holder)
+}

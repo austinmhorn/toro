@@ -734,15 +734,9 @@ void test_interface_lowering()
 void test_unsupported_features()
 {
     expect_backend_error(
-        "function identity<T>(value: T) -> T { return value }\n",
-        "generic functions are not supported by the C backend");
-    expect_backend_error(
         "function convert(value: int) -> int { return value }\n"
         "function convert(value: string) -> string { return value }\n",
         "function overloads are not supported by the C backend");
-    expect_backend_error(
-        "struct Box<T> { value: T }\n",
-        "generic structs are not supported by the C backend");
     expect_backend_error(
         "struct MaybeOwner { owner: string? }\n",
         "nullable type 'string?' is not supported by the C backend");
@@ -774,9 +768,6 @@ void test_unsupported_features()
         "}\n",
         "destroy() cannot be invoked directly");
     expect_backend_error(
-        "class Box<T> { public value: T }\n",
-        "generic classes are not supported by the C backend");
-    expect_backend_error(
         "interface Box<T> { function value() -> T }\n",
         "generic interfaces are not supported by the C backend");
     expect_backend_error(
@@ -800,6 +791,53 @@ void test_unsupported_features()
     expect_backend_error(
         "function consume(result: Result<int?, string>) {}\n",
         "nullable type 'int?' is not supported by the C backend");
+}
+
+void test_generic_monomorphization()
+{
+    const auto output = generate(
+        "function identity<T>(value: T) -> T { return value }\n"
+        "struct Box<T> {\n"
+        "    value: T\n"
+        "    function echo<U>(value: U) -> U { return value }\n"
+        "}\n"
+        "class Holder<T> {\n"
+        "    public value: T\n"
+        "    init(value: T) { self.value = value }\n"
+        "    public function echo<U>(value: U) -> U { return value }\n"
+        "}\n"
+        "function pass_box(value: Box<int>) -> Box<int> { return value }\n"
+        "function main() {\n"
+        "    number := identity(10)\n"
+        "    text := identity<string>(\"Toro\")\n"
+        "    boxed := Box(value: 42)\n"
+        "    words := Box<string>(value: \"hello\")\n"
+        "    nested := Box<Box<int>>(value: pass_box(boxed))\n"
+        "    holder := Holder(number)\n"
+        "    print(boxed.echo<string>(text))\n"
+        "    print(holder.echo<string>(text))\n"
+        "    print(words.value)\n"
+        "    print(nested.value.value)\n"
+        "    print(holder.value)\n"
+        "}\n");
+
+    expect_contains(output, "toro_fn_identity__1_i", "int function specialization");
+    expect_contains(output, "toro_fn_identity__1_s", "string function specialization");
+    expect_contains(output, "toro_struct_Box__1_i", "int struct specialization");
+    expect_contains(output, "toro_struct_Box__1_s", "string struct specialization");
+    expect_contains(
+        output,
+        "toro_struct_Box__11_s8_Box__1_i",
+        "nested struct specialization");
+    expect_contains(output, "toro_class_11_Holder__1_i", "class specialization");
+    expect_contains(
+        output,
+        "toro_method_8_Box__1_i_echo__1_s",
+        "generic method specialization");
+    expect_contains(
+        output,
+        "toro_method_11_Holder__1_i_echo__1_s",
+        "generic class method specialization");
 }
 
 void test_generated_c_compiles()
@@ -858,6 +896,7 @@ int main()
         test_virtual_dispatch_lowering();
         test_class_initializer_lowering();
         test_interface_lowering();
+        test_generic_monomorphization();
         test_unsupported_features();
         test_generated_c_compiles();
     } catch (const std::exception& error) {

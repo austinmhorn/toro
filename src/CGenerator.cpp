@@ -6,6 +6,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -61,6 +62,8 @@ struct ValueInfo {
 
 struct FunctionInfo {
     const FunctionDeclarationStmt* declaration;
+    std::string key;
+    std::unordered_map<std::string, CValueType> substitutions;
     CValueType return_type;
     std::vector<CValueType> parameter_types;
 };
@@ -72,15 +75,20 @@ struct StructFieldInfo {
 
 struct MethodInfo {
     const MethodDeclaration* declaration;
+    std::string key;
+    std::unordered_map<std::string, CValueType> substitutions;
     CValueType return_type;
     std::vector<CValueType> parameter_types;
 };
 
 struct StructInfo {
     const StructDeclarationStmt* declaration;
+    std::string key;
+    std::unordered_map<std::string, CValueType> substitutions;
     std::vector<StructFieldInfo> fields;
     std::unordered_map<std::string, std::size_t> field_indices;
     std::unordered_map<std::string, MethodInfo> methods;
+    std::vector<std::string> method_order;
 };
 
 struct ClassFieldInfo {
@@ -90,10 +98,13 @@ struct ClassFieldInfo {
 
 struct ClassInfo {
     const ClassDeclarationStmt* declaration;
+    std::string key;
+    std::unordered_map<std::string, CValueType> substitutions;
     std::optional<std::string> base_name;
     std::vector<ClassFieldInfo> fields;
     std::unordered_map<std::string, std::size_t> field_indices;
     std::unordered_map<std::string, MethodInfo> methods;
+    std::vector<std::string> method_order;
 };
 
 struct InterfaceMethodInfo {
@@ -331,31 +342,52 @@ std::string enum_payload_name(std::string_view variant)
 
 std::string type_mangle(const CValueType& type)
 {
+    std::string result;
     switch (type.kind) {
-    case CValueKind::Int: return "i";
-    case CValueKind::Dec: return "d";
-    case CValueKind::Bool: return "b";
-    case CValueKind::String: return "s";
+    case CValueKind::Int: result = "i"; break;
+    case CValueKind::Dec: result = "d"; break;
+    case CValueKind::Bool: result = "b"; break;
+    case CValueKind::String: result = "s"; break;
     case CValueKind::Struct:
-        return "s" + std::to_string(type.nominal_name.size()) + "_"
+        result = "s" + std::to_string(type.nominal_name.size()) + "_"
             + type.nominal_name;
+        break;
     case CValueKind::Class:
-        return "c" + std::to_string(type.nominal_name.size()) + "_"
+        result = "c" + std::to_string(type.nominal_name.size()) + "_"
             + type.nominal_name;
+        break;
     case CValueKind::Interface:
-        return "i" + std::to_string(type.nominal_name.size()) + "_"
+        result = "i" + std::to_string(type.nominal_name.size()) + "_"
             + type.nominal_name;
+        break;
     case CValueKind::Enum:
-        return "e" + std::to_string(type.nominal_name.size()) + "_"
+        result = "e" + std::to_string(type.nominal_name.size()) + "_"
             + type.nominal_name;
+        break;
     case CValueKind::Result:
-        return "r" + std::to_string(type_mangle(type.arguments[0]).size()) + "_"
+        result = "r" + std::to_string(type_mangle(type.arguments[0]).size()) + "_"
             + type_mangle(type.arguments[0]) + "_"
             + std::to_string(type_mangle(type.arguments[1]).size()) + "_"
             + type_mangle(type.arguments[1]);
-    case CValueKind::Void: return "v";
+        break;
+    case CValueKind::Void: result = "v"; break;
     }
-    return "unknown";
+    if (type.nullable) {
+        result += "n";
+    }
+    return result;
+}
+
+std::string specialization_key(
+    std::string_view name,
+    const std::vector<CValueType>& arguments)
+{
+    std::string key{name};
+    for (const auto& argument : arguments) {
+        const std::string mangled = type_mangle(argument);
+        key += "__" + std::to_string(mangled.size()) + "_" + mangled;
+    }
+    return key;
 }
 
 std::string result_name(const CValueType& type)
@@ -470,13 +502,13 @@ public:
                 "}\n\n";
         }
 
-        for (const auto& struct_declaration : struct_order_) {
-            output += "typedef struct " + struct_name(struct_declaration->name)
-                + " " + struct_name(struct_declaration->name) + ";\n";
+        for (const auto& key : struct_order_) {
+            output += "typedef struct " + struct_name(key)
+                + " " + struct_name(key) + ";\n";
         }
-        for (const auto& class_declaration : class_order_) {
-            output += "typedef struct " + class_name(class_declaration->name)
-                + " " + class_name(class_declaration->name) + ";\n";
+        for (const auto& key : class_order_) {
+            output += "typedef struct " + class_name(key)
+                + " " + class_name(key) + ";\n";
         }
         for (const auto& interface_declaration : interface_order_) {
             output += "typedef struct " + interface_name(interface_declaration->name)
@@ -485,13 +517,13 @@ public:
                 + interface_vtable_name(interface_declaration->name) + " "
                 + interface_vtable_name(interface_declaration->name) + ";\n";
         }
-        for (const auto* declaration : class_order_) {
-            if (classes_.at(declaration->name).base_name
-                || virtual_slots(declaration->name).empty()) {
+        for (const auto& key : class_order_) {
+            if (classes_.at(key).base_name
+                || virtual_slots(key).empty()) {
                 continue;
             }
-            output += "typedef struct " + vtable_name(declaration->name)
-                + " " + vtable_name(declaration->name) + ";\n";
+            output += "typedef struct " + vtable_name(key)
+                + " " + vtable_name(key) + ";\n";
         }
         for (const auto& enum_declaration : enum_order_) {
             output += "typedef struct " + enum_name(enum_declaration->name)
@@ -506,16 +538,17 @@ public:
             || !result_order_.empty()) {
             output += '\n';
         }
-        for (const auto* declaration : class_order_) {
-            output += "static void " + finalize_name(declaration->name)
+        for (const auto& key : class_order_) {
+            const auto& info = classes_.at(key);
+            output += "static void " + finalize_name(key)
                 + "(void* toro_raw_value);\n";
-            output += "static void " + retain_name(declaration->name) + "("
-                + class_name(declaration->name) + "* toro_value);\n";
-            output += "static void " + release_name(declaration->name) + "("
-                + class_name(declaration->name) + "* toro_value);\n";
-            if (classes_.at(declaration->name).methods.contains("destroy")) {
-                output += "static void " + method_name(declaration->name, "destroy")
-                    + "(" + class_name(declaration->name)
+            output += "static void " + retain_name(key) + "("
+                + class_name(key) + "* toro_value);\n";
+            output += "static void " + release_name(key) + "("
+                + class_name(key) + "* toro_value);\n";
+            if (info.methods.contains("destroy")) {
+                output += "static void " + method_name(key, "destroy")
+                    + "(" + class_name(key)
                     + "* toro_self);\n";
             }
         }
@@ -534,86 +567,85 @@ public:
             output += emit_interface_definition(*declaration);
         }
 
-        for (const auto* declaration : class_order_) {
-            if (classes_.at(declaration->name).base_name) {
+        for (const auto& key : class_order_) {
+            if (classes_.at(key).base_name) {
                 continue;
             }
-            output += emit_vtable_definition(declaration->name);
+            output += emit_vtable_definition(key);
         }
 
         for (const auto& statement : program.statements) {
-            if (statement->kind == StmtKind::StructDeclaration
-                || statement->kind == StmtKind::ClassDeclaration
-                || statement->kind == StmtKind::EnumDeclaration
-                || statement->kind == StmtKind::InterfaceDeclaration) {
-                continue;
-            }
-            if (statement->kind != StmtKind::FunctionDeclaration) {
+            if (statement->kind != StmtKind::FunctionDeclaration
+                && statement->kind != StmtKind::StructDeclaration
+                && statement->kind != StmtKind::ClassDeclaration
+                && statement->kind != StmtKind::EnumDeclaration
+                && statement->kind != StmtKind::InterfaceDeclaration) {
                 throw_backend_error(
                     statement->location,
                     "top-level statements are not supported by the C backend");
             }
-            output += function_declaration(
-                static_cast<const FunctionDeclarationStmt&>(*statement));
+        }
+        for (const auto& key : function_order_) {
+            output += function_declaration(key);
             output += ";\n";
         }
-        for (const auto* declaration : struct_order_) {
-            const auto& info = structs_.at(declaration->name);
-            for (const auto& method : declaration->methods) {
-                const auto& method_declaration =
-                    static_cast<const MethodDeclaration&>(*method);
+        for (const auto& key : struct_order_) {
+            const auto& info = structs_.at(key);
+            for (const auto& method_key : info.method_order) {
+                const auto& method_info = info.methods.at(method_key);
+                const auto& method_declaration = *method_info.declaration;
                 output += method_declaration_text(
-                    declaration->name,
+                    key,
                     CValueKind::Struct,
                     method_declaration,
-                    info.methods.at(method_declaration.name));
+                    method_info);
                 output += ";\n";
             }
         }
-        for (const auto* declaration : class_order_) {
-            const auto& info = classes_.at(declaration->name);
-            for (const auto& member : declaration->members) {
-                if (member->kind != ClassMemberKind::Method) {
-                    continue;
-                }
-                const auto& method = static_cast<const MethodDeclaration&>(*member);
+        for (const auto& key : class_order_) {
+            const auto& info = classes_.at(key);
+            for (const auto& method_key : info.method_order) {
+                const auto& method_info = info.methods.at(method_key);
+                const auto& method = *method_info.declaration;
                 if (!method.body) {
                     continue;
                 }
                 output += method_declaration_text(
-                    declaration->name,
+                    key,
                     CValueKind::Class,
                     method,
-                    info.methods.at(method.name));
+                    method_info);
                 output += ";\n";
             }
         }
 
-        for (const auto* declaration : struct_order_) {
-            for (const auto& implemented : declaration->interfaces) {
+        for (const auto& key : struct_order_) {
+            const auto& info = structs_.at(key);
+            for (const auto& implemented : info.declaration->interfaces) {
                 output += emit_interface_thunks(
-                    implemented.name, declaration->name, CValueKind::Struct);
+                    implemented.name, key, CValueKind::Struct);
                 output += emit_interface_vtable_instance(
-                    implemented.name, declaration->name, CValueKind::Struct);
+                    implemented.name, key, CValueKind::Struct);
             }
         }
-        for (const auto* declaration : class_order_) {
+        for (const auto& key : class_order_) {
             for (const auto& implemented : effective_class_interfaces(
-                     declaration->name)) {
+                     key)) {
                 output += emit_interface_thunks(
-                    implemented, declaration->name, CValueKind::Class);
+                    implemented, key, CValueKind::Class);
                 output += emit_interface_vtable_instance(
-                    implemented, declaration->name, CValueKind::Class);
+                    implemented, key, CValueKind::Class);
             }
         }
 
-        for (const auto* declaration : class_order_) {
-            if (declaration->is_abstract
-                || virtual_slots(class_root(declaration->name)).empty()) {
+        for (const auto& key : class_order_) {
+            const auto& info = classes_.at(key);
+            if (info.declaration->is_abstract
+                || virtual_slots(class_root(key)).empty()) {
                 continue;
             }
-            output += emit_virtual_thunks(*declaration);
-            output += emit_vtable_instance(*declaration);
+            output += emit_virtual_thunks(key);
+            output += emit_vtable_instance(key);
         }
         if (!program.statements.empty() || !struct_order_.empty()
             || !class_order_.empty()
@@ -621,45 +653,36 @@ public:
             output += '\n';
         }
 
-        for (const auto& statement : program.statements) {
-            if (statement->kind == StmtKind::StructDeclaration
-                || statement->kind == StmtKind::ClassDeclaration
-                || statement->kind == StmtKind::EnumDeclaration
-                || statement->kind == StmtKind::InterfaceDeclaration) {
-                continue;
-            }
-            output += emit_function(
-                static_cast<const FunctionDeclarationStmt&>(*statement));
+        for (const auto& key : function_order_) {
+            output += emit_function(key);
             output += '\n';
         }
-        for (const auto* declaration : struct_order_) {
-            const auto& info = structs_.at(declaration->name);
-            for (const auto& method : declaration->methods) {
-                const auto& method_declaration =
-                    static_cast<const MethodDeclaration&>(*method);
+        for (const auto& key : struct_order_) {
+            const auto& info = structs_.at(key);
+            for (const auto& method_key : info.method_order) {
+                const auto& method_info = info.methods.at(method_key);
+                const auto& method_declaration = *method_info.declaration;
                 output += emit_method(
-                    declaration->name,
+                    key,
                     CValueKind::Struct,
                     method_declaration,
-                    info.methods.at(method_declaration.name));
+                    method_info);
                 output += '\n';
             }
         }
-        for (const auto* declaration : class_order_) {
-            const auto& info = classes_.at(declaration->name);
-            for (const auto& member : declaration->members) {
-                if (member->kind != ClassMemberKind::Method) {
-                    continue;
-                }
-                const auto& method = static_cast<const MethodDeclaration&>(*member);
+        for (const auto& key : class_order_) {
+            const auto& info = classes_.at(key);
+            for (const auto& method_key : info.method_order) {
+                const auto& method_info = info.methods.at(method_key);
+                const auto& method = *method_info.declaration;
                 if (!method.body) {
                     continue;
                 }
                 output += emit_method(
-                    declaration->name,
+                    key,
                     CValueKind::Class,
                     method,
-                    info.methods.at(method.name));
+                    method_info);
                 output += '\n';
             }
         }
@@ -812,12 +835,12 @@ private:
     std::vector<VirtualSlot> virtual_slots(const std::string& root) const
     {
         std::vector<VirtualSlot> slots;
-        for (const auto* declaration : class_order_) {
-            if (class_root(declaration->name) != root) {
+        for (const auto& key : class_order_) {
+            if (class_root(key) != root) {
                 continue;
             }
-            const auto& info = classes_.at(declaration->name);
-            for (const auto& member : declaration->members) {
+            const auto& info = classes_.at(key);
+            for (const auto& member : info.declaration->members) {
                 if (member->kind != ClassMemberKind::Method) {
                     continue;
                 }
@@ -828,7 +851,7 @@ private:
                 }
                 slots.push_back(VirtualSlot{
                     method.name,
-                    declaration->name,
+                    key,
                     &info.methods.at(method.name),
                 });
             }
@@ -971,6 +994,27 @@ private:
             : std::nullopt;
     }
 
+    std::optional<std::pair<std::string, const MethodDeclaration*>>
+    find_class_method_declaration(
+        const std::string& name,
+        const std::string& method_name_value) const
+    {
+        const auto& info = classes_.at(name);
+        for (const auto& member : info.declaration->members) {
+            if (member->kind != ClassMemberKind::Method) {
+                continue;
+            }
+            const auto& method = static_cast<const MethodDeclaration&>(*member);
+            if (method.name == method_name_value) {
+                return std::pair<std::string, const MethodDeclaration*>{
+                    name, &method};
+            }
+        }
+        return info.base_name
+            ? find_class_method_declaration(*info.base_name, method_name_value)
+            : std::nullopt;
+    }
+
     std::optional<std::string> base_initializer_owner(
         const std::string& name) const
     {
@@ -1021,8 +1065,240 @@ private:
             && statement_guarantees_return(*statements.back());
     }
 
+    std::unordered_map<std::string, CValueType> substitutions_for(
+        const std::vector<GenericParameter>& parameters,
+        const std::vector<CValueType>& arguments,
+        SourceLocation location) const
+    {
+        if (parameters.size() != arguments.size()) {
+            throw_backend_error(
+                location,
+                "generic specialization expects "
+                    + std::to_string(parameters.size()) + " type arguments, got "
+                    + std::to_string(arguments.size()));
+        }
+        std::unordered_map<std::string, CValueType> substitutions;
+        for (std::size_t index = 0; index < parameters.size(); ++index) {
+            substitutions.emplace(parameters[index].name, arguments[index]);
+        }
+        return substitutions;
+    }
+
+    CValueType instantiate_struct(
+        const StructDeclarationStmt& declaration,
+        const std::vector<CValueType>& arguments)
+    {
+        const std::string key = specialization_key(declaration.name, arguments);
+        if (structs_.contains(key) || instantiating_types_.contains(key)) {
+            return CValueType{CValueKind::Struct, key};
+        }
+        instantiating_types_.insert(key);
+        const auto saved = current_substitutions_;
+        current_substitutions_ = substitutions_for(
+            declaration.generic_parameters, arguments, declaration.location);
+        StructInfo info{
+            &declaration, key, current_substitutions_, {}, {}, {}, {}};
+        for (const auto& field : declaration.fields) {
+            const CValueType field_type = lower_type(field.type);
+            if (field_type.kind == CValueKind::Interface) {
+                throw_backend_error(
+                    field.location,
+                    "interface-valued struct fields are not supported by the C backend");
+            }
+            if (contains_class_reference(field_type)) {
+                throw_backend_error(
+                    field.location,
+                    "class-reference struct fields are not supported by the C backend");
+            }
+            info.field_indices.emplace(field.name, info.fields.size());
+            info.fields.push_back(StructFieldInfo{&field, field_type});
+        }
+        std::unordered_set<std::string> method_names;
+        for (const auto& member : declaration.methods) {
+            const auto& method = static_cast<const MethodDeclaration&>(*member);
+            if (!method_names.insert(method.name).second) {
+                throw_backend_error(
+                    method.location,
+                    "struct method overloads are not supported by the C backend: '"
+                        + declaration.name + "." + method.name + "'");
+            }
+            if (!method.generic_parameters.empty()) {
+                if (method.is_virtual || method.is_override) {
+                    throw_backend_error(
+                        method.location,
+                        "generic virtual methods are not supported by the C backend");
+                }
+                continue;
+            }
+            if (method.is_virtual || method.is_override || !method.body) {
+                throw_backend_error(
+                    method.location,
+                    "virtual or bodyless struct methods are not supported by the C backend");
+            }
+            MethodInfo method_info{
+                &method, method.name, current_substitutions_, void_type, {}};
+            if (method.return_type) {
+                method_info.return_type = lower_type(*method.return_type);
+            }
+            for (const auto& parameter : method.parameters) {
+                method_info.parameter_types.push_back(lower_type(parameter.type));
+            }
+            if (!info.methods.emplace(method.name, std::move(method_info)).second) {
+                throw_backend_error(
+                    method.location,
+                    "struct method overloads are not supported by the C backend: '"
+                        + declaration.name + "." + method.name + "'");
+            }
+            info.method_order.push_back(method.name);
+        }
+        current_substitutions_ = saved;
+        instantiating_types_.erase(key);
+        structs_.emplace(key, std::move(info));
+        struct_order_.push_back(key);
+        nominal_order_.push_back(CValueType{CValueKind::Struct, key});
+        return CValueType{CValueKind::Struct, key};
+    }
+
+    CValueType instantiate_class(
+        const ClassDeclarationStmt& declaration,
+        const std::vector<CValueType>& arguments)
+    {
+        const std::string key = specialization_key(declaration.name, arguments);
+        if (classes_.contains(key) || instantiating_types_.contains(key)) {
+            return CValueType{CValueKind::Class, key};
+        }
+        instantiating_types_.insert(key);
+        const auto saved = current_substitutions_;
+        current_substitutions_ = substitutions_for(
+            declaration.generic_parameters, arguments, declaration.location);
+        std::optional<std::string> base_name;
+        if (declaration.base_type) {
+            base_name = lower_type(*declaration.base_type).nominal_name;
+        }
+        ClassInfo info{
+            &declaration, key, current_substitutions_, base_name, {}, {}, {}, {}};
+        std::unordered_set<std::string> method_names;
+        for (const auto& member : declaration.members) {
+            if (member->kind == ClassMemberKind::Conversion) {
+                throw_backend_error(
+                    member->location,
+                    "class conversion overloads are not supported by the C backend");
+            }
+            if (member->kind == ClassMemberKind::Field) {
+                const auto& field = static_cast<const ClassField&>(*member);
+                const CValueType field_type = lower_type(field.type);
+                if (field_type.kind == CValueKind::Interface) {
+                    throw_backend_error(
+                        field.location,
+                        "interface-valued class fields are not supported by the C backend");
+                }
+                if (field.is_weak
+                    && (field_type.kind != CValueKind::Class
+                        || !field_type.nullable)) {
+                    throw_backend_error(
+                        field.location, "weak fields require a nullable class type");
+                }
+                info.field_indices.emplace(field.name, info.fields.size());
+                info.fields.push_back(ClassFieldInfo{&field, field_type});
+                continue;
+            }
+            const auto& method = static_cast<const MethodDeclaration&>(*member);
+            if (!method_names.insert(method.name).second) {
+                throw_backend_error(
+                    method.location,
+                    "class method overloads are not supported by the C backend: '"
+                        + declaration.name + "." + method.name + "'");
+            }
+            if (!method.generic_parameters.empty()) {
+                if (method.is_virtual || method.is_override) {
+                    throw_backend_error(
+                        method.location,
+                        "generic virtual methods are not supported by the C backend");
+                }
+                continue;
+            }
+            if (!method.body && !method.is_virtual) {
+                throw_backend_error(
+                    method.location,
+                    "only virtual class methods may omit a body in the C backend");
+            }
+            MethodInfo method_info{
+                &method, method.name, current_substitutions_, void_type, {}};
+            if (method.return_type) {
+                method_info.return_type = lower_type(*method.return_type);
+            }
+            for (const auto& parameter : method.parameters) {
+                method_info.parameter_types.push_back(lower_type(parameter.type));
+            }
+            if (!info.methods.emplace(method.name, std::move(method_info)).second) {
+                throw_backend_error(
+                    method.location,
+                    "class method overloads are not supported by the C backend: '"
+                        + declaration.name + "." + method.name + "'");
+            }
+            info.method_order.push_back(method.name);
+        }
+        current_substitutions_ = saved;
+        instantiating_types_.erase(key);
+        classes_.emplace(key, std::move(info));
+        class_order_.push_back(key);
+        nominal_order_.push_back(CValueType{CValueKind::Class, key});
+        return CValueType{CValueKind::Class, key};
+    }
+
+    std::string instantiate_method(
+        const std::string& owner,
+        CValueKind owner_kind,
+        const MethodDeclaration& method,
+        const std::vector<CValueType>& arguments)
+    {
+        const std::string key = specialization_key(method.name, arguments);
+        auto add_to = [&](auto& info) {
+            if (info.methods.contains(key)) {
+                return;
+            }
+            const auto saved = current_substitutions_;
+            current_substitutions_ = info.substitutions;
+            const auto method_substitutions = substitutions_for(
+                method.generic_parameters, arguments, method.location);
+            current_substitutions_.insert(
+                method_substitutions.begin(), method_substitutions.end());
+            MethodInfo method_info{
+                &method, key, current_substitutions_, void_type, {}};
+            if (method.return_type) {
+                method_info.return_type = lower_type(*method.return_type);
+            }
+            for (const auto& parameter : method.parameters) {
+                method_info.parameter_types.push_back(lower_type(parameter.type));
+            }
+            info.methods.emplace(key, std::move(method_info));
+            info.method_order.push_back(key);
+            if (method.body) {
+                discover_statement(*method.body);
+            }
+            current_substitutions_ = saved;
+        };
+        if (owner_kind == CValueKind::Struct) {
+            add_to(structs_.at(owner));
+        } else {
+            add_to(classes_.at(owner));
+        }
+        return key;
+    }
+
     void collect_types(const Program& program)
     {
+        for (const auto& statement : program.statements) {
+            if (statement->kind == StmtKind::StructDeclaration) {
+                const auto& declaration =
+                    static_cast<const StructDeclarationStmt&>(*statement);
+                struct_templates_.emplace(declaration.name, &declaration);
+            } else if (statement->kind == StmtKind::ClassDeclaration) {
+                const auto& declaration =
+                    static_cast<const ClassDeclarationStmt&>(*statement);
+                class_templates_.emplace(declaration.name, &declaration);
+            }
+        }
         for (const auto& statement : program.statements) {
             if (statement->kind != StmtKind::InterfaceDeclaration) {
                 continue;
@@ -1043,21 +1319,15 @@ private:
             if (statement->kind == StmtKind::StructDeclaration) {
                 const auto& declaration =
                     static_cast<const StructDeclarationStmt&>(*statement);
-                if (!declaration.generic_parameters.empty()) {
-                    throw_backend_error(
-                        declaration.location,
-                        "generic structs are not supported by the C backend");
-                }
                 if (!declaration.conversions.empty()) {
                     throw_backend_error(
                         declaration.location,
                         "struct conversion overloads are not supported by the C backend");
                 }
-                structs_.emplace(
-                    declaration.name, StructInfo{&declaration, {}, {}, {}});
-                struct_order_.push_back(&declaration);
-                nominal_order_.push_back(
-                    CValueType{CValueKind::Struct, declaration.name});
+                struct_templates_.emplace(declaration.name, &declaration);
+                if (declaration.generic_parameters.empty()) {
+                    static_cast<void>(instantiate_struct(declaration, {}));
+                }
             } else if (statement->kind == StmtKind::EnumDeclaration) {
                 const auto& declaration =
                     static_cast<const EnumDeclarationStmt&>(*statement);
@@ -1068,25 +1338,10 @@ private:
             } else if (statement->kind == StmtKind::ClassDeclaration) {
                 const auto& declaration =
                     static_cast<const ClassDeclarationStmt&>(*statement);
-                if (!declaration.generic_parameters.empty()) {
-                    throw_backend_error(
-                        declaration.location,
-                        "generic classes are not supported by the C backend");
+                class_templates_.emplace(declaration.name, &declaration);
+                if (declaration.generic_parameters.empty()) {
+                    static_cast<void>(instantiate_class(declaration, {}));
                 }
-                classes_.emplace(
-                    declaration.name,
-                    ClassInfo{
-                        &declaration,
-                        declaration.base_type
-                            ? std::optional<std::string>{declaration.base_type->name}
-                            : std::nullopt,
-                        {},
-                        {},
-                        {},
-                    });
-                class_order_.push_back(&declaration);
-                nominal_order_.push_back(
-                    CValueType{CValueKind::Class, declaration.name});
             }
         }
 
@@ -1116,51 +1371,6 @@ private:
             }
         }
 
-        for (const auto* declaration : struct_order_) {
-            auto& info = structs_.at(declaration->name);
-            for (const auto& field : declaration->fields) {
-                const CValueType field_type = lower_type(field.type);
-                if (field_type.kind == CValueKind::Interface) {
-                    throw_backend_error(
-                        field.location,
-                        "interface-valued struct fields are not supported by the C backend");
-                }
-                if (contains_class_reference(field_type)) {
-                    throw_backend_error(
-                        field.location,
-                        "class-reference struct fields are not supported by the C backend");
-                }
-                info.field_indices.emplace(field.name, info.fields.size());
-                info.fields.push_back(StructFieldInfo{&field, field_type});
-            }
-            for (const auto& member : declaration->methods) {
-                const auto& method = static_cast<const MethodDeclaration&>(*member);
-                if (!method.generic_parameters.empty()) {
-                    throw_backend_error(
-                        method.location,
-                        "generic struct methods are not supported by the C backend");
-                }
-                if (method.is_virtual || method.is_override || !method.body) {
-                    throw_backend_error(
-                        method.location,
-                        "virtual or bodyless struct methods are not supported by the C backend");
-                }
-                MethodInfo method_info{&method, void_type, {}};
-                if (method.return_type) {
-                    method_info.return_type = lower_type(*method.return_type);
-                }
-                for (const auto& parameter : method.parameters) {
-                    method_info.parameter_types.push_back(lower_type(parameter.type));
-                }
-                if (!info.methods.emplace(method.name, std::move(method_info)).second) {
-                    throw_backend_error(
-                        method.location,
-                        "struct method overloads are not supported by the C backend: '"
-                            + declaration->name + "." + method.name + "'");
-                }
-            }
-        }
-
         for (const auto* declaration : enum_order_) {
             auto& info = enums_.at(declaration->name);
             for (const auto& variant : declaration->variants) {
@@ -1186,60 +1396,31 @@ private:
             }
         }
 
-        for (const auto* declaration : class_order_) {
-            auto& info = classes_.at(declaration->name);
-            for (const auto& member : declaration->members) {
-                if (member->kind == ClassMemberKind::Conversion) {
-                    throw_backend_error(
-                        member->location,
-                        "class conversion overloads are not supported by the C backend");
-                }
-                if (member->kind == ClassMemberKind::Field) {
-                    const auto& field = static_cast<const ClassField&>(*member);
-                    const CValueType field_type = lower_type(field.type);
-                    if (field_type.kind == CValueKind::Interface) {
-                        throw_backend_error(
-                            field.location,
-                            "interface-valued class fields are not supported by the C backend");
-                    }
-                    if (field.is_weak
-                        && (field_type.kind != CValueKind::Class
-                            || !field_type.nullable)) {
-                        throw_backend_error(
-                            field.location,
-                            "weak fields require a nullable class type");
-                    }
-                    info.field_indices.emplace(field.name, info.fields.size());
-                    info.fields.push_back(ClassFieldInfo{&field, field_type});
-                    continue;
-                }
+    }
 
-                const auto& method = static_cast<const MethodDeclaration&>(*member);
-                if (!method.generic_parameters.empty()) {
-                    throw_backend_error(
-                        method.location,
-                        "generic class methods are not supported by the C backend");
-                }
-                if (!method.body && !method.is_virtual) {
-                    throw_backend_error(
-                        method.location,
-                        "only virtual class methods may omit a body in the C backend");
-                }
-                MethodInfo method_info{&method, void_type, {}};
-                if (method.return_type) {
-                    method_info.return_type = lower_type(*method.return_type);
-                }
-                for (const auto& parameter : method.parameters) {
-                    method_info.parameter_types.push_back(lower_type(parameter.type));
-                }
-                if (!info.methods.emplace(method.name, std::move(method_info)).second) {
-                    throw_backend_error(
-                        method.location,
-                        "class method overloads are not supported by the C backend: '"
-                            + declaration->name + "." + method.name + "'");
-                }
-            }
+    std::string instantiate_function(
+        const FunctionDeclarationStmt& function,
+        const std::vector<CValueType>& arguments)
+    {
+        const std::string key = specialization_key(function.name, arguments);
+        if (functions_.contains(key)) {
+            return key;
         }
+        const auto saved = current_substitutions_;
+        current_substitutions_ = substitutions_for(
+            function.generic_parameters, arguments, function.location);
+        FunctionInfo info{
+            &function, key, current_substitutions_, void_type, {}};
+        if (function.return_type) {
+            info.return_type = lower_type(*function.return_type);
+        }
+        for (const auto& parameter : function.parameters) {
+            info.parameter_types.push_back(lower_type(parameter.type));
+        }
+        current_substitutions_ = saved;
+        functions_.emplace(key, std::move(info));
+        function_order_.push_back(key);
+        return key;
     }
 
     void collect_functions(const Program& program)
@@ -1250,32 +1431,50 @@ private:
             }
             const auto& function =
                 static_cast<const FunctionDeclarationStmt&>(*statement);
-            if (!function.generic_parameters.empty()) {
+            if (function.name == "main" && !function.generic_parameters.empty()) {
                 throw_backend_error(
                     function.location,
-                    "generic functions are not supported by the C backend");
+                    "toro entry function 'main' cannot be generic in the C backend");
             }
-            FunctionInfo info{&function, void_type, {}};
-            if (function.return_type) {
-                info.return_type = lower_type(*function.return_type);
-            }
-            for (const auto& parameter : function.parameters) {
-                info.parameter_types.push_back(lower_type(parameter.type));
-            }
-            if (!functions_.emplace(function.name, std::move(info)).second) {
+            if (!function_templates_.emplace(function.name, &function).second) {
                 throw_backend_error(
                     function.location,
                     "function overloads are not supported by the C backend: '"
                         + function.name + "'");
+            }
+            if (function.generic_parameters.empty()) {
+                static_cast<void>(instantiate_function(function, {}));
             }
         }
     }
 
     CValueType lower_type(const TypeReference& type)
     {
+        if (type.arguments.empty()) {
+            if (const auto substitution = current_substitutions_.find(type.name);
+                substitution != current_substitutions_.end()) {
+                CValueType result = substitution->second;
+                if (type.nullable) {
+                    if (result.kind != CValueKind::Class) {
+                        throw_backend_error(
+                            type.location,
+                            "nullable generic substitution is not a class reference");
+                    }
+                    result.nullable = true;
+                }
+                return result;
+            }
+        }
         if (type.nullable) {
-            if (type.arguments.empty() && classes_.contains(type.name)) {
-                return CValueType{CValueKind::Class, type.name, {}, true};
+            if (const auto found = class_templates_.find(type.name);
+                found != class_templates_.end()) {
+                std::vector<CValueType> arguments;
+                for (const auto& argument : type.arguments) {
+                    arguments.push_back(lower_type(argument));
+                }
+                auto result = instantiate_class(*found->second, arguments);
+                result.nullable = true;
+                return result;
             }
             throw_backend_error(
                 type.location,
@@ -1311,11 +1510,6 @@ private:
             }
             return result;
         }
-        if (!type.arguments.empty()) {
-            throw_backend_error(
-                type.location,
-                "type '" + type.name + "' is not supported by the C backend");
-        }
         if (type.name == "int") {
             return int_type;
         }
@@ -1328,11 +1522,37 @@ private:
         if (type.name == "string") {
             return string_type;
         }
-        if (structs_.contains(type.name)) {
-            return CValueType{CValueKind::Struct, type.name};
+        if (const auto found = struct_templates_.find(type.name);
+            found != struct_templates_.end()) {
+            std::vector<CValueType> arguments;
+            for (const auto& argument : type.arguments) {
+                arguments.push_back(lower_type(argument));
+            }
+            if (arguments.empty() && !found->second->generic_parameters.empty()) {
+                for (const auto& parameter : found->second->generic_parameters) {
+                    if (const auto value = current_substitutions_.find(parameter.name);
+                        value != current_substitutions_.end()) {
+                        arguments.push_back(value->second);
+                    }
+                }
+            }
+            return instantiate_struct(*found->second, arguments);
         }
-        if (classes_.contains(type.name)) {
-            return CValueType{CValueKind::Class, type.name};
+        if (const auto found = class_templates_.find(type.name);
+            found != class_templates_.end()) {
+            std::vector<CValueType> arguments;
+            for (const auto& argument : type.arguments) {
+                arguments.push_back(lower_type(argument));
+            }
+            if (arguments.empty() && !found->second->generic_parameters.empty()) {
+                for (const auto& parameter : found->second->generic_parameters) {
+                    if (const auto value = current_substitutions_.find(parameter.name);
+                        value != current_substitutions_.end()) {
+                        arguments.push_back(value->second);
+                    }
+                }
+            }
+            return instantiate_class(*found->second, arguments);
         }
         if (interfaces_.contains(type.name)) {
             return CValueType{CValueKind::Interface, type.name};
@@ -1345,31 +1565,335 @@ private:
             "type '" + type.name + "' is not supported by the C backend");
     }
 
-    void collect_local_types(const Program& program)
+    CValueType lower_type(const Type& type)
     {
-        for (const auto& statement : program.statements) {
-            collect_local_types(*statement);
+        if (type.deferred && type.arguments.empty()) {
+            if (const auto found = current_substitutions_.find(type.name);
+                found != current_substitutions_.end()) {
+                return found->second;
+            }
         }
-        for (const auto* declaration : struct_order_) {
+        switch (type.kind) {
+        case TypeKind::Int: return int_type;
+        case TypeKind::Dec: return dec_type;
+        case TypeKind::String: return string_type;
+        case TypeKind::Bool: return bool_type;
+        case TypeKind::Void: return void_type;
+        case TypeKind::Null:
+            throw_backend_error(current_location_, "cannot lower an untyped null value");
+        case TypeKind::Unknown:
+            break;
+        }
+        std::vector<CValueType> arguments;
+        arguments.reserve(type.arguments.size());
+        for (const auto& argument : type.arguments) {
+            arguments.push_back(lower_type(argument));
+        }
+        if (type.name == "Result") {
+            CValueType result{CValueKind::Result, {}, arguments, type.nullable};
+            if (std::ranges::none_of(
+                    result_order_,
+                    [&](const ResultInfo& existing) {
+                        return existing.type == result;
+                    })) {
+                result_order_.push_back(ResultInfo{result, current_location_});
+            }
+            return result;
+        }
+        if (const auto found = struct_templates_.find(type.name);
+            found != struct_templates_.end()) {
+            if (arguments.empty() && !found->second->generic_parameters.empty()) {
+                for (const auto& parameter : found->second->generic_parameters) {
+                    if (const auto value = current_substitutions_.find(parameter.name);
+                        value != current_substitutions_.end()) {
+                        arguments.push_back(value->second);
+                    }
+                }
+            }
+            return instantiate_struct(*found->second, arguments);
+        }
+        if (const auto found = class_templates_.find(type.name);
+            found != class_templates_.end()) {
+            if (arguments.empty() && !found->second->generic_parameters.empty()) {
+                for (const auto& parameter : found->second->generic_parameters) {
+                    if (const auto value = current_substitutions_.find(parameter.name);
+                        value != current_substitutions_.end()) {
+                        arguments.push_back(value->second);
+                    }
+                }
+            }
+            auto result = instantiate_class(*found->second, arguments);
+            result.nullable = type.nullable;
+            return result;
+        }
+        if (interfaces_.contains(type.name)) {
+            return CValueType{CValueKind::Interface, type.name, arguments, type.nullable};
+        }
+        if (enums_.contains(type.name)) {
+            return CValueType{CValueKind::Enum, type.name, arguments, type.nullable};
+        }
+        throw_backend_error(
+            current_location_,
+            "type '" + type_name(type) + "' is not supported by the C backend");
+    }
+
+    void discover_expression(const Expr& expression)
+    {
+        if (expression.resolved_type
+            && expression.resolved_type->kind != TypeKind::Null
+            && (!expression.resolved_type->deferred
+                || current_substitutions_.contains(
+                    expression.resolved_type->name))) {
+            static_cast<void>(lower_type(*expression.resolved_type));
+        }
+        switch (expression.kind) {
+        case ExprKind::Unary:
+            discover_expression(*static_cast<const UnaryExpr&>(expression).operand);
+            return;
+        case ExprKind::Binary: {
+            const auto& binary = static_cast<const BinaryExpr&>(expression);
+            discover_expression(*binary.left);
+            discover_expression(*binary.right);
+            return;
+        }
+        case ExprKind::Call: {
+            const auto& call = static_cast<const CallExpr&>(expression);
+            discover_expression(*call.callee);
+            for (const auto& argument : call.arguments) {
+                discover_expression(*argument.value);
+            }
+            if (call.callee->kind == ExprKind::Identifier) {
+                const auto& callee =
+                    static_cast<const IdentifierExpr&>(*call.callee);
+                if (const auto found = function_templates_.find(callee.name);
+                    found != function_templates_.end()
+                    && !found->second->generic_parameters.empty()) {
+                    std::vector<CValueType> arguments;
+                    for (const auto& parameter : found->second->generic_parameters) {
+                        const auto substitution = std::ranges::find_if(
+                            call.resolved_substitutions,
+                            [&](const auto& value) {
+                                return value.first == parameter.name;
+                            });
+                        if (substitution == call.resolved_substitutions.end()) {
+                            throw_backend_error(
+                                current_location_,
+                                "missing resolved generic argument for function '"
+                                    + callee.name + "'");
+                        }
+                        arguments.push_back(lower_type(substitution->second));
+                    }
+                    static_cast<void>(instantiate_function(*found->second, arguments));
+                }
+            } else if (call.callee->kind == ExprKind::MemberAccess) {
+                const auto& member =
+                    static_cast<const MemberAccessExpr&>(*call.callee);
+                if (member.object->resolved_type) {
+                    const CValueType owner_type =
+                        lower_type(*member.object->resolved_type);
+                    if (owner_type.kind == CValueKind::Struct
+                        || owner_type.kind == CValueKind::Class) {
+                        const MethodDeclaration* method = nullptr;
+                        if (owner_type.kind == CValueKind::Struct) {
+                            for (const auto& candidate :
+                                 structs_.at(owner_type.nominal_name)
+                                     .declaration->methods) {
+                                const auto& declaration =
+                                    static_cast<const MethodDeclaration&>(*candidate);
+                                if (declaration.name == member.member) {
+                                    method = &declaration;
+                                    break;
+                                }
+                            }
+                        } else {
+                            if (const auto found = find_class_method_declaration(
+                                    owner_type.nominal_name, member.member)) {
+                                method = found->second;
+                            }
+                        }
+                        if (method && !method->generic_parameters.empty()) {
+                            std::vector<CValueType> arguments;
+                            for (const auto& parameter : method->generic_parameters) {
+                                const auto substitution = std::ranges::find_if(
+                                    call.resolved_substitutions,
+                                    [&](const auto& value) {
+                                        return value.first == parameter.name;
+                                    });
+                                if (substitution == call.resolved_substitutions.end()) {
+                                    throw_backend_error(
+                                        current_location_,
+                                        "missing resolved generic argument for method '"
+                                            + member.member + "'");
+                                }
+                                arguments.push_back(lower_type(substitution->second));
+                            }
+                            std::string method_owner = owner_type.nominal_name;
+                            if (owner_type.kind == CValueKind::Class) {
+                                method_owner = find_class_method_declaration(
+                                    owner_type.nominal_name, member.member)->first;
+                            }
+                            static_cast<void>(instantiate_method(
+                                method_owner, owner_type.kind, *method, arguments));
+                        }
+                    }
+                }
+            }
+            return;
+        }
+        case ExprKind::MemberAccess:
+            discover_expression(
+                *static_cast<const MemberAccessExpr&>(expression).object);
+            return;
+        case ExprKind::Propagation:
+            discover_expression(
+                *static_cast<const PropagationExpr&>(expression).expression);
+            return;
+        case ExprKind::Cast:
+            discover_expression(*static_cast<const CastExpr&>(expression).expression);
+            return;
+        case ExprKind::Grouping:
+            discover_expression(
+                *static_cast<const GroupingExpr&>(expression).expression);
+            return;
+        case ExprKind::Integer:
+        case ExprKind::Decimal:
+        case ExprKind::String:
+        case ExprKind::Bool:
+        case ExprKind::Null:
+        case ExprKind::Identifier:
+        case ExprKind::TypeAccess:
+            return;
+        }
+    }
+
+    void discover_statement(const Stmt& statement)
+    {
+        current_location_ = statement.location;
+        switch (statement.kind) {
+        case StmtKind::VariableDeclaration: {
+            const auto& declaration =
+                static_cast<const VariableDeclarationStmt&>(statement);
+            if (declaration.explicit_type) {
+                static_cast<void>(lower_type(*declaration.explicit_type));
+            }
+            discover_expression(*declaration.initializer);
+            return;
+        }
+        case StmtKind::Assignment:
+            discover_expression(*static_cast<const AssignmentStmt&>(statement).value);
+            return;
+        case StmtKind::MemberAssignment: {
+            const auto& assignment =
+                static_cast<const MemberAssignmentStmt&>(statement);
+            discover_expression(*assignment.target);
+            discover_expression(*assignment.value);
+            return;
+        }
+        case StmtKind::Expression:
+            discover_expression(
+                *static_cast<const ExpressionStmt&>(statement).expression);
+            return;
+        case StmtKind::Return: {
+            const auto& result = static_cast<const ReturnStmt&>(statement);
+            if (result.value) {
+                discover_expression(*result.value);
+            }
+            return;
+        }
+        case StmtKind::Block:
+            for (const auto& nested :
+                 static_cast<const BlockStmt&>(statement).statements) {
+                discover_statement(*nested);
+            }
+            return;
+        case StmtKind::If: {
+            const auto& conditional = static_cast<const IfStmt&>(statement);
+            discover_expression(*conditional.condition);
+            discover_statement(*conditional.then_block);
+            if (conditional.else_branch) {
+                discover_statement(*conditional.else_branch);
+            }
+            return;
+        }
+        case StmtKind::While: {
+            const auto& loop = static_cast<const WhileStmt&>(statement);
+            discover_expression(*loop.condition);
+            discover_statement(*loop.body);
+            return;
+        }
+        case StmtKind::ForIn: {
+            const auto& loop = static_cast<const ForInStmt&>(statement);
+            discover_expression(*loop.collection);
+            discover_statement(*loop.body);
+            return;
+        }
+        case StmtKind::Handle: {
+            const auto& handle = static_cast<const HandleStmt&>(statement);
+            discover_expression(*handle.expression);
+            for (const auto& handle_case : handle.cases) {
+                discover_statement(*handle_case.body);
+            }
+            return;
+        }
+        case StmtKind::FunctionDeclaration:
+        case StmtKind::Stop:
+        case StmtKind::Continue:
+        case StmtKind::EnumDeclaration:
+        case StmtKind::StructDeclaration:
+        case StmtKind::ClassDeclaration:
+        case StmtKind::InterfaceDeclaration:
+            return;
+        }
+    }
+
+    void collect_local_types(const Program&)
+    {
+        for (std::size_t index = 0; index < function_order_.size(); ++index) {
+            const std::string key = function_order_[index];
+            const auto* declaration = functions_.at(key).declaration;
+            current_substitutions_ = functions_.at(key).substitutions;
+            discover_statement(*declaration->body);
+        }
+        for (std::size_t index = 0; index < struct_order_.size(); ++index) {
+            const std::string key = struct_order_[index];
+            const auto* declaration = structs_.at(key).declaration;
+            current_substitutions_ = structs_.at(key).substitutions;
+            for (const auto& field : declaration->fields) {
+                if (field.default_value) {
+                    discover_expression(*field.default_value);
+                }
+            }
             for (const auto& method : declaration->methods) {
-                const auto& method_declaration =
+                const auto& declaration =
                     static_cast<const MethodDeclaration&>(*method);
-                if (method_declaration.body) {
-                    collect_local_types(*method_declaration.body);
+                if (declaration.body && declaration.generic_parameters.empty()) {
+                    discover_statement(*declaration.body);
                 }
             }
         }
-        for (const auto* declaration : class_order_) {
+        for (std::size_t index = 0; index < class_order_.size(); ++index) {
+            const std::string key = class_order_[index];
+            const auto* declaration = classes_.at(key).declaration;
+            current_substitutions_ = classes_.at(key).substitutions;
             for (const auto& member : declaration->members) {
+                if (member->kind == ClassMemberKind::Field) {
+                    const auto& field = static_cast<const ClassField&>(*member);
+                    if (field.default_value) {
+                        discover_expression(*field.default_value);
+                    }
+                    continue;
+                }
                 if (member->kind != ClassMemberKind::Method) {
                     continue;
                 }
-                const auto& method = static_cast<const MethodDeclaration&>(*member);
-                if (method.body) {
-                    collect_local_types(*method.body);
+                const auto& declaration =
+                    static_cast<const MethodDeclaration&>(*member);
+                if (declaration.body && declaration.generic_parameters.empty()) {
+                    discover_statement(*declaration.body);
                 }
             }
         }
+        current_substitutions_.clear();
     }
 
     void collect_local_types(const Stmt& statement)
@@ -1447,37 +1971,38 @@ private:
             output += ");\n";
         }
         output += "};\n\n";
-        for (const auto* declaration : class_order_) {
-            if (!declaration->is_abstract
-                && class_root(declaration->name) == root) {
+        for (const auto& key : class_order_) {
+            const auto& info = classes_.at(key);
+            if (!info.declaration->is_abstract
+                && class_root(key) == root) {
                 output += "static const " + vtable_name(root) + " "
-                    + vtable_instance_name(declaration->name) + ";\n";
+                    + vtable_instance_name(key) + ";\n";
             }
         }
         output += '\n';
         return output;
     }
 
-    std::string emit_virtual_thunks(
-        const ClassDeclarationStmt& concrete) const
+    std::string emit_virtual_thunks(const std::string& concrete) const
     {
-        const auto slots = virtual_slots(class_root(concrete.name));
+        const auto& concrete_info = classes_.at(concrete);
+        const auto slots = virtual_slots(class_root(concrete));
         std::string output;
         for (const auto& slot : slots) {
-            if (!is_class_base_of(slot.declaration_owner, concrete.name)) {
+            if (!is_class_base_of(slot.declaration_owner, concrete)) {
                 continue;
             }
-            const auto implementation = find_class_method(concrete.name, slot.name);
+            const auto implementation = find_class_method(concrete, slot.name);
             if (!implementation || !implementation->second->declaration->body) {
                 throw_backend_error(
-                    concrete.location,
-                    "concrete class '" + concrete.name
+                    concrete_info.declaration->location,
+                    "concrete class '" + concrete_info.declaration->name
                         + "' has no runtime implementation for virtual method '"
                         + slot.name + "'");
             }
             output += "static "
                 + c_type_name(slot.declaration->return_type) + " "
-                + virtual_thunk_name(concrete.name, slot.name)
+                + virtual_thunk_name(concrete, slot.name)
                 + "(void* toro_object";
             for (std::size_t index = 0;
                  index < slot.declaration->parameter_types.size(); ++index) {
@@ -1488,8 +2013,8 @@ private:
             }
             output += ")\n{\n";
             const std::string receiver = class_upcast(
-                "(" + class_name(concrete.name) + "*)toro_object",
-                concrete.name,
+                "(" + class_name(concrete) + "*)toro_object",
+                concrete,
                 implementation->first);
             output += "    ";
             if (slot.declaration->return_type != void_type) {
@@ -1506,21 +2031,20 @@ private:
         return output;
     }
 
-    std::string emit_vtable_instance(
-        const ClassDeclarationStmt& concrete) const
+    std::string emit_vtable_instance(const std::string& concrete) const
     {
-        const std::string root = class_root(concrete.name);
+        const std::string root = class_root(concrete);
         const auto slots = virtual_slots(root);
         if (slots.empty()) {
             return {};
         }
         std::string output = "static const " + vtable_name(root) + " "
-            + vtable_instance_name(concrete.name) + " =\n{\n";
+            + vtable_instance_name(concrete) + " =\n{\n";
         for (const auto& slot : slots) {
             output += "    ." + virtual_slot_name(
                 slot.declaration_owner, slot.name) + " = ";
-            if (is_class_base_of(slot.declaration_owner, concrete.name)) {
-                output += virtual_thunk_name(concrete.name, slot.name);
+            if (is_class_base_of(slot.declaration_owner, concrete)) {
+                output += virtual_thunk_name(concrete, slot.name);
             } else {
                 output += "NULL";
             }
@@ -1543,9 +2067,10 @@ private:
         output += "    void (*toro_release)(void*);\n";
         output += "    union\n    {\n";
         bool has_struct_implementer = false;
-        for (const auto* implementer : struct_order_) {
+        for (const auto& key : struct_order_) {
+            const auto& implementer = structs_.at(key);
             const bool implements = std::ranges::any_of(
-                implementer->interfaces,
+                implementer.declaration->interfaces,
                 [&](const TypeReference& candidate) {
                     return candidate.name == declaration.name;
                 });
@@ -1553,8 +2078,8 @@ private:
                 continue;
             }
             has_struct_implementer = true;
-            output += "        " + struct_name(implementer->name) + " "
-                + interface_struct_storage_name(implementer->name) + ";\n";
+            output += "        " + struct_name(key) + " "
+                + interface_struct_storage_name(key) + ";\n";
         }
         if (!has_struct_implementer) {
             output += "        uint8_t toro_empty;\n";
@@ -1924,7 +2449,7 @@ private:
         const MethodInfo& info) const
     {
         std::string output = "static " + c_type_name(info.return_type) + " "
-            + method_name(owner, method.name) + "("
+            + method_name(owner, info.key) + "("
             + c_type_name(CValueType{owner_kind, owner})
             + (owner_kind == CValueKind::Struct ? "*" : "")
             + " toro_self";
@@ -1936,12 +2461,12 @@ private:
         return output;
     }
 
-    std::string function_declaration(
-        const FunctionDeclarationStmt& function) const
+    std::string function_declaration(const std::string& key) const
     {
-        const auto& info = functions_.at(function.name);
+        const auto& info = functions_.at(key);
+        const auto& function = *info.declaration;
         std::string output = "static ";
-        output += c_type_name(info.return_type) + " " + function_name(function.name) + "(";
+        output += c_type_name(info.return_type) + " " + function_name(key) + "(";
         if (function.parameters.empty()) {
             output += "void";
         } else {
@@ -1957,13 +2482,15 @@ private:
         return output;
     }
 
-    std::string emit_function(const FunctionDeclarationStmt& function)
+    std::string emit_function(const std::string& key)
     {
+        const auto& info = functions_.at(key);
+        const auto& function = *info.declaration;
         current_location_ = function.location;
         scopes_.clear();
         owned_reference_values_.clear();
         push_scope();
-        const auto& info = functions_.at(function.name);
+        current_substitutions_ = info.substitutions;
         current_return_type_ = info.return_type;
         for (std::size_t index = 0; index < function.parameters.size(); ++index) {
             const bool owns_parameter =
@@ -1986,7 +2513,7 @@ private:
             }
         }
 
-        std::string output = function_declaration(function) + "\n{\n";
+        std::string output = function_declaration(key) + "\n{\n";
         for (const auto& parameter : owned_reference_values_.back()) {
             output += indent(1) + retain_call(parameter.type, parameter.c_name)
                 + ";\n";
@@ -1998,6 +2525,7 @@ private:
         output += "}\n";
         pop_scope();
         current_return_type_.reset();
+        current_substitutions_.clear();
         return output;
     }
 
@@ -2008,6 +2536,7 @@ private:
         const MethodInfo& info)
     {
         current_location_ = method.location;
+        current_substitutions_ = info.substitutions;
         scopes_.clear();
         owned_reference_values_.clear();
         push_scope();
@@ -2053,6 +2582,7 @@ private:
         output += "}\n";
         pop_scope();
         current_return_type_.reset();
+        current_substitutions_.clear();
         return output;
     }
 
@@ -2616,11 +3146,6 @@ private:
                 return emit_result_construction(callee.name, call, expected_type);
             }
         }
-        if (!call.generic_arguments.empty()) {
-            throw_backend_error(
-                current_location_,
-                "generic calls are not supported by the C backend");
-        }
         if (call.callee->kind == ExprKind::TypeAccess) {
             const auto& access =
                 static_cast<const TypeAccessExpr&>(*call.callee);
@@ -2640,13 +3165,44 @@ private:
         if (callee.name == "print") {
             return emit_print(call);
         }
-        if (structs_.contains(callee.name)) {
-            return emit_struct_construction(callee.name, call);
+        if (struct_templates_.contains(callee.name)) {
+            if (!call.resolved_type) {
+                throw_backend_error(
+                    current_location_, "missing resolved generic construction type");
+            }
+            const auto type = lower_type(*call.resolved_type);
+            return emit_struct_construction(type.nominal_name, call);
         }
-        if (classes_.contains(callee.name)) {
-            return emit_class_construction(callee.name, call);
+        if (class_templates_.contains(callee.name)) {
+            if (!call.resolved_type) {
+                throw_backend_error(
+                    current_location_, "missing resolved generic construction type");
+            }
+            const auto type = lower_type(*call.resolved_type);
+            return emit_class_construction(type.nominal_name, call);
         }
-        const auto function = functions_.find(callee.name);
+        std::string function_key = callee.name;
+        if (const auto source = function_templates_.find(callee.name);
+            source != function_templates_.end()
+            && !source->second->generic_parameters.empty()) {
+            std::vector<CValueType> arguments;
+            for (const auto& parameter : source->second->generic_parameters) {
+                const auto substitution = std::ranges::find_if(
+                    call.resolved_substitutions,
+                    [&](const auto& value) {
+                        return value.first == parameter.name;
+                    });
+                if (substitution == call.resolved_substitutions.end()) {
+                    throw_backend_error(
+                        current_location_,
+                        "missing resolved generic argument for function '"
+                            + callee.name + "'");
+                }
+                arguments.push_back(lower_type(substitution->second));
+            }
+            function_key = instantiate_function(*source->second, arguments);
+        }
+        const auto function = functions_.find(function_key);
         if (function == functions_.end()) {
             throw_backend_error(
                 current_location_, "unknown backend function '" + callee.name + "'");
@@ -2655,7 +3211,7 @@ private:
         const auto ordered = order_arguments(
             call, function->second.declaration->parameters);
 
-        std::string code = function_name(callee.name) + "(";
+        std::string code = function_name(function_key) + "(";
         std::string prelude;
         std::vector<ValueInfo> owned_arguments;
         for (std::size_t index = 0; index < ordered.size(); ++index) {
@@ -2890,8 +3446,11 @@ private:
                 prelude += value.prelude;
                 code += value.code;
             } else if (field.declaration->default_value) {
+                const auto saved = current_substitutions_;
+                current_substitutions_ = info.substitutions;
                 const auto value = emit_expression(
                     *field.declaration->default_value, field.type);
+                current_substitutions_ = saved;
                 prelude += value.prelude;
                 code += value.code;
             } else {
@@ -2985,7 +3544,11 @@ private:
             if (arguments[index]) {
                 value = emit_expression(*arguments[index]->value, field.type);
             } else if (field.declaration->default_value) {
+                const auto saved = current_substitutions_;
+                current_substitutions_ =
+                    classes_.at(fields[index].first).substitutions;
                 value = emit_expression(*field.declaration->default_value, field.type);
+                current_substitutions_ = saved;
             } else {
                 value = GeneratedExpression{
                     zero_value(field.type, field.declaration->location), field.type};
@@ -3078,8 +3641,11 @@ private:
                 continue;
             }
 
+            const auto saved = current_substitutions_;
+            current_substitutions_ = classes_.at(owner).substitutions;
             const auto value = emit_expression(
                 *field.declaration->default_value, field.type);
+            current_substitutions_ = saved;
             prelude += value.prelude;
             if (field.declaration->is_weak) {
                 const std::string weak_value =
@@ -3347,16 +3913,55 @@ private:
         }
         const MethodInfo* method_info = nullptr;
         std::string method_owner = receiver.type.nominal_name;
+        std::string method_key = member.member;
+        const auto resolved_method_key = [&](const MethodDeclaration& method) {
+            if (method.generic_parameters.empty()) {
+                return method.name;
+            }
+            std::vector<CValueType> arguments;
+            for (const auto& parameter : method.generic_parameters) {
+                const auto substitution = std::ranges::find_if(
+                    call.resolved_substitutions,
+                    [&](const auto& value) {
+                        return value.first == parameter.name;
+                    });
+                if (substitution == call.resolved_substitutions.end()) {
+                    throw_backend_error(
+                        current_location_,
+                        "missing resolved generic argument for method '"
+                            + member.member + "'");
+                }
+                arguments.push_back(lower_type(substitution->second));
+            }
+            return specialization_key(method.name, arguments);
+        };
         if (receiver.type.kind == CValueKind::Struct) {
-            const auto& methods = structs_.at(receiver.type.nominal_name).methods;
-            const auto method = methods.find(member.member);
+            const auto& struct_info = structs_.at(receiver.type.nominal_name);
+            for (const auto& candidate : struct_info.declaration->methods) {
+                const auto& declaration =
+                    static_cast<const MethodDeclaration&>(*candidate);
+                if (declaration.name == member.member) {
+                    method_key = resolved_method_key(declaration);
+                    break;
+                }
+            }
+            const auto& methods = struct_info.methods;
+            const auto method = methods.find(method_key);
             if (method != methods.end()) {
                 method_info = &method->second;
             }
-        } else if (const auto method = find_class_method(
-                       receiver.type.nominal_name, member.member)) {
-            method_owner = method->first;
-            method_info = method->second;
+        } else {
+            if (const auto declaration = find_class_method_declaration(
+                    receiver.type.nominal_name, member.member)) {
+                method_key = resolved_method_key(*declaration->second);
+            }
+        }
+        if (receiver.type.kind == CValueKind::Class) {
+            if (const auto method = find_class_method(
+                    receiver.type.nominal_name, method_key)) {
+                method_owner = method->first;
+                method_info = method->second;
+            }
         }
         if (!method_info) {
             throw_backend_error(
@@ -3406,7 +4011,7 @@ private:
                 receiver_code = class_upcast(
                     receiver_code, receiver.type.nominal_name, method_owner);
             }
-            code = method_name(method_owner, member.member) + "(" + receiver_code;
+            code = method_name(method_owner, method_info->key) + "(" + receiver_code;
         }
         for (std::size_t index = 0; index < ordered.size(); ++index) {
             const auto argument = emit_expression(
@@ -3632,9 +4237,11 @@ private:
     }
 
     std::unordered_map<std::string, StructInfo> structs_;
-    std::vector<const StructDeclarationStmt*> struct_order_;
+    std::vector<std::string> struct_order_;
+    std::unordered_map<std::string, const StructDeclarationStmt*> struct_templates_;
     std::unordered_map<std::string, ClassInfo> classes_;
-    std::vector<const ClassDeclarationStmt*> class_order_;
+    std::vector<std::string> class_order_;
+    std::unordered_map<std::string, const ClassDeclarationStmt*> class_templates_;
     std::unordered_map<std::string, InterfaceInfo> interfaces_;
     std::vector<const InterfaceDeclarationStmt*> interface_order_;
     std::unordered_map<std::string, EnumInfo> enums_;
@@ -3642,10 +4249,14 @@ private:
     std::vector<CValueType> nominal_order_;
     std::vector<ResultInfo> result_order_;
     std::unordered_map<std::string, FunctionInfo> functions_;
+    std::unordered_map<std::string, const FunctionDeclarationStmt*> function_templates_;
+    std::vector<std::string> function_order_;
     std::vector<std::unordered_map<std::string, ValueInfo>> scopes_;
     std::vector<std::vector<ValueInfo>> owned_reference_values_;
     std::size_t temporary_index_{0};
     std::optional<CValueType> current_return_type_;
+    std::unordered_map<std::string, CValueType> current_substitutions_;
+    std::unordered_set<std::string> instantiating_types_;
     SourceLocation current_location_{1, 1};
 };
 

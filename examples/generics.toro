@@ -1,66 +1,106 @@
-interface Serializable {
-    function serialize() -> string
+interface Named {
+    function name() -> string
 }
 
-interface Comparable {
-    function compare(other: Comparable) -> int
+interface Tagged {
+    function tag() -> string
 }
 
-class Value implements Serializable, Comparable {
-    public function serialize() -> string {
+class NamedValue implements Named, Tagged {
+    public label: string
+
+    init(label: string) {
+        self.label = label
+    }
+
+    public function name() -> string {
+        return self.label
+    }
+
+    public function tag() -> string {
         return "value"
     }
+}
 
-    public function compare(other: Comparable) -> int {
-        return 0
+function identity<T>(value: T) -> T {
+    return value
+}
+
+function preserve_named<T: Named + Tagged>(value: T) -> T {
+    return value
+}
+
+struct Box<T> {
+    value: T
+
+    function echo<U>(value: U) -> U {
+        return value
     }
 }
 
-struct Pair<A, B> {
-    first: A
-    second: B
-}
-
-class Box<T> {
+class Holder<T> {
     public value: T
 
-    public function get() -> T {
-        return self.value
-    }
-
-    public function replace(value: T) {
+    init(value: T) {
         self.value = value
     }
+
+    public function echo<U>(value: U) -> U {
+        return value
+    }
 }
 
-class SortedBox<T: Serializable + Comparable> {
-    public value: T
+class Resource {
+    public name: string
+
+    destroy() {
+        print("resource destroyed")
+    }
 }
 
-function max<T: Serializable + Comparable>(a: T, b: T) -> T {
-    return a
+function pass<T>(value: T) -> T {
+    return value
 }
 
-function preserve<T>(items: Map<string, List<T>>) -> Map<string, List<T>> {
-    return items
-}
-
-function verify_collections(items: Map<string, List<Value>>) {
-    values: Map<string, List<Value>> = preserve(items)
-    print(values)
+function wrap<T>(value: T) -> Result<T, string> {
+    return ok(value)
 }
 
 function main() {
-    explicit_pair := Pair<int, string>(first: 1, second: "one")
-    inferred_pair := Pair(first: 2, second: "two")
-    box: Box<int> = Box(value: 10)
-    box.replace(20)
-    number: int = box.get()
-    sorted := SortedBox(value: Value())
-    value := max<Value>(Value(), Value())
-    print(explicit_pair)
-    print(inferred_pair)
+    number := identity(10)
+    text := identity<string>("Toro")
+
+    boxed := Box(value: 42)
+    zero := Box<int>()
+    words := Box<string>(value: "hello")
+    nested := Box<Box<int>>(value: pass(boxed))
+
+    holder := Holder(number)
+    resource := Resource(name: "owned")
+    kept := pass(resource)
+    resource_holder := Holder<Resource>(kept)
+    nullable_holder := Holder<Resource?>(null)
+    named := preserve_named(NamedValue("constrained"))
+    result := wrap<string>("result")
+
     print(number)
-    print(sorted)
-    print(value)
+    print(zero.value)
+    print(text)
+    print(boxed.echo<string>(words.value))
+    print(nested.value.value)
+    print(holder.value)
+    print(holder.echo<string>("class method"))
+    print(resource_holder.value.name)
+    print(nullable_holder.value == null)
+    print(named.name())
+
+    handle result {
+        ok(value) {
+            print(value)
+        }
+
+        error(problem) {
+            print(problem)
+        }
+    }
 }
