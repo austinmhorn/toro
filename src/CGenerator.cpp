@@ -23,6 +23,9 @@ enum class CValueKind {
     Interface,
     Enum,
     Result,
+    Array,
+    List,
+    Map,
     Void,
 };
 
@@ -379,6 +382,16 @@ std::string type_mangle(const CValueType& type)
             + std::to_string(type_mangle(type.arguments[1]).size()) + "_"
             + type_mangle(type.arguments[1]);
         break;
+    case CValueKind::Array:
+        result = "a" + type_mangle(type.arguments[0]);
+        break;
+    case CValueKind::List:
+        result = "l" + type_mangle(type.arguments[0]);
+        break;
+    case CValueKind::Map:
+        result = "m" + type_mangle(type.arguments[0]) + "_"
+            + type_mangle(type.arguments[1]);
+        break;
     case CValueKind::Void: result = "v"; break;
     }
     if (type.nullable) {
@@ -434,6 +447,18 @@ std::string result_name(const CValueType& type)
     return "toro_result_" + type_mangle(type);
 }
 
+std::string collection_name(const CValueType& type)
+{
+    std::string prefix;
+    switch (type.kind) {
+    case CValueKind::Array: prefix = "array"; break;
+    case CValueKind::List: prefix = "list"; break;
+    case CValueKind::Map: prefix = "map"; break;
+    default: prefix = "collection"; break;
+    }
+    return "toro_" + prefix + "_" + type_mangle(type);
+}
+
 std::string field_name(std::string_view name)
 {
     return "toro_field_" + std::string(name);
@@ -473,6 +498,10 @@ std::string c_type_name(CValueType type)
     case CValueKind::Interface: return interface_name(type.nominal_name);
     case CValueKind::Enum: return enum_name(type.nominal_name);
     case CValueKind::Result: return result_name(type);
+    case CValueKind::Array: return collection_name(type);
+    case CValueKind::List:
+    case CValueKind::Map:
+        return collection_name(type) + "*";
     case CValueKind::Void: return "void";
     }
     return "void";
@@ -578,9 +607,13 @@ public:
             output += "typedef struct " + result_name(result.type) + " "
                 + result_name(result.type) + ";\n";
         }
+        for (const auto& collection : collection_order_) {
+            output += "typedef struct " + collection_name(collection) + " "
+                + collection_name(collection) + ";\n";
+        }
         if (!struct_order_.empty() || !class_order_.empty()
             || !interface_order_.empty() || !enum_order_.empty()
-            || !result_order_.empty()) {
+            || !result_order_.empty() || !collection_order_.empty()) {
             output += '\n';
         }
         for (const auto& key : class_order_) {
@@ -610,6 +643,9 @@ public:
         }
         for (const auto* declaration : interface_order_) {
             output += emit_interface_definition(*declaration);
+        }
+        for (const auto& collection : collection_order_) {
+            output += emit_collection_definition(collection);
         }
 
         for (const auto& key : class_order_) {
@@ -777,7 +813,14 @@ private:
     static bool is_managed_reference(const CValueType& type)
     {
         return type.kind == CValueKind::Class
-            || type.kind == CValueKind::Interface;
+            || type.kind == CValueKind::Interface
+            || type.kind == CValueKind::List
+            || type.kind == CValueKind::Map;
+    }
+
+    static bool is_owned_runtime_value(const CValueType& type)
+    {
+        return is_managed_reference(type) || type.kind == CValueKind::Array;
     }
 
     static bool contains_class_reference(const CValueType& type)
@@ -868,6 +911,9 @@ private:
         if (type.kind == CValueKind::Interface) {
             return interface_name(type.nominal_name) + "_retain(&" + value + ")";
         }
+        if (type.kind == CValueKind::List || type.kind == CValueKind::Map) {
+            return collection_name(type) + "_retain(" + value + ")";
+        }
         throw_backend_error(current_location_, "cannot retain a non-reference value");
     }
 
@@ -880,6 +926,12 @@ private:
         }
         if (type.kind == CValueKind::Interface) {
             return interface_name(type.nominal_name) + "_release(&" + value + ")";
+        }
+        if (type.kind == CValueKind::List || type.kind == CValueKind::Map) {
+            return collection_name(type) + "_release(" + value + ")";
+        }
+        if (type.kind == CValueKind::Array) {
+            return collection_name(type) + "_destroy(&" + value + ")";
         }
         throw_backend_error(current_location_, "cannot release a non-reference value");
     }
@@ -1648,6 +1700,36 @@ private:
         }
     }
 
+    void register_collection(
+        const CValueType& type,
+        SourceLocation location)
+    {
+        if (type.nullable) {
+            throw_backend_error(location,
+                "nullable collection values are not supported by the C backend");
+        }
+        if (type.kind == CValueKind::Map
+            && type.arguments.front() != string_type) {
+            throw_backend_error(location,
+                "Map currently supports string keys only in the C backend");
+        }
+        for (const auto& argument : type.arguments) {
+            if (argument.kind == CValueKind::Interface) {
+                throw_backend_error(location,
+                    "interface-valued collection elements are not supported by the C backend");
+            }
+            if (argument.kind == CValueKind::Array) {
+                throw_backend_error(location,
+                    "nested Array values are not supported by the C backend");
+            }
+        }
+        if (std::ranges::none_of(collection_order_, [&](const CValueType& value) {
+                return value == type;
+            })) {
+            collection_order_.push_back(type);
+        }
+    }
+
     CValueType lower_type(const TypeReference& type)
     {
         if (type.arguments.empty()) {
@@ -1708,6 +1790,22 @@ private:
                     })) {
                 result_order_.push_back(ResultInfo{result, type.location});
             }
+            return result;
+        }
+        if (type.name == "Array" || type.name == "List" || type.name == "Map") {
+            const std::size_t expected = type.name == "Map" ? 2U : 1U;
+            if (type.arguments.size() != expected) {
+                throw_backend_error(type.location, type.name + " requires "
+                    + std::to_string(expected) + " type arguments");
+            }
+            std::vector<CValueType> arguments;
+            for (const auto& argument : type.arguments) {
+                arguments.push_back(lower_type(argument));
+            }
+            const CValueKind kind = type.name == "Array" ? CValueKind::Array
+                : type.name == "List" ? CValueKind::List : CValueKind::Map;
+            CValueType result{kind, {}, std::move(arguments)};
+            register_collection(result, type.location);
             return result;
         }
         if (type.name == "int") {
@@ -1798,6 +1896,13 @@ private:
                     })) {
                 result_order_.push_back(ResultInfo{result, current_location_});
             }
+            return result;
+        }
+        if (type.name == "Array" || type.name == "List" || type.name == "Map") {
+            const CValueKind kind = type.name == "Array" ? CValueKind::Array
+                : type.name == "List" ? CValueKind::List : CValueKind::Map;
+            CValueType result{kind, {}, arguments, type.nullable};
+            register_collection(result, current_location_);
             return result;
         }
         if (const auto found = struct_templates_.find(type.name);
@@ -1934,6 +2039,12 @@ private:
             discover_expression(
                 *static_cast<const MemberAccessExpr&>(expression).object);
             return;
+        case ExprKind::Index: {
+            const auto& index = static_cast<const IndexExpr&>(expression);
+            discover_expression(*index.object);
+            discover_expression(*index.index);
+            return;
+        }
         case ExprKind::Propagation:
             discover_expression(
                 *static_cast<const PropagationExpr&>(expression).expression);
@@ -1975,6 +2086,13 @@ private:
         case StmtKind::MemberAssignment: {
             const auto& assignment =
                 static_cast<const MemberAssignmentStmt&>(statement);
+            discover_expression(*assignment.target);
+            discover_expression(*assignment.value);
+            return;
+        }
+        case StmtKind::IndexAssignment: {
+            const auto& assignment =
+                static_cast<const IndexAssignmentStmt&>(statement);
             discover_expression(*assignment.target);
             discover_expression(*assignment.value);
             return;
@@ -2135,6 +2253,7 @@ private:
             return;
         case StmtKind::Assignment:
         case StmtKind::MemberAssignment:
+        case StmtKind::IndexAssignment:
         case StmtKind::Expression:
         case StmtKind::Return:
         case StmtKind::Stop:
@@ -2145,6 +2264,198 @@ private:
         case StmtKind::InterfaceDeclaration:
             return;
         }
+    }
+
+    std::string collection_element_retain(
+        const CValueType& type,
+        std::string_view expression) const
+    {
+        if (type.kind == CValueKind::Class) {
+            return retain_name(type.nominal_name) + "(" + std::string(expression) + ");\n";
+        }
+        if (type.kind == CValueKind::List || type.kind == CValueKind::Map) {
+            return collection_name(type) + "_retain(" + std::string(expression) + ");\n";
+        }
+        return {};
+    }
+
+    std::string collection_element_release(
+        const CValueType& type,
+        std::string_view expression) const
+    {
+        if (type.kind == CValueKind::Class) {
+            return release_name(type.nominal_name) + "(" + std::string(expression) + ");\n";
+        }
+        if (type.kind == CValueKind::List || type.kind == CValueKind::Map) {
+            return collection_name(type) + "_release(" + std::string(expression) + ");\n";
+        }
+        return {};
+    }
+
+    std::string emit_collection_definition(const CValueType& type) const
+    {
+        const std::string name = collection_name(type);
+        if (type.kind == CValueKind::Array) {
+            const auto& element = type.arguments[0];
+            std::string output = "struct " + name + "\n{\n"
+                "    size_t toro_count;\n    " + c_type_name(element)
+                + "* toro_data;\n};\n\n";
+            output += "static " + name + " " + name
+                + "_new(size_t toro_count)\n{\n    " + name
+                + " toro_value;\n    toro_value.toro_count = toro_count;\n"
+                  "    toro_value.toro_data = toro_count == 0 ? NULL : calloc(toro_count, sizeof(*toro_value.toro_data));\n"
+                  "    if (toro_count != 0 && toro_value.toro_data == NULL) { abort(); }\n"
+                  "    return toro_value;\n}\n\n";
+            output += "static void " + name + "_destroy(" + name
+                + "* toro_value)\n{\n    if (toro_value->toro_data == NULL) { return; }\n";
+            if (const auto release = collection_element_release(
+                    element, "toro_value->toro_data[toro_index]"); !release.empty()) {
+                output += "    for (size_t toro_index = 0; toro_index < toro_value->toro_count; ++toro_index)\n    {\n        "
+                    + release + "    }\n";
+            }
+            output += "    free(toro_value->toro_data);\n    toro_value->toro_data = NULL;\n    toro_value->toro_count = 0;\n}\n\n";
+            output += "static " + name + " " + name + "_clone(" + name
+                + " toro_source)\n{\n    " + name + " toro_copy = " + name
+                + "_new(toro_source.toro_count);\n    for (size_t toro_index = 0; toro_index < toro_source.toro_count; ++toro_index)\n    {\n"
+                  "        toro_copy.toro_data[toro_index] = toro_source.toro_data[toro_index];\n";
+            if (const auto retain = collection_element_retain(
+                    element, "toro_copy.toro_data[toro_index]"); !retain.empty()) {
+                output += "        " + retain;
+            }
+            output += "    }\n    return toro_copy;\n}\n\n";
+            output += "static " + c_type_name(element) + " " + name
+                + "_get(" + name + " toro_value, int64_t toro_index)\n{\n"
+                  "    if (toro_index < 0 || (size_t)toro_index >= toro_value.toro_count) { abort(); }\n"
+                  "    return toro_value.toro_data[toro_index];\n}\n\n";
+            output += "static void " + name + "_set(" + name
+                + "* toro_value, int64_t toro_index, " + c_type_name(element)
+                + " toro_element)\n{\n"
+                  "    if (toro_index < 0 || (size_t)toro_index >= toro_value->toro_count) { abort(); }\n";
+            output += "    " + collection_element_retain(element, "toro_element");
+            output += "    " + collection_element_release(
+                element, "toro_value->toro_data[toro_index]");
+            output += "    toro_value->toro_data[toro_index] = toro_element;\n}\n\n";
+            return output;
+        }
+
+        if (type.kind == CValueKind::List) {
+            const auto& element = type.arguments[0];
+            std::string output = "struct " + name + "\n{\n"
+                "    uint64_t toro_ref_count;\n    size_t toro_count;\n"
+                "    size_t toro_capacity;\n    " + c_type_name(element)
+                + "* toro_data;\n};\n\n";
+            output += "static " + name + "* " + name + "_new(void)\n{\n    "
+                + name + "* toro_value = calloc(1, sizeof(*toro_value));\n"
+                  "    if (toro_value == NULL) { abort(); }\n    toro_value->toro_ref_count = 1;\n    return toro_value;\n}\n\n";
+            output += "static void " + name + "_retain(" + name
+                + "* toro_value)\n{\n    if (toro_value != NULL) { ++toro_value->toro_ref_count; }\n}\n\n";
+            output += "static void " + name + "_release(" + name
+                + "* toro_value)\n{\n    if (toro_value == NULL || --toro_value->toro_ref_count != 0) { return; }\n";
+            if (const auto release = collection_element_release(
+                    element, "toro_value->toro_data[toro_index]"); !release.empty()) {
+                output += "    for (size_t toro_index = 0; toro_index < toro_value->toro_count; ++toro_index)\n    {\n        "
+                    + release + "    }\n";
+            }
+            output += "    free(toro_value->toro_data);\n    free(toro_value);\n}\n\n";
+            output += "static void " + name + "_add(" + name + "* toro_value, "
+                + c_type_name(element) + " toro_element)\n{\n"
+                  "    if (toro_value->toro_count == toro_value->toro_capacity)\n    {\n"
+                  "        size_t toro_capacity = toro_value->toro_capacity == 0 ? 4 : toro_value->toro_capacity * 2;\n"
+                  "        void* toro_data = realloc(toro_value->toro_data, toro_capacity * sizeof(*toro_value->toro_data));\n"
+                  "        if (toro_data == NULL) { abort(); }\n        toro_value->toro_data = toro_data;\n        toro_value->toro_capacity = toro_capacity;\n    }\n";
+            output += "    " + collection_element_retain(element, "toro_element");
+            output += "    toro_value->toro_data[toro_value->toro_count++] = toro_element;\n}\n\n";
+            output += "static " + c_type_name(element) + " " + name
+                + "_get(" + name + "* toro_value, int64_t toro_index)\n{\n"
+                  "    if (toro_index < 0 || (size_t)toro_index >= toro_value->toro_count) { abort(); }\n"
+                  "    return toro_value->toro_data[toro_index];\n}\n\n";
+            output += "static void " + name + "_set(" + name
+                + "* toro_value, int64_t toro_index, " + c_type_name(element)
+                + " toro_element)\n{\n"
+                  "    if (toro_index < 0 || (size_t)toro_index >= toro_value->toro_count) { abort(); }\n";
+            output += "    " + collection_element_retain(element, "toro_element");
+            output += "    " + collection_element_release(
+                element, "toro_value->toro_data[toro_index]");
+            output += "    toro_value->toro_data[toro_index] = toro_element;\n}\n\n";
+            output += "static " + name + "* " + name + "_clone(" + name
+                + "* toro_source)\n{\n    " + name + "* toro_copy = " + name
+                + "_new();\n    for (size_t toro_index = 0; toro_index < toro_source->toro_count; ++toro_index)\n    {\n        "
+                + name + "_add(toro_copy, toro_source->toro_data[toro_index]);\n    }\n    return toro_copy;\n}\n\n";
+            return output;
+        }
+
+        const auto& value = type.arguments[1];
+        std::string output = "struct " + name + "\n{\n"
+            "    uint64_t toro_ref_count;\n    size_t toro_count;\n    size_t toro_capacity;\n"
+            "    const char** toro_keys;\n    " + c_type_name(value)
+            + "* toro_values;\n    bool* toro_occupied;\n};\n\n";
+        output += "static uint64_t " + name + "_hash(const char* toro_key)\n{\n"
+            "    uint64_t toro_hash = UINT64_C(1469598103934665603);\n"
+            "    while (*toro_key != '\\0') { toro_hash ^= (unsigned char)*toro_key++; toro_hash *= UINT64_C(1099511628211); }\n"
+            "    return toro_hash;\n}\n\n";
+        output += "static " + name + "* " + name + "_new(void)\n{\n    "
+            + name + "* toro_value = calloc(1, sizeof(*toro_value));\n"
+              "    if (toro_value == NULL) { abort(); }\n    toro_value->toro_ref_count = 1;\n"
+              "    toro_value->toro_capacity = 8;\n"
+              "    toro_value->toro_keys = calloc(toro_value->toro_capacity, sizeof(*toro_value->toro_keys));\n"
+              "    toro_value->toro_values = calloc(toro_value->toro_capacity, sizeof(*toro_value->toro_values));\n"
+              "    toro_value->toro_occupied = calloc(toro_value->toro_capacity, sizeof(*toro_value->toro_occupied));\n"
+              "    if (toro_value->toro_keys == NULL || toro_value->toro_values == NULL || toro_value->toro_occupied == NULL) { abort(); }\n"
+              "    return toro_value;\n}\n\n";
+        output += "static void " + name + "_retain(" + name
+            + "* toro_value)\n{\n    if (toro_value != NULL) { ++toro_value->toro_ref_count; }\n}\n\n";
+        output += "static void " + name + "_release(" + name
+            + "* toro_value)\n{\n    if (toro_value == NULL || --toro_value->toro_ref_count != 0) { return; }\n";
+        if (const auto release = collection_element_release(
+                value, "toro_value->toro_values[toro_index]"); !release.empty()) {
+            output += "    for (size_t toro_index = 0; toro_index < toro_value->toro_capacity; ++toro_index)\n    {\n        if (toro_value->toro_occupied[toro_index]) { "
+                + release + "        }\n    }\n";
+        }
+        output += "    free(toro_value->toro_keys);\n    free(toro_value->toro_values);\n    free(toro_value->toro_occupied);\n    free(toro_value);\n}\n\n";
+        output += "static size_t " + name + "_slot(" + name
+            + "* toro_value, const char* toro_key)\n{\n    size_t toro_index = (size_t)("
+            + name + "_hash(toro_key) % toro_value->toro_capacity);\n"
+              "    while (toro_value->toro_occupied[toro_index] && strcmp(toro_value->toro_keys[toro_index], toro_key) != 0) { toro_index = (toro_index + 1) % toro_value->toro_capacity; }\n"
+              "    return toro_index;\n}\n\n";
+        output += "static void " + name + "_set(" + name
+            + "* toro_value, const char* toro_key, " + c_type_name(value)
+            + " toro_element);\n\n";
+        output += "static void " + name + "_grow(" + name + "* toro_value)\n{\n"
+            "    size_t toro_old_capacity = toro_value->toro_capacity;\n"
+            "    const char** toro_old_keys = toro_value->toro_keys;\n"
+            "    " + c_type_name(value) + "* toro_old_values = toro_value->toro_values;\n"
+            "    bool* toro_old_occupied = toro_value->toro_occupied;\n"
+            "    toro_value->toro_capacity *= 2; toro_value->toro_count = 0;\n"
+            "    toro_value->toro_keys = calloc(toro_value->toro_capacity, sizeof(*toro_value->toro_keys));\n"
+            "    toro_value->toro_values = calloc(toro_value->toro_capacity, sizeof(*toro_value->toro_values));\n"
+            "    toro_value->toro_occupied = calloc(toro_value->toro_capacity, sizeof(*toro_value->toro_occupied));\n"
+            "    if (toro_value->toro_keys == NULL || toro_value->toro_values == NULL || toro_value->toro_occupied == NULL) { abort(); }\n"
+            "    for (size_t toro_index = 0; toro_index < toro_old_capacity; ++toro_index)\n    {\n"
+            "        if (!toro_old_occupied[toro_index]) { continue; }\n"
+            "        size_t toro_slot = " + name + "_slot(toro_value, toro_old_keys[toro_index]);\n"
+            "        toro_value->toro_occupied[toro_slot] = true; toro_value->toro_keys[toro_slot] = toro_old_keys[toro_index]; toro_value->toro_values[toro_slot] = toro_old_values[toro_index]; ++toro_value->toro_count;\n"
+            "    }\n    free(toro_old_keys); free(toro_old_values); free(toro_old_occupied);\n}\n\n";
+        output += "static void " + name + "_set(" + name
+            + "* toro_value, const char* toro_key, " + c_type_name(value)
+            + " toro_element)\n{\n    if ((toro_value->toro_count + 1) * 10 >= toro_value->toro_capacity * 7) { "
+            + name + "_grow(toro_value); }\n    size_t toro_slot = " + name
+            + "_slot(toro_value, toro_key);\n";
+        output += "    " + collection_element_retain(value, "toro_element");
+        output += "    if (toro_value->toro_occupied[toro_slot]) { "
+            + collection_element_release(value, "toro_value->toro_values[toro_slot]")
+            + "    } else { toro_value->toro_occupied[toro_slot] = true; toro_value->toro_keys[toro_slot] = toro_key; ++toro_value->toro_count; }\n"
+            "    toro_value->toro_values[toro_slot] = toro_element;\n}\n\n";
+        output += "static bool " + name + "_contains(" + name
+            + "* toro_value, const char* toro_key)\n{\n    size_t toro_slot = "
+            + name + "_slot(toro_value, toro_key);\n    return toro_value->toro_occupied[toro_slot];\n}\n\n";
+        output += "static " + c_type_name(value) + " " + name
+            + "_get(" + name + "* toro_value, const char* toro_key)\n{\n    size_t toro_slot = "
+            + name + "_slot(toro_value, toro_key);\n    if (!toro_value->toro_occupied[toro_slot]) { abort(); }\n    return toro_value->toro_values[toro_slot];\n}\n\n";
+        output += "static " + name + "* " + name + "_clone(" + name
+            + "* toro_source)\n{\n    " + name + "* toro_copy = " + name
+            + "_new();\n    for (size_t toro_index = 0; toro_index < toro_source->toro_capacity; ++toro_index)\n    {\n        if (toro_source->toro_occupied[toro_index]) { "
+            + name + "_set(toro_copy, toro_source->toro_keys[toro_index], toro_source->toro_values[toro_index]); }\n    }\n    return toro_copy;\n}\n\n";
+        return output;
     }
 
     std::string emit_vtable_definition(const std::string& root) const
@@ -2468,6 +2779,12 @@ private:
                     CValueType{CValueKind::Class, *info.base_name}, state);
             }
             for (const auto& field : info.fields) {
+                if (field.type.kind == CValueKind::Array
+                    || field.type.kind == CValueKind::List
+                    || field.type.kind == CValueKind::Map) {
+                    throw_backend_error(field.declaration->location,
+                        "collection-valued class fields are not supported by the C backend");
+                }
                 if (field.type.kind == CValueKind::Struct
                     || field.type.kind == CValueKind::Enum
                     || field.type.kind == CValueKind::Result) {
@@ -2632,6 +2949,12 @@ private:
 
         const auto& info = structs_.at(name);
         for (const auto& field : info.fields) {
+            if (field.type.kind == CValueKind::Array
+                || field.type.kind == CValueKind::List
+                || field.type.kind == CValueKind::Map) {
+                throw_backend_error(field.declaration->location,
+                    "collection-valued struct fields are not supported by the C backend");
+            }
             if (field.type.kind == CValueKind::Struct
                 || field.type.kind == CValueKind::Enum
                 || field.type.kind == CValueKind::Result) {
@@ -2861,15 +3184,20 @@ private:
             const std::optional<CValueType> declared_type = declaration.explicit_type
                 ? std::optional<CValueType>{lower_type(*declaration.explicit_type)}
                 : std::nullopt;
-            const auto initializer = emit_expression(
+            auto initializer = emit_expression(
                 *declaration.initializer, declared_type);
             const CValueType type = declared_type.value_or(initializer.type);
             const std::string c_name = variable_name(declaration.name);
             std::string output = indent_prelude(initializer.prelude, depth);
+            if (type.kind == CValueKind::Array && !initializer.owned) {
+                initializer.code = collection_name(type) + "_clone("
+                    + initializer.code + ")";
+                initializer.owned = true;
+            }
             output += prefix + c_type_name(type) + " " + c_name + " = "
                 + initializer.code + ";\n";
-            if (is_managed_reference(type)) {
-                if (!initializer.owned) {
+            if (is_owned_runtime_value(type)) {
+                if (is_managed_reference(type) && !initializer.owned) {
                     output += prefix + retain_call(type, c_name) + ";\n";
                 }
                 owned_reference_values_.back().push_back(
@@ -2877,13 +3205,30 @@ private:
             }
             scopes_.back().emplace(
                 declaration.name,
-                ValueInfo{type, c_name, false, is_managed_reference(type)});
+                ValueInfo{type, c_name, false, is_owned_runtime_value(type)});
             return output;
         }
         case StmtKind::Assignment: {
             const auto& assignment = static_cast<const AssignmentStmt&>(statement);
             const auto& target = find_value(assignment.name);
-            const auto value = emit_expression(*assignment.value, target.type);
+            auto value = emit_expression(*assignment.value, target.type);
+            if (target.type.kind == CValueKind::Array) {
+                if (!target.owned_local) {
+                    throw_backend_error(statement.location,
+                        "cannot reassign borrowed Array value '" + assignment.name
+                            + "' in the C backend");
+                }
+                const std::string temporary =
+                    "toro_array_value_" + std::to_string(temporary_index_++);
+                std::string output = indent_prelude(value.prelude, depth);
+                output += prefix + c_type_name(target.type) + " " + temporary
+                    + " = " + (value.owned ? value.code
+                        : collection_name(target.type) + "_clone(" + value.code + ")")
+                    + ";\n";
+                output += prefix + release_call(target.type, target.c_name) + ";\n";
+                output += prefix + target.c_name + " = " + temporary + ";\n";
+                return output;
+            }
             if (is_managed_reference(target.type)) {
                 if (!target.owned_local) {
                     throw_backend_error(
@@ -2925,10 +3270,13 @@ private:
             return indent_prelude(target.prelude + value.prelude, depth)
                 + prefix + target.code + " = " + value.code + ";\n";
         }
+        case StmtKind::IndexAssignment:
+            return emit_index_assignment(
+                static_cast<const IndexAssignmentStmt&>(statement), depth);
         case StmtKind::Expression: {
             const auto& expression = static_cast<const ExpressionStmt&>(statement);
             const auto value = emit_expression(*expression.expression);
-            if (is_managed_reference(value.type) && value.owned) {
+            if (is_owned_runtime_value(value.type) && value.owned) {
                 const std::string temporary =
                     "toro_unused_class_" + std::to_string(temporary_index_++);
                 return indent_prelude(value.prelude, depth)
@@ -2959,6 +3307,18 @@ private:
                 output += prefix + "return " + temporary + ";\n";
                 return output;
             }
+            if (value.type.kind == CValueKind::Array) {
+                const std::string temporary =
+                    "toro_return_array_" + std::to_string(temporary_index_++);
+                std::string output = indent_prelude(value.prelude, depth);
+                output += prefix + c_type_name(value.type) + " " + temporary
+                    + " = " + (value.owned ? value.code
+                        : collection_name(value.type) + "_clone(" + value.code + ")")
+                    + ";\n";
+                output += all_scope_cleanup(depth);
+                output += prefix + "return " + temporary + ";\n";
+                return output;
+            }
             const bool has_owned_references = std::ranges::any_of(
                 owned_reference_values_,
                 [](const auto& values) { return !values.empty(); });
@@ -2981,31 +3341,90 @@ private:
         case StmtKind::While: {
             const auto& loop = static_cast<const WhileStmt&>(statement);
             const auto condition = emit_expression(*loop.condition);
-            if (condition.prelude.empty()) {
-                std::string output = prefix + "while (" + condition.code + ") ";
-                output += emit_braced_block(*loop.body, depth);
-                return output;
-            }
             push_scope();
-            std::string output = prefix + "while (true)\n" + prefix + "{\n";
-            output += indent_prelude(condition.prelude, depth + 1);
-            output += indent(depth + 1) + "if (!(" + condition.code + "))\n";
-            output += indent(depth + 1) + "{\n";
-            output += indent(depth + 2) + "break;\n";
-            output += indent(depth + 1) + "}\n";
+            std::string output;
+            if (condition.prelude.empty()) {
+                output = prefix + "while (" + condition.code + ")\n"
+                    + prefix + "{\n";
+            } else {
+                output = prefix + "while (true)\n" + prefix + "{\n";
+                output += indent_prelude(condition.prelude, depth + 1);
+                output += indent(depth + 1) + "if (!(" + condition.code + "))\n";
+                output += indent(depth + 1) + "{\n";
+                output += indent(depth + 2) + "break;\n";
+                output += indent(depth + 1) + "}\n";
+            }
+            loop_scope_indices_.push_back(scopes_.size() - 1);
             output += emit_statement_list(loop.body->statements, depth + 1);
+            loop_scope_indices_.pop_back();
             output += scope_cleanup(scopes_.size() - 1, depth + 1);
             output += prefix + "}\n";
             pop_scope();
+            return output;
+        }
+        case StmtKind::ForIn: {
+            const auto& loop = static_cast<const ForInStmt&>(statement);
+            const auto collection = emit_expression(*loop.collection);
+            if ((collection.type.kind != CValueKind::Array
+                    && collection.type.kind != CValueKind::List)
+                || collection.type.arguments.size() != 1) {
+                throw_backend_error(statement.location,
+                    "for ... in lowering requires Array<T> or List<T>");
+            }
+            push_scope();
+            const std::string collection_temporary =
+                "toro_for_collection_" + std::to_string(temporary_index_++);
+            const std::string index =
+                "toro_for_index_" + std::to_string(temporary_index_++);
+            std::string output = indent_prelude(collection.prelude, depth);
+            output += prefix + c_type_name(collection.type) + " "
+                + collection_temporary + " = " + collection.code + ";\n";
+            if (collection.owned) {
+                owned_reference_values_.back().push_back(ValueInfo{
+                    collection.type, collection_temporary, false, true});
+            }
+            const std::string count = collection.type.kind == CValueKind::Array
+                ? collection_temporary + ".toro_count"
+                : collection_temporary + "->toro_count";
+            output += prefix + "for (size_t " + index + " = 0; " + index
+                + " < " + count + "; ++" + index + ")\n" + prefix + "{\n";
+            push_scope();
+            const std::string variable = variable_name(loop.variable_name);
+            const CValueType element = collection.type.arguments[0];
+            output += indent(depth + 1) + c_type_name(element) + " " + variable
+                + " = " + collection_name(collection.type) + "_get("
+                + collection_temporary + ", (int64_t)" + index + ");\n";
+            scopes_.back().emplace(
+                loop.variable_name, ValueInfo{element, variable, false, false});
+            loop_scope_indices_.push_back(scopes_.size() - 1);
+            output += emit_statement_list(loop.body->statements, depth + 1);
+            loop_scope_indices_.pop_back();
+            output += scope_cleanup(scopes_.size() - 1, depth + 1);
+            output += prefix + "}\n";
+            pop_scope();
+            output += scope_cleanup(scopes_.size() - 1, depth);
+            pop_scope();
+            return output;
+        }
+        case StmtKind::Stop:
+        case StmtKind::Continue: {
+            if (loop_scope_indices_.empty()) {
+                throw_backend_error(statement.location,
+                    "loop control is not inside a backend loop");
+            }
+            std::string output;
+            for (std::size_t index = owned_reference_values_.size();
+                 index > loop_scope_indices_.back(); --index) {
+                output += scope_cleanup(index - 1, depth);
+            }
+            output += prefix
+                + (statement.kind == StmtKind::Stop ? "break;\n" : "continue;\n");
             return output;
         }
         case StmtKind::FunctionDeclaration:
             throw_backend_error(
                 statement.location,
                 "nested functions are not supported by the C backend");
-        case StmtKind::ForIn:
-        case StmtKind::Stop:
-        case StmtKind::Continue:
         case StmtKind::EnumDeclaration:
         case StmtKind::StructDeclaration:
         case StmtKind::ClassDeclaration:
@@ -3248,6 +3667,8 @@ private:
         case ExprKind::MemberAccess:
             return emit_member_access(
                 static_cast<const MemberAccessExpr&>(expression));
+        case ExprKind::Index:
+            return emit_index(static_cast<const IndexExpr&>(expression));
         case ExprKind::TypeAccess:
             return emit_enum_variant_access(
                 static_cast<const TypeAccessExpr&>(expression));
@@ -3333,11 +3754,17 @@ private:
             || left.type.kind == CValueKind::Interface
             || left.type.kind == CValueKind::Enum
             || left.type.kind == CValueKind::Result
+            || left.type.kind == CValueKind::Array
+            || left.type.kind == CValueKind::List
+            || left.type.kind == CValueKind::Map
             || right.type.kind == CValueKind::Struct
             || right.type.kind == CValueKind::Class
             || right.type.kind == CValueKind::Interface
             || right.type.kind == CValueKind::Enum
-            || right.type.kind == CValueKind::Result) {
+            || right.type.kind == CValueKind::Result
+            || right.type.kind == CValueKind::Array
+            || right.type.kind == CValueKind::List
+            || right.type.kind == CValueKind::Map) {
             throw_backend_error(
                 current_location_,
                 "operators on aggregate values are not supported by the C backend");
@@ -3507,6 +3934,15 @@ private:
         if (callee.name == "print") {
             return emit_print(call);
         }
+        if (callee.name == "Array" || callee.name == "List"
+            || callee.name == "Map") {
+            if (!call.resolved_type) {
+                throw_backend_error(current_location_,
+                    "missing resolved collection construction type");
+            }
+            return emit_collection_construction(
+                lower_type(*call.resolved_type), call);
+        }
         if (struct_templates_.contains(callee.name)) {
             if (!call.resolved_type) {
                 throw_backend_error(
@@ -3566,7 +4002,17 @@ private:
             const auto argument = emit_expression(
                 *ordered[index]->value, function->second.parameter_types[index]);
             prelude += argument.prelude;
-            if (is_managed_reference(argument.type) && argument.owned) {
+            if (function->second.parameter_types[index].kind == CValueKind::Array) {
+                const std::string temporary =
+                    "toro_argument_array_" + std::to_string(temporary_index_++);
+                prelude += c_type_name(argument.type) + " " + temporary + " = "
+                    + (argument.owned ? argument.code
+                        : collection_name(argument.type) + "_clone(" + argument.code + ")")
+                    + ";\n";
+                owned_arguments.push_back(
+                    ValueInfo{argument.type, temporary, false, true});
+                code += temporary;
+            } else if (is_managed_reference(argument.type) && argument.owned) {
                 const std::string temporary =
                     "toro_argument_class_" + std::to_string(temporary_index_++);
                 prelude += c_type_name(argument.type) + " " + temporary
@@ -4073,15 +4519,226 @@ private:
         case CValueKind::Result:
             throw_backend_error(
                 location, "omitted Result field has no backend zero value");
+        case CValueKind::Array:
+        case CValueKind::List:
+        case CValueKind::Map:
+            throw_backend_error(
+                location, "omitted collection field has no backend zero value");
         case CValueKind::Void:
             break;
         }
         throw_backend_error(location, "field has no backend zero value");
     }
 
+    GeneratedExpression emit_collection_construction(
+        const CValueType& type,
+        const CallExpr& call)
+    {
+        const std::string temporary =
+            "toro_new_collection_" + std::to_string(temporary_index_++);
+        std::string prelude;
+        if (type.kind == CValueKind::Array) {
+            prelude += c_type_name(type) + " " + temporary + " = "
+                + collection_name(type) + "_new("
+                + std::to_string(call.arguments.size()) + ");\n";
+        } else if (type.kind == CValueKind::List || type.kind == CValueKind::Map) {
+            prelude += c_type_name(type) + " " + temporary + " = "
+                + collection_name(type) + "_new();\n";
+        } else {
+            throw_backend_error(current_location_, "invalid collection construction");
+        }
+        if (type.kind != CValueKind::Map) {
+            const CValueType& element = type.arguments[0];
+            for (std::size_t index = 0; index < call.arguments.size(); ++index) {
+                const auto value = emit_expression(*call.arguments[index].value, element);
+                prelude += value.prelude;
+                std::string value_code = value.code;
+                if (is_owned_runtime_value(value.type) && value.owned) {
+                    const std::string value_temporary =
+                        "toro_collection_element_"
+                        + std::to_string(temporary_index_++);
+                    prelude += c_type_name(value.type) + " " + value_temporary
+                        + " = " + value.code + ";\n";
+                    value_code = value_temporary;
+                    prelude += collection_name(type)
+                        + (type.kind == CValueKind::Array ? "_set(&" : "_add(")
+                        + temporary + ", "
+                        + (type.kind == CValueKind::Array
+                                ? std::to_string(index) + ", " : "")
+                        + value_code + ");\n";
+                    prelude += release_call(value.type, value_temporary) + ";\n";
+                    continue;
+                }
+                prelude += collection_name(type)
+                    + (type.kind == CValueKind::Array ? "_set(&" : "_add(")
+                    + temporary + ", "
+                    + (type.kind == CValueKind::Array
+                            ? std::to_string(index) + ", " : "")
+                    + value_code + ");\n";
+            }
+        }
+        return {temporary, type, true, false, std::move(prelude), true};
+    }
+
+    GeneratedExpression emit_index(const IndexExpr& index)
+    {
+        const auto object = emit_expression(*index.object);
+        if (object.owned) {
+            throw_backend_error(current_location_,
+                "indexing a temporary collection is not supported by the C backend");
+        }
+        if (object.type.kind != CValueKind::Array
+            && object.type.kind != CValueKind::List
+            && object.type.kind != CValueKind::Map) {
+            throw_backend_error(current_location_, "indexing requires a collection");
+        }
+        const CValueType index_type = object.type.kind == CValueKind::Map
+            ? object.type.arguments[0] : int_type;
+        const auto subscript = emit_expression(*index.index, index_type);
+        const CValueType result_type = object.type.kind == CValueKind::Map
+            ? object.type.arguments[1] : object.type.arguments[0];
+        return {
+            collection_name(object.type) + "_get(" + object.code + ", "
+                + subscript.code + ")",
+            result_type,
+            false,
+            false,
+            object.prelude + subscript.prelude,
+        };
+    }
+
+    std::string emit_index_assignment(
+        const IndexAssignmentStmt& assignment,
+        std::size_t depth)
+    {
+        const auto object = emit_expression(*assignment.target->object);
+        if (object.owned) {
+            throw_backend_error(assignment.location,
+                "indexed assignment through a temporary collection is not supported");
+        }
+        if (object.type.kind != CValueKind::Array
+            && object.type.kind != CValueKind::List
+            && object.type.kind != CValueKind::Map) {
+            throw_backend_error(assignment.location,
+                "indexed assignment requires a collection");
+        }
+        if (object.type.kind == CValueKind::Array && !object.addressable) {
+            throw_backend_error(assignment.location,
+                "Array indexed assignment requires an addressable value");
+        }
+        const CValueType index_type = object.type.kind == CValueKind::Map
+            ? object.type.arguments[0] : int_type;
+        const CValueType element_type = object.type.kind == CValueKind::Map
+            ? object.type.arguments[1] : object.type.arguments[0];
+        const auto subscript = emit_expression(*assignment.target->index, index_type);
+        const auto value = emit_expression(*assignment.value, element_type);
+        const std::string prefix = indent(depth);
+        std::string output = indent_prelude(
+            object.prelude + subscript.prelude + value.prelude, depth);
+        std::string value_code = value.code;
+        std::optional<std::string> owned_temporary;
+        if (is_owned_runtime_value(value.type) && value.owned) {
+            owned_temporary = "toro_index_value_"
+                + std::to_string(temporary_index_++);
+            output += prefix + c_type_name(value.type) + " " + *owned_temporary
+                + " = " + value.code + ";\n";
+            value_code = *owned_temporary;
+        }
+        output += prefix + collection_name(object.type) + "_set("
+            + (object.type.kind == CValueKind::Array ? "&" : "")
+            + object.code + ", " + subscript.code + ", " + value_code + ");\n";
+        if (owned_temporary) {
+            output += prefix + release_call(value.type, *owned_temporary) + ";\n";
+        }
+        return output;
+    }
+
+    GeneratedExpression emit_collection_method_call(
+        const CallExpr& call,
+        const MemberAccessExpr& member,
+        const GeneratedExpression& receiver)
+    {
+        if (receiver.owned) {
+            throw_backend_error(current_location_,
+                "calling a method on a temporary collection is not supported");
+        }
+        if (member.member == "clone") {
+            if (!call.arguments.empty()) {
+                throw_backend_error(current_location_, "clone() takes no arguments");
+            }
+            return {
+                collection_name(receiver.type) + "_clone(" + receiver.code + ")",
+                receiver.type,
+                false,
+                false,
+                receiver.prelude,
+                true,
+            };
+        }
+        if (receiver.type.kind == CValueKind::List
+            && (member.member == "add" || member.member == "append")) {
+            const auto value = emit_expression(
+                *call.arguments.front().value, receiver.type.arguments[0]);
+            std::string prelude = receiver.prelude + value.prelude;
+            std::string value_code = value.code;
+            if (is_owned_runtime_value(value.type) && value.owned) {
+                const std::string temporary =
+                    "toro_list_element_" + std::to_string(temporary_index_++);
+                prelude += c_type_name(value.type) + " " + temporary + " = "
+                    + value.code + ";\n";
+                prelude += collection_name(receiver.type) + "_add("
+                    + receiver.code + ", " + temporary + ");\n";
+                prelude += release_call(value.type, temporary) + ";\n";
+                return {"(void)0", void_type, false, false, std::move(prelude)};
+            }
+            return {
+                collection_name(receiver.type) + "_add(" + receiver.code + ", "
+                    + value_code + ")",
+                void_type,
+                false,
+                false,
+                std::move(prelude),
+            };
+        }
+        if (receiver.type.kind == CValueKind::Map && member.member == "contains") {
+            const auto key = emit_expression(
+                *call.arguments.front().value, receiver.type.arguments[0]);
+            return {
+                collection_name(receiver.type) + "_contains(" + receiver.code
+                    + ", " + key.code + ")",
+                bool_type,
+                false,
+                false,
+                receiver.prelude + key.prelude,
+            };
+        }
+        throw_backend_error(current_location_, "unsupported collection method '"
+            + member.member + "'");
+    }
+
     GeneratedExpression emit_member_access(const MemberAccessExpr& member)
     {
         const auto object = emit_expression(*member.object);
+        if (object.type.kind == CValueKind::Array
+            || object.type.kind == CValueKind::List
+            || object.type.kind == CValueKind::Map) {
+            if (object.owned) {
+                throw_backend_error(current_location_,
+                    "member access through a temporary collection is not supported");
+            }
+            if (member.member != "count" && member.member != "length") {
+                throw_backend_error(current_location_, "collection type has no member named '"
+                    + member.member + "'");
+            }
+            return {
+                object.code + (object.type.kind == CValueKind::Array
+                    ? ".toro_count" : "->toro_count"),
+                int_type,
+                false,
+                false,
+                object.prelude,
+            };
+        }
         if (object.type.kind != CValueKind::Struct
             && object.type.kind != CValueKind::Class) {
             throw_backend_error(
@@ -4238,6 +4895,11 @@ private:
         const MemberAccessExpr& member)
     {
         const auto receiver = emit_expression(*member.object);
+        if (receiver.type.kind == CValueKind::Array
+            || receiver.type.kind == CValueKind::List
+            || receiver.type.kind == CValueKind::Map) {
+            return emit_collection_method_call(call, member, receiver);
+        }
         if (member.member == "destroy") {
             throw_backend_error(
                 current_location_,
@@ -4377,7 +5039,17 @@ private:
                 *ordered[index]->value, method_info->parameter_types[index]);
             prelude += argument.prelude;
             code += ", ";
-            if (is_managed_reference(argument.type) && argument.owned) {
+            if (method_info->parameter_types[index].kind == CValueKind::Array) {
+                const std::string temporary =
+                    "toro_method_array_" + std::to_string(temporary_index_++);
+                prelude += c_type_name(argument.type) + " " + temporary + " = "
+                    + (argument.owned ? argument.code
+                        : collection_name(argument.type) + "_clone(" + argument.code + ")")
+                    + ";\n";
+                owned_arguments.push_back(
+                    ValueInfo{argument.type, temporary, false, true});
+                code += temporary;
+            } else if (is_managed_reference(argument.type) && argument.owned) {
                 const std::string temporary =
                     "toro_argument_class_" + std::to_string(temporary_index_++);
                 prelude += c_type_name(argument.type) + " " + temporary
@@ -4437,7 +5109,17 @@ private:
                 *ordered[index]->value, method.parameter_types[index]);
             prelude += argument.prelude;
             code += ", ";
-            if (is_managed_reference(argument.type) && argument.owned) {
+            if (method.parameter_types[index].kind == CValueKind::Array) {
+                const std::string temporary =
+                    "toro_interface_array_" + std::to_string(temporary_index_++);
+                prelude += c_type_name(argument.type) + " " + temporary + " = "
+                    + (argument.owned ? argument.code
+                        : collection_name(argument.type) + "_clone(" + argument.code + ")")
+                    + ";\n";
+                owned_arguments.push_back(
+                    ValueInfo{argument.type, temporary, false, true});
+                code += temporary;
+            } else if (is_managed_reference(argument.type) && argument.owned) {
                 const std::string temporary =
                     "toro_interface_argument_"
                     + std::to_string(temporary_index_++);
@@ -4471,7 +5153,7 @@ private:
                 false,
                 false,
                 std::move(prelude),
-                is_managed_reference(result_type),
+                is_owned_runtime_value(result_type),
             };
         }
 
@@ -4493,7 +5175,7 @@ private:
             false,
             false,
             std::move(prelude),
-            is_managed_reference(result_type),
+            is_owned_runtime_value(result_type),
         };
     }
 
@@ -4549,6 +5231,11 @@ private:
         case CValueKind::Result:
             throw_backend_error(
                 current_location_, "printing Result values is not supported by the C backend");
+        case CValueKind::Array:
+        case CValueKind::List:
+        case CValueKind::Map:
+            throw_backend_error(
+                current_location_, "printing collection values is not supported by the C backend");
         case CValueKind::Void:
             throw_backend_error(
                 current_location_, "cannot print an expression without a value");
@@ -4611,6 +5298,7 @@ private:
     std::vector<const EnumDeclarationStmt*> enum_order_;
     std::vector<CValueType> nominal_order_;
     std::vector<ResultInfo> result_order_;
+    std::vector<CValueType> collection_order_;
     std::unordered_map<std::string, FunctionInfo> functions_;
     std::unordered_map<std::string,
         std::vector<const FunctionDeclarationStmt*>> function_templates_;
@@ -4621,6 +5309,7 @@ private:
     std::optional<CValueType> current_return_type_;
     std::unordered_map<std::string, CValueType> current_substitutions_;
     std::unordered_set<std::string> instantiating_types_;
+    std::vector<std::size_t> loop_scope_indices_;
     SourceLocation current_location_{1, 1};
 };
 

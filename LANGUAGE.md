@@ -56,6 +56,56 @@ Collection iteration uses `for item in collection`, and conditional loops use
 `while condition`. `stop` exits the nearest enclosing loop; `continue` skips to
 its next iteration.
 
+### Core collections
+
+Toro provides three concrete generic collection types. Indexes are zero-based,
+and native execution performs bounds checks for indexed `Array` and `List`
+access.
+
+`Array<T>` is a fixed-size value. Constructor arguments provide its elements,
+ordinary assignment makes an independent copy, and indexed mutation changes
+only that copy:
+
+```toro
+values := Array<int>(1, 2, 3)
+copy := values
+copy[0] = 9
+print(values.count)
+```
+
+`List<T>` is growable and reference-backed. `add` and `append` add one element,
+ordinary assignment shares storage, and `clone()` creates independent storage:
+
+```toro
+names := List<string>("Toro")
+names.add("native")
+shared := names
+independent := names.clone()
+```
+
+`Map<K, V>` is reference-backed. Indexed assignment inserts or updates a key,
+indexed access looks it up, `contains(key)` tests presence, and `clone()` creates
+independent storage:
+
+```toro
+scores := Map<string, int>()
+scores["Toro"] = 14
+print(scores["Toro"])
+print(scores.contains("Toro"))
+```
+
+All three expose `count` and `length`. Existing `for item in collection` syntax
+iterates `Array<T>` and `List<T>` in index order. Map iteration has no canonical
+key/value/entry binding shape yet and is therefore not defined. The current
+native Map runtime supports `string` keys; other key types are rejected until
+their hashing and equality semantics are specified.
+
+Collection storage retains class-reference elements while stored and releases
+them when replaced or destroyed. `Array<T>` copy operations retain their own
+element references. Shared `List<T>` and `Map<K, V>` assignments share one
+reference-counted backing store; cloning copies the store and retains its
+elements independently.
+
 ### Enums and `handle`
 
 Enums may contain payload-free variants or variants carrying one value type:
@@ -425,7 +475,7 @@ struct values remain unsupported unless explicitly supplied.
 
 Generic interfaces and generic interface methods,
 interface-valued fields, class-reference struct fields, nullable non-class fields,
-collections, thread-safe ARC, and
+thread-safe ARC, and
 cyclic-reference collection are not lowered yet. Enum and
 Result payloads may use primitives, supported concrete structs, supported
 enums, or supported nested Results; other payload types produce a backend
@@ -434,6 +484,20 @@ never guessed. Class `init` declarations execute after field storage is
 initialized. Method receivers and argument forms that cannot yet be owned safely
 are materialized and released around the call; temporary class field access
 remains rejected rather than lowered to invalid C.
+
+Concrete `Array<T>`, `List<T>`, and `Map<string, V>` instances lower to
+deterministically named C11 specializations with reusable runtime helpers.
+Arrays own fixed contiguous storage and deep-copy that storage on value copies.
+Lists and maps use non-atomic reference-counted backing objects; ordinary copies
+retain the backing object and `clone()` allocates a separate one. Array/List
+indexing and indexed assignment are bounds checked. Map lookup of a missing key
+terminates through the runtime error path. The current immutable `const char*`
+string lowering remains sufficient because Toro does not yet produce dynamically
+owned strings; this milestone does not change string equality or printing.
+Nested `List`/`Map` instances and class-reference elements are supported. Nested
+`Array` elements and interface-valued elements remain explicit backend
+limitations. Collection-valued struct/class fields are also deferred because
+their aggregate copy and teardown rules need dedicated lowering.
 
 The native toolchain can compile this generated source as C11. `toro build`
 writes a persistent executable, defaulting to the source filename stem in the

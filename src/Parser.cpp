@@ -115,6 +115,13 @@ void append_dump(const Expr& expression, std::size_t depth, std::string& output)
         }
         return;
     }
+    case ExprKind::Index: {
+        const auto& index = static_cast<const IndexExpr&>(expression);
+        output += "Index\n";
+        append_dump(*index.object, depth + 1, output);
+        append_dump(*index.index, depth + 1, output);
+        return;
+    }
     case ExprKind::MemberAccess: {
         const auto& member = static_cast<const MemberAccessExpr&>(expression);
         output += "MemberAccess\n";
@@ -174,6 +181,13 @@ void append_statement_dump(const Stmt& statement, std::size_t depth, std::string
     case StmtKind::MemberAssignment: {
         const auto& assignment = static_cast<const MemberAssignmentStmt&>(statement);
         output += indentation + "MemberAssignment\n";
+        append_dump(*assignment.target, depth + 1, output);
+        append_dump(*assignment.value, depth + 1, output);
+        return;
+    }
+    case StmtKind::IndexAssignment: {
+        const auto& assignment = static_cast<const IndexAssignmentStmt&>(statement);
+        output += indentation + "IndexAssignment\n";
         append_dump(*assignment.target, depth + 1, output);
         append_dump(*assignment.value, depth + 1, output);
         return;
@@ -506,9 +520,11 @@ std::unique_ptr<Stmt> Parser::parse_statement()
     if (match({TokenType::Assign})) {
         const Token assignment = previous();
         if (expression->kind != ExprKind::Identifier
-            && expression->kind != ExprKind::MemberAccess) {
+            && expression->kind != ExprKind::MemberAccess
+            && expression->kind != ExprKind::Index) {
             throw_parse_error(
-                assignment, "invalid assignment target; expected identifier or member access");
+                assignment,
+                "invalid assignment target; expected identifier, member access, or index");
         }
 
         require_expression("expected assignment value");
@@ -521,9 +537,15 @@ std::unique_ptr<Stmt> Parser::parse_statement()
                 location, std::move(name), std::move(value));
         }
 
-        auto target = std::unique_ptr<MemberAccessExpr>(
-            static_cast<MemberAccessExpr*>(expression.release()));
-        return std::make_unique<MemberAssignmentStmt>(
+        if (expression->kind == ExprKind::MemberAccess) {
+            auto target = std::unique_ptr<MemberAccessExpr>(
+                static_cast<MemberAccessExpr*>(expression.release()));
+            return std::make_unique<MemberAssignmentStmt>(
+                location, std::move(target), std::move(value));
+        }
+        auto target = std::unique_ptr<IndexExpr>(
+            static_cast<IndexExpr*>(expression.release()));
+        return std::make_unique<IndexAssignmentStmt>(
             location, std::move(target), std::move(value));
     }
 
@@ -1428,6 +1450,12 @@ std::unique_ptr<Expr> Parser::parse_call()
                 TokenType::Identifier, "expected member name after '.'");
             expression = std::make_unique<MemberAccessExpr>(
                 std::move(expression), member.lexeme);
+        } else if (match({TokenType::LeftBracket})) {
+            require_expression("expected index expression after '['");
+            auto index = parse_or();
+            consume(TokenType::RightBracket, "expected ']' after index expression");
+            expression = std::make_unique<IndexExpr>(
+                std::move(expression), std::move(index));
         } else if (match({TokenType::DoubleColon})) {
             if (expression->kind != ExprKind::Identifier) {
                 throw_parse_error(

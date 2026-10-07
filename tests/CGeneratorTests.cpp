@@ -849,6 +849,38 @@ void test_overload_and_conversion_lowering()
         "generic substituted-target conversion symbol");
 }
 
+void test_collection_lowering()
+{
+    const auto output = generate(
+        "function main() {\n"
+        "    array := Array<int>(1, 2)\n"
+        "    copied := array\n"
+        "    copied[0] = 3\n"
+        "    list := List<string>(\"Toro\")\n"
+        "    list.add(\"native\")\n"
+        "    cloned := list.clone()\n"
+        "    map := Map<string, int>()\n"
+        "    map[\"answer\"] = 42\n"
+        "    print(map[\"answer\"])\n"
+        "}\n");
+    expect_contains(output, "struct toro_array_ai", "Array specialization");
+    expect_contains(output, "toro_array_ai_clone", "Array deep-copy helper");
+    expect_contains(output,
+        "(size_t)toro_index >= toro_value.toro_count) { abort(); }",
+        "Array bounds check");
+    expect_contains(output, "struct toro_list_ls", "List specialization");
+    expect_contains(output, "toro_list_ls_add", "List growth helper");
+    expect_contains(output,
+        "(size_t)toro_index >= toro_value->toro_count) { abort(); }",
+        "List bounds check");
+    expect_contains(output, "struct toro_map_ms_i", "Map specialization");
+    expect_contains(output, "toro_map_ms_i_contains", "Map lookup helper");
+    expect_contains(output, "toro_map_ms_i_set", "Map mutation helper");
+    expect_backend_error(
+        "function main() { values := Map<int, string>() }\n",
+        "Map currently supports string keys only");
+}
+
 void test_generic_monomorphization()
 {
     const auto output = generate(
@@ -954,6 +986,7 @@ int main()
         test_interface_lowering();
         test_generic_monomorphization();
         test_overload_and_conversion_lowering();
+        test_collection_lowering();
         test_unsupported_features();
         test_generated_c_compiles();
     } catch (const std::exception& error) {

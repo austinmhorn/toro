@@ -1560,6 +1560,48 @@ void test_existing_language_features_remain_checkable()
         "}\n");
 }
 
+void test_core_collection_types()
+{
+    expect_valid(
+        "function total(values: Array<int>) -> int {\n"
+        "    result := 0\n"
+        "    for value in values { result = result + value }\n"
+        "    return result\n"
+        "}\n"
+        "function main() {\n"
+        "    values := Array<int>(1, 2, 3)\n"
+        "    values[0] = 4\n"
+        "    first: int = values[0]\n"
+        "    list := List<string>(\"Toro\")\n"
+        "    list.add(\"native\")\n"
+        "    copy: List<string> = list.clone()\n"
+        "    count: int = copy.count\n"
+        "    map := Map<string, int>()\n"
+        "    map[\"answer\"] = 42\n"
+        "    answer: int = map[\"answer\"]\n"
+        "    present: bool = map.contains(\"answer\")\n"
+        "    print(total(values))\n"
+        "}\n");
+    expect_error(
+        "function main() {\n"
+        "    values := Array<int>(1)\n"
+        "    values[\"bad\"] = 2\n"
+        "}\n",
+        "cannot assign value of type 'string' to type 'int'");
+    expect_error(
+        "function main() {\n"
+        "    values := List<int>()\n"
+        "    values.add(\"bad\")\n"
+        "}\n",
+        "cannot assign value of type 'string' to type 'int'");
+    expect_error(
+        "function main() {\n"
+        "    values := Map<string, int>()\n"
+        "    value: string = values[\"x\"]\n"
+        "}\n",
+        "cannot assign value of type 'int' to type 'string'");
+}
+
 } // namespace
 
 int main()
@@ -1607,6 +1649,7 @@ int main()
         test_nested_handle_and_result();
         test_result_construction();
         test_result_propagation();
+        test_core_collection_types();
         test_existing_language_features_remain_checkable();
     } catch (const std::exception& error) {
         std::cerr << "type checker test failure: " << error.what() << '\n';

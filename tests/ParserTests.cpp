@@ -323,6 +323,24 @@ void test_member_assignment()
         "member assignment source location was not retained");
 }
 
+void test_collection_indexing()
+{
+    expect_dump(
+        "values[index + 1]",
+        "Index\n"
+        "  Identifier(values)\n"
+        "  Binary(+)\n"
+        "    Identifier(index)\n"
+        "    Integer(1)\n");
+    expect_program_dump(
+        "values[0] = 42\n",
+        "IndexAssignment\n"
+        "  Index\n"
+        "    Identifier(values)\n"
+        "    Integer(0)\n"
+        "  Integer(42)\n");
+}
+
 void test_named_call_arguments()
 {
     expect_dump(
@@ -1732,6 +1750,7 @@ int main()
         test_call_expression_statement();
         test_member_access();
         test_member_assignment();
+        test_collection_indexing();
         test_named_call_arguments();
         test_nested_multiline_construction();
         test_empty_function();

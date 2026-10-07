@@ -40,6 +40,10 @@ Concrete generic functions, structs, classes, and methods are monomorphized
 with deterministic generated names. Their substituted fields, calls, returns,
 ARC, inheritance, virtual dispatch, and interface conversions reuse the same
 lowering as ordinary concrete declarations.
+Concrete core collections also execute natively: `Array<T>` is a fixed-size
+value with independent copies, while `List<T>` and `Map<string, V>` are shared
+reference-backed containers with explicit `clone()` operations. Indexing,
+mutation, counts, Array/List iteration, and class-element ARC are supported.
 
 ## Build
 
@@ -178,6 +182,7 @@ Build and run through temporary artifacts:
 ./build/toro run examples/interfaces.toro
 ./build/toro run examples/overloads.toro
 ./build/toro run examples/conversions.toro
+./build/toro run examples/collections.toro
 ```
 
 `run` forwards program output and returns its exit status. Its temporary C source
@@ -238,6 +243,17 @@ parameters instead of fields. The backend initializes explicit defaults, Toro
 zero values, and nullable fields before invoking `init` exactly once. Required
 non-null fields without defaults must be assigned by `init` on every reachable
 completion path. Classes without `init` retain field-based construction.
+
+Core collections lower to deterministic C specializations and helper functions.
+`Array<T>` owns fixed contiguous storage and copies independently; `List<T>` and
+`Map<string, V>` use shared non-atomic reference-counted backing storage and
+provide `clone()` for independent storage. Array/List indexing is bounds checked,
+`for ... in` iterates them in index order, and stored class references are
+retained and released with the collection. Map iteration and non-string Map keys
+remain deferred pending canonical hashing and entry-binding semantics. Strings
+continue to use the existing immutable `const char*` lowering because no owned
+string operation is required by the current collection API.
+
 Initializers and destructors use the dedicated `init(...) { ... }` and
 `destroy() { ... }` lifecycle syntax; `function init(...)` and
 `function destroy()` are rejected.

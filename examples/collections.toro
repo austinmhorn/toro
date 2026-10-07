@@ -1,0 +1,36 @@
+function sum(values: Array<int>) -> int {
+    total := 0
+    for value in values {
+        total = total + value
+    }
+    return total
+}
+
+function main() {
+    values := Array<int>(1, 2, 3)
+    copied := values
+    copied[0] = 9
+    print(values[0])
+    print(copied[0])
+    print(sum(values))
+
+    names := List<string>("Toro")
+    shared := names
+    shared.add("native")
+    print(names.count)
+    cloned := names.clone()
+    cloned[0] = "copy"
+    print(names[0])
+    print(cloned[0])
+
+    scores := Map<string, int>()
+    scores["Toro"] = 14
+    same_scores := scores
+    same_scores["Toro"] = 15
+    print(scores["Toro"])
+    print(scores.contains("Toro"))
+    scores_copy := scores.clone()
+    scores_copy["Toro"] = 16
+    print(scores["Toro"])
+    print(scores_copy["Toro"])
+}

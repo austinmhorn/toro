@@ -8,6 +8,11 @@
 namespace toro {
 namespace {
 
+bool is_collection_name(std::string_view name)
+{
+    return name == "Array" || name == "List" || name == "Map";
+}
+
 const Type int_type{TypeKind::Int};
 const Type dec_type{TypeKind::Dec};
 const Type string_type{TypeKind::String};
@@ -594,6 +599,29 @@ void TypeChecker::check_statement(const Stmt& statement)
         require_assignable(expected, value, assignment.location);
         return;
     }
+    case StmtKind::IndexAssignment: {
+        const auto& assignment = static_cast<const IndexAssignmentStmt&>(statement);
+        const Type object = require_value(
+            check_expression(*assignment.target->object), assignment.location);
+        if (!is_collection_name(object.name)
+            || (object.name != "Map" && object.arguments.size() != 1)
+            || (object.name == "Map" && object.arguments.size() != 2)) {
+            throw_type_error(assignment.location,
+                "indexed assignment requires Array<T>, List<T>, or Map<K, V>");
+        }
+        const Type expected_index = object.name == "Map"
+            ? object.arguments[0] : int_type;
+        const Type actual_index = require_value(
+            check_expression(*assignment.target->index, expected_index),
+            assignment.location);
+        require_assignable(expected_index, actual_index, assignment.location);
+        const Type expected_value = object.name == "Map"
+            ? object.arguments[1] : object.arguments[0];
+        const Type value = require_value(
+            check_expression(*assignment.value, expected_value), assignment.location);
+        require_assignable(expected_value, value, assignment.location);
+        return;
+    }
     case StmtKind::Expression:
         static_cast<void>(check_expression(
             *static_cast<const ExpressionStmt&>(statement).expression));
@@ -645,9 +673,15 @@ void TypeChecker::check_statement(const Stmt& statement)
     }
     case StmtKind::ForIn: {
         const auto& loop = static_cast<const ForInStmt&>(statement);
-        static_cast<void>(require_value(check_expression(*loop.collection), statement.location));
+        const Type collection = require_value(
+            check_expression(*loop.collection), statement.location);
+        if ((collection.name != "Array" && collection.name != "List")
+            || collection.arguments.size() != 1) {
+            throw_type_error(statement.location,
+                "for ... in currently requires Array<T> or List<T>");
+        }
         push_scope();
-        declare_value(loop.variable_name, unknown_type);
+        declare_value(loop.variable_name, collection.arguments[0]);
         check_statement_list(loop.body->statements);
         pop_scope();
         return;
@@ -972,6 +1006,24 @@ Type TypeChecker::check_expression(
     case ExprKind::Call:
         return resolved(check_call(
             static_cast<const CallExpr&>(expression), expected_type));
+    case ExprKind::Index: {
+        const auto& index = static_cast<const IndexExpr&>(expression);
+        const Type object = require_value(
+            check_expression(*index.object), current_location_);
+        if (!is_collection_name(object.name)
+            || (object.name != "Map" && object.arguments.size() != 1)
+            || (object.name == "Map" && object.arguments.size() != 2)) {
+            throw_type_error(current_location_,
+                "indexing requires Array<T>, List<T>, or Map<K, V>");
+        }
+        const Type expected_index = object.name == "Map"
+            ? object.arguments[0] : int_type;
+        const Type actual_index = require_value(
+            check_expression(*index.index, expected_index), current_location_);
+        require_assignable(expected_index, actual_index, current_location_);
+        return resolved(object.name == "Map"
+            ? object.arguments[1] : object.arguments[0]);
+    }
     case ExprKind::MemberAccess: {
         const auto& member = static_cast<const MemberAccessExpr&>(expression);
         return resolved(check_member_access(member));
@@ -1025,6 +1077,34 @@ Type TypeChecker::check_call(
                     "print expects 1 argument, got " + std::to_string(arguments.size()));
             }
             return void_type;
+        }
+
+        if (is_collection_name(callee.name)) {
+            const std::size_t generic_count = callee.name == "Map" ? 2U : 1U;
+            if (call.generic_arguments.size() != generic_count) {
+                throw_type_error(current_location_, "collection '" + callee.name
+                    + "' requires " + std::to_string(generic_count)
+                    + " explicit generic argument"
+                    + (generic_count == 1 ? "" : "s"));
+            }
+            std::vector<Type> type_arguments;
+            type_arguments.reserve(generic_count);
+            for (const auto& argument : call.generic_arguments) {
+                type_arguments.push_back(resolve_type(argument));
+            }
+            if (callee.name == "Map" && !arguments.empty()) {
+                throw_type_error(current_location_,
+                    "Map<K, V> construction does not accept initial entries yet");
+            }
+            if (callee.name != "Map") {
+                for (const auto& argument : arguments) {
+                    require_assignable(
+                        type_arguments.front(), argument, current_location_);
+                }
+            }
+            return Type{
+                TypeKind::Unknown, false, false, callee.name,
+                std::move(type_arguments)};
         }
 
         auto candidates = find_functions(callee.name);
@@ -1396,6 +1476,31 @@ Type TypeChecker::check_method_call(
     if (object.deferred && object.name.empty()) {
         return unknown_type;
     }
+    if (is_collection_name(object.name)) {
+        if (callee.member == "clone") {
+            if (!arguments.empty()) {
+                throw_type_error(current_location_, "collection clone() expects no arguments");
+            }
+            return object;
+        }
+        if (object.name == "List" && (callee.member == "add"
+                || callee.member == "append")) {
+            if (arguments.size() != 1 || object.arguments.size() != 1) {
+                throw_type_error(current_location_, "List.add expects one element");
+            }
+            require_assignable(object.arguments[0], arguments[0], current_location_);
+            return void_type;
+        }
+        if (object.name == "Map" && callee.member == "contains") {
+            if (arguments.size() != 1 || object.arguments.size() != 2) {
+                throw_type_error(current_location_, "Map.contains expects one key");
+            }
+            require_assignable(object.arguments[0], arguments[0], current_location_);
+            return bool_type;
+        }
+        throw_type_error(current_location_, "collection type '" + object.name
+            + "' has no method named '" + callee.member + "'");
+    }
     if (!is_unknown(object) || object.name.empty()) {
         throw_type_error(
             current_location_, "type '" + type_name(object) + "' has no methods");
@@ -1688,6 +1793,13 @@ Type TypeChecker::check_member_access(const MemberAccessExpr& member)
     }
     if (object.deferred && object.name.empty()) {
         return unknown_type;
+    }
+    if (is_collection_name(object.name)) {
+        if (member.member == "count" || member.member == "length") {
+            return int_type;
+        }
+        throw_type_error(current_location_, "collection type '" + object.name
+            + "' has no member named '" + member.member + "'");
     }
     if (!is_unknown(object) || object.name.empty()) {
         throw_type_error(
@@ -2057,6 +2169,7 @@ bool TypeChecker::statement_guarantees_return(const Stmt& statement) const
     case StmtKind::VariableDeclaration:
     case StmtKind::Assignment:
     case StmtKind::MemberAssignment:
+    case StmtKind::IndexAssignment:
     case StmtKind::Expression:
     case StmtKind::FunctionDeclaration:
     case StmtKind::While:

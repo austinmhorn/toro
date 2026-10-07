@@ -23,6 +23,9 @@ void SemanticAnalyzer::analyze(const Program& program)
     scopes_.back().emplace("print", Symbol{SymbolKind::Builtin, SourceLocation{0, 0}});
     scopes_.back().emplace("ok", Symbol{SymbolKind::Builtin, SourceLocation{0, 0}});
     scopes_.back().emplace("error", Symbol{SymbolKind::Builtin, SourceLocation{0, 0}});
+    scopes_.back().emplace("Array", Symbol{SymbolKind::Builtin, SourceLocation{0, 0}});
+    scopes_.back().emplace("List", Symbol{SymbolKind::Builtin, SourceLocation{0, 0}});
+    scopes_.back().emplace("Map", Symbol{SymbolKind::Builtin, SourceLocation{0, 0}});
     analyze_statement_list(program.statements);
     pop_scope();
 }
@@ -93,6 +96,13 @@ void SemanticAnalyzer::analyze_statement(const Stmt& statement)
     case StmtKind::MemberAssignment: {
         const auto& assignment = static_cast<const MemberAssignmentStmt&>(statement);
         analyze_expression(*assignment.target);
+        analyze_expression(*assignment.value);
+        return;
+    }
+    case StmtKind::IndexAssignment: {
+        const auto& assignment = static_cast<const IndexAssignmentStmt&>(statement);
+        analyze_expression(*assignment.target->object);
+        analyze_expression(*assignment.target->index);
         analyze_expression(*assignment.value);
         return;
     }
@@ -233,6 +243,12 @@ void SemanticAnalyzer::analyze_expression(const Expr& expression)
         for (const auto& argument : call.arguments) {
             analyze_expression(*argument.value);
         }
+        return;
+    }
+    case ExprKind::Index: {
+        const auto& index = static_cast<const IndexExpr&>(expression);
+        analyze_expression(*index.object);
+        analyze_expression(*index.index);
         return;
     }
     case ExprKind::MemberAccess:

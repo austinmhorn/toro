@@ -96,7 +96,7 @@ Completed behavior:
 - interaction with inheritance, interfaces, and concrete generic instantiations;
 - preserved class ARC and struct value semantics during conversions.
 
-## 6.14 Core collections and strings
+## 6.14 Core collections and strings — completed
 
 Implement the first real standard runtime containers.
 
@@ -113,6 +113,21 @@ Target concepts:
 - explicit `.clone()` for independent copies.
 
 Keep container ownership semantics consistent with the language memory model.
+
+Completed behavior:
+
+- fixed contiguous `Array<T>` values with independent copies, indexing,
+  mutation, count/length, iteration, pass/return behavior, and class-element ARC;
+- shared growable `List<T>` storage with add/append, indexing, iteration, and
+  independent `.clone()` storage;
+- shared hash-backed `Map<string, V>` storage with insert/update, lookup,
+  presence tests, count/length, and independent `.clone()` storage;
+- deterministic concrete C11 collection specializations and reusable helpers;
+- retained immutable `const char*` strings because current operations do not
+  require an owned string representation.
+
+Map iteration and additional key hashing/equality definitions remain deferred
+until their source-level semantics are specified.
 
 ## 6.15 Runtime/backend hardening
 

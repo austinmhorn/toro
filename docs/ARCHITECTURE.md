@@ -265,9 +265,25 @@ typed cast annotation. Struct operands preserve value semantics, and temporary
 class operands use the ordinary ARC call-temporary path so each operand is
 evaluated once and released exactly once.
 
+### Core collections
+
+Reachable concrete collection instances receive deterministic generated C
+types and a small reusable helper family per specialization. `Array<T>` is a C
+value containing a count and owned contiguous element buffer; copying in Toro
+invokes a deep buffer clone. `List<T>` is a pointer to a growable,
+reference-counted contiguous backing object. `Map<string, V>` is a pointer to a
+reference-counted open-addressed hash table. Ordinary List/Map assignment retains
+the backing object, while `.clone()` allocates independent storage.
+
+Element helpers isolate retain/release behavior for class references and nested
+shared collections. Array/List access uses generated checked get/set helpers,
+and Array/List `for ... in` lowers to indexed traversal. Strings remain immutable
+`const char*` values; this is sufficient for the current literal-oriented string
+semantics and string-keyed maps, so no owned string runtime is introduced.
+
 ## Current known runtime boundaries
 
-After the generic-runtime milestone, important unsupported or deferred runtime features include:
+Important unsupported or deferred runtime features include:
 
 - generic interfaces and generic interface methods;
 - interface-valued fields;
@@ -275,7 +291,9 @@ After the generic-runtime milestone, important unsupported or deferred runtime f
 - RTTI/dynamic casts;
 - multiple inheritance;
 - base-initializer chaining;
-- full collection runtime;
+- Map iteration and non-string Map keys;
+- nested Array elements and interface-valued collection elements;
+- collection-valued struct/class fields;
 - modules/multi-file project compilation;
 - C/C++ FFI;
 - ownership/escape/borrow optimization;

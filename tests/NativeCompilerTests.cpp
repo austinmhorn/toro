@@ -772,6 +772,91 @@ void test_overload_and_conversion_runtime_behavior()
         "overload/conversion program produced unexpected output");
 }
 
+void test_collection_runtime_behavior()
+{
+    const auto c_source = generate(
+        "class Item {\n"
+        "    public name: string\n"
+        "    destroy() { print(self.name) }\n"
+        "}\n"
+        "function changed(values: Array<int>) -> Array<int> {\n"
+        "    values[0] = 8\n"
+        "    return values\n"
+        "}\n"
+        "function append_value(values: List<int>) { values.add(3) }\n"
+        "function main() {\n"
+        "    array := Array<int>(1, 2)\n"
+        "    copied := array\n"
+        "    copied[0] = 9\n"
+        "    changed_copy := changed(array)\n"
+        "    print(array[0])\n"
+        "    print(copied[0])\n"
+        "    print(changed_copy[0])\n"
+        "    total := 0\n"
+        "    for value in array { total = total + value }\n"
+        "    print(total)\n"
+        "    list := List<int>(1, 2)\n"
+        "    alias := list\n"
+        "    append_value(alias)\n"
+        "    alias.add(4)\n"
+        "    alias.add(5)\n"
+        "    alias.add(6)\n"
+        "    print(list.count)\n"
+        "    independent := list.clone()\n"
+        "    independent[0] = 7\n"
+        "    print(list[0])\n"
+        "    print(independent[0])\n"
+        "    nested := List<List<int>>(List<int>(4))\n"
+        "    print(nested[0][0])\n"
+        "    map := Map<string, int>()\n"
+        "    map[\"one\"] = 1\n"
+        "    map_alias := map\n"
+        "    map_alias[\"one\"] = 2\n"
+        "    print(map[\"one\"])\n"
+        "    map_copy := map.clone()\n"
+        "    map_copy[\"one\"] = 5\n"
+        "    print(map[\"one\"])\n"
+        "    print(map_copy[\"one\"])\n"
+        "    print(map.contains(\"one\"))\n"
+        "    item := Item(name: \"item destroyed\")\n"
+        "    items := List<Item>()\n"
+        "    items.add(item)\n"
+        "    items_alias := items\n"
+        "    items_copy := items.clone()\n"
+        "    print(items_alias.count)\n"
+        "    print(items_copy.count)\n"
+        "    item_array := Array<Item>(item)\n"
+        "    item_array_copy := item_array\n"
+        "    print(item_array_copy.count)\n"
+        "    item_map := Map<string, Item>()\n"
+        "    item_map[\"item\"] = item\n"
+        "    item_map_copy := item_map.clone()\n"
+        "    print(item_map_copy.count)\n"
+        "}\n");
+    const auto [status, output] = capture_run(toro::NativeCompiler(), c_source);
+    expect(status == 0, "collection program did not exit successfully");
+    expect(
+        output == "1\n9\n8\n3\n6\n1\n7\n4\n2\n2\n5\ntrue\n1\n1\n1\n1\nitem destroyed\n",
+        "collection program produced unexpected output");
+}
+
+void test_collection_bounds_failure()
+{
+    try {
+        static_cast<void>(toro::NativeCompiler().run(generate(
+            "function main() {\n"
+            "    values := Array<int>(1)\n"
+            "    print(values[1])\n"
+            "}\n")));
+    } catch (const std::runtime_error& error) {
+        expect(std::string_view(error.what()).find("runtime process failure")
+                != std::string_view::npos,
+            "out-of-bounds access did not report a runtime process failure");
+        return;
+    }
+    throw std::runtime_error("out-of-bounds Array access unexpectedly succeeded");
+}
+
 void test_temporary_cleanup()
 {
     const auto before = native_temporary_directories();
@@ -804,6 +889,8 @@ int main()
         test_generic_runtime_behavior();
         test_generic_inheritance_interface_runtime_behavior();
         test_overload_and_conversion_runtime_behavior();
+        test_collection_runtime_behavior();
+        test_collection_bounds_failure();
         test_temporary_cleanup();
     } catch (const std::exception& error) {
         std::cerr << "native compiler test failure: " << error.what() << '\n';

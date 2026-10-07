@@ -40,6 +40,7 @@ enum class ExprKind {
     Unary,
     Binary,
     Call,
+    Index,
     MemberAccess,
     TypeAccess,
     Propagation,
@@ -176,6 +177,18 @@ struct CallExpr final : Expr {
     mutable const InterfaceMethod* resolved_interface_method{nullptr};
 };
 
+struct IndexExpr final : Expr {
+    IndexExpr(std::unique_ptr<Expr> object, std::unique_ptr<Expr> index)
+        : Expr(ExprKind::Index)
+        , object(std::move(object))
+        , index(std::move(index))
+    {
+    }
+
+    std::unique_ptr<Expr> object;
+    std::unique_ptr<Expr> index;
+};
+
 struct MemberAccessExpr final : Expr {
     MemberAccessExpr(std::unique_ptr<Expr> object, std::string member)
         : Expr(ExprKind::MemberAccess)
@@ -239,6 +252,7 @@ enum class StmtKind {
     VariableDeclaration,
     Assignment,
     MemberAssignment,
+    IndexAssignment,
     Expression,
     FunctionDeclaration,
     Return,
@@ -313,6 +327,21 @@ struct MemberAssignmentStmt final : Stmt {
     }
 
     std::unique_ptr<MemberAccessExpr> target;
+    std::unique_ptr<Expr> value;
+};
+
+struct IndexAssignmentStmt final : Stmt {
+    IndexAssignmentStmt(
+        SourceLocation location,
+        std::unique_ptr<IndexExpr> target,
+        std::unique_ptr<Expr> value)
+        : Stmt(StmtKind::IndexAssignment, location)
+        , target(std::move(target))
+        , value(std::move(value))
+    {
+    }
+
+    std::unique_ptr<IndexExpr> target;
     std::unique_ptr<Expr> value;
 };
 
