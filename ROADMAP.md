@@ -1,8 +1,7 @@
 # Toro Roadmap
 
 This roadmap reflects the current language direction after completion of the
-core semantic system and native runtime work through deterministic generic
-monomorphization.
+core semantic system and the completed Phase 6 native runtime baseline.
 
 Toro's long-term thesis is:
 
@@ -129,7 +128,7 @@ Completed behavior:
 Map iteration and additional key hashing/equality definitions remain deferred
 until their source-level semantics are specified.
 
-## 6.15 Runtime/backend hardening
+## 6.15 Runtime/backend hardening — completed
 
 Before moving to larger application features:
 
@@ -141,6 +140,23 @@ Before moving to larger application features:
 - document supported/unsupported backend boundaries.
 
 Do not perform speculative ownership optimization here.
+
+Completed behavior:
+
+- centralized concrete collection/Result registration and backend validation;
+- shared call-argument ownership preparation and parameter ARC setup;
+- deterministic vector-backed emission registries with repeated-generation
+  regression coverage;
+- collision diagnostics for concrete generic specialization identities;
+- strict C11 syntax validation for representative generated output;
+- a larger native integration program covering classes, inheritance,
+  interfaces, generics, overloads, conversions, collections, Result, enums,
+  virtual dispatch, ARC, and lifecycle cleanup;
+- regression coverage for Array value semantics through class initializers.
+
+Phase 6 is complete. The direct C11 backend remains correctness-first and keeps
+its documented unsupported boundaries explicit; Phase 7 may now build
+application features on this runtime baseline.
 
 ---
 

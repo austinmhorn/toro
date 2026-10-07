@@ -775,6 +775,14 @@ void test_unsupported_features()
     expect_backend_error(
         "function consume(result: Result<int?, string>) {}\n",
         "nullable type 'int?' is not supported by the C backend");
+    expect_backend_error(
+        "struct Box<T> { value: T }\n"
+        "struct Box__1_i { value: int }\n"
+        "function main() {\n"
+        "    concrete := Box__1_i(value: 1)\n"
+        "    specialized := Box<int>(value: concrete.value)\n"
+        "}\n",
+        "C backend struct specialization identity collides");
 }
 
 void test_overload_and_conversion_lowering()
@@ -928,6 +936,58 @@ void test_generic_monomorphization()
         "generic class method specialization");
 }
 
+void test_deterministic_generation()
+{
+    constexpr std::string_view source =
+        "interface Named { function label() -> string }\n"
+        "enum Event {\n"
+        "    value(int)\n"
+        "    done\n"
+        "}\n"
+        "class Entity {\n"
+        "    public id: int\n"
+        "    public virtual function label() -> string { return \"entity\" }\n"
+        "}\n"
+        "class Worker : Entity implements Named {\n"
+        "    public name: string\n"
+        "    public override function label() -> string { return self.name }\n"
+        "    overload as string { return self.label() }\n"
+        "}\n"
+        "function identity<T>(value: T) -> T { return value }\n"
+        "function describe(value: Named) -> string { return value.label() }\n"
+        "function describe(value: int) -> string { return \"number\" }\n"
+        "function checked(value: int) -> Result<int, string> {\n"
+        "    if value > 0 { return ok(value) }\n"
+        "    return error(\"invalid\")\n"
+        "}\n"
+        "function main() {\n"
+        "    worker := Worker(id: 7, name: \"Toro\")\n"
+        "    named: Named = worker\n"
+        "    values := List<int>(identity<int>(1), 2)\n"
+        "    values.add(worker.id)\n"
+        "    print(describe(named))\n"
+        "    print(worker as string)\n"
+        "    result := checked(values.count)\n"
+        "    handle result {\n"
+        "        ok(value) { print(value) }\n"
+        "        error(problem) { print(problem) }\n"
+        "    }\n"
+        "    event := Event::value(values[0])\n"
+        "    handle event {\n"
+        "        value(value) { print(value) }\n"
+        "        done { print(\"done\") }\n"
+        "    }\n"
+        "}\n";
+
+    const std::string first = generate(source);
+    const std::string second = generate(source);
+    const std::string third = generate(source);
+    if (first != second || first != third) {
+        throw std::runtime_error(
+            "repeated generation did not produce byte-identical C output");
+    }
+}
+
 void test_generated_c_compiles()
 {
 #ifdef TORO_TEST_C_COMPILER
@@ -953,7 +1013,8 @@ void test_generated_c_compiles()
         file << output;
     }
     const std::string command = std::string("\"") + TORO_TEST_C_COMPILER
-        + "\" -std=c11 -fsyntax-only \"" + path.string() + "\"";
+        + "\" -std=c11 -pedantic-errors -fsyntax-only \""
+        + path.string() + "\"";
     const int result = std::system(command.c_str());
     std::filesystem::remove(path);
     if (result != 0) {
@@ -987,6 +1048,7 @@ int main()
         test_generic_monomorphization();
         test_overload_and_conversion_lowering();
         test_collection_lowering();
+        test_deterministic_generation();
         test_unsupported_features();
         test_generated_c_compiles();
     } catch (const std::exception& error) {

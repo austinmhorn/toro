@@ -281,6 +281,28 @@ and Array/List `for ... in` lowers to indexed traversal. Strings remain immutabl
 `const char*` values; this is sufficient for the current literal-oriented string
 semantics and string-keyed maps, so no owned string runtime is introduced.
 
+### Backend hardening baseline
+
+Backend discovery and emission use explicit insertion-order registries for
+concrete types, functions, methods, Results, collections, vtables, and interface
+tables. Lookup maps do not determine generated declaration order. Native names
+derive only from source declarations, callable signatures, and recursively
+mangled concrete types. Repeated compilation of the same program is therefore
+covered as a byte-identical generated-C invariant.
+
+Concrete Result and collection registration validates runtime boundaries before
+helper emission. Generic specialization registries diagnose identity collisions
+rather than silently selecting an unrelated declaration. Shared backend helpers
+prepare call arguments, preserve Array value-copy semantics, retain managed
+parameters, and release owned call temporaries in reverse order. These helpers
+keep the current direct frontend-to-C implementation localized without
+introducing an intermediate representation prematurely.
+
+Representative generated output is syntax-checked as strict C11, and a larger
+native integration test exercises inheritance, virtual and interface dispatch,
+generics, overloads, explicit conversions, collections, Result, enums, ARC, and
+lifecycle cleanup together.
+
 ## Current known runtime boundaries
 
 Important unsupported or deferred runtime features include:
@@ -303,7 +325,8 @@ The type system may understand some concepts before the C backend can execute th
 
 ## Near-term architecture principle
 
-The existing C backend is a semantic proving ground.
+The completed Phase 6 C backend is a semantic proving ground and the runtime
+baseline for Phase 7 application work.
 
 Do not prematurely optimize ARC or allocation behavior inside the C generator merely to approximate the future ownership model.
 

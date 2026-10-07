@@ -1,0 +1,85 @@
+interface Named {
+    function label() -> string
+}
+
+enum Event {
+    value(int)
+    done
+}
+
+class Entity {
+    public id: int
+
+    public virtual function label() -> string {
+        return "entity"
+    }
+}
+
+class Worker : Entity implements Named {
+    public name: string
+
+    public override function label() -> string {
+        return self.name
+    }
+
+    overload as string {
+        return self.label()
+    }
+
+    destroy() {
+        print("worker destroyed")
+    }
+}
+
+function identity<T>(value: T) -> T {
+    return value
+}
+
+function describe(value: Named) -> string {
+    return value.label()
+}
+
+function describe(value: int) -> string {
+    return "number"
+}
+
+function checked(value: int) -> Result<int, string> {
+    if value > 0 {
+        return ok(value)
+    }
+
+    return error("invalid")
+}
+
+function main() {
+    worker := Worker(id: 7, name: "Toro")
+    named: Named = worker
+    values := List<int>(identity<int>(1), 2)
+    values.add(worker.id)
+
+    print(describe(named))
+    print(worker as string)
+    print(describe(values.count))
+
+    result := checked(values.count)
+    handle result {
+        ok(value) {
+            print(value)
+        }
+
+        error(problem) {
+            print(problem)
+        }
+    }
+
+    event := Event::value(values[0])
+    handle event {
+        value(value) {
+            print(value)
+        }
+
+        done {
+            print("done")
+        }
+    }
+}

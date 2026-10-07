@@ -840,6 +840,80 @@ void test_collection_runtime_behavior()
         "collection program produced unexpected output");
 }
 
+void test_initializer_collection_argument_value_semantics()
+{
+    const auto c_source = generate(
+        "class ArrayReader {\n"
+        "    public first: int\n"
+        "    init(values: Array<int>) {\n"
+        "        values[0] = 9\n"
+        "        self.first = values[0]\n"
+        "    }\n"
+        "}\n"
+        "function main() {\n"
+        "    values := Array<int>(1, 2)\n"
+        "    reader := ArrayReader(values)\n"
+        "    print(values[0])\n"
+        "    print(reader.first)\n"
+        "}\n");
+    const auto [status, output] = capture_run(toro::NativeCompiler(), c_source);
+    expect(status == 0, "initializer collection argument program failed");
+    expect(
+        output == "1\n9\n",
+        "class initializer did not preserve Array value semantics");
+}
+
+void test_backend_integration_runtime_behavior()
+{
+    const auto c_source = generate(
+        "interface Named { function label() -> string }\n"
+        "enum Event {\n"
+        "    value(int)\n"
+        "    done\n"
+        "}\n"
+        "class Entity {\n"
+        "    public id: int\n"
+        "    public virtual function label() -> string { return \"entity\" }\n"
+        "}\n"
+        "class Worker : Entity implements Named {\n"
+        "    public name: string\n"
+        "    public override function label() -> string { return self.name }\n"
+        "    overload as string { return self.label() }\n"
+        "    destroy() { print(\"worker destroyed\") }\n"
+        "}\n"
+        "function identity<T>(value: T) -> T { return value }\n"
+        "function describe(value: Named) -> string { return value.label() }\n"
+        "function describe(value: int) -> string { return \"number\" }\n"
+        "function checked(value: int) -> Result<int, string> {\n"
+        "    if value > 0 { return ok(value) }\n"
+        "    return error(\"invalid\")\n"
+        "}\n"
+        "function main() {\n"
+        "    worker := Worker(id: 7, name: \"Toro\")\n"
+        "    named: Named = worker\n"
+        "    values := List<int>(identity<int>(1), 2)\n"
+        "    values.add(worker.id)\n"
+        "    print(describe(named))\n"
+        "    print(worker as string)\n"
+        "    print(describe(values.count))\n"
+        "    result := checked(values.count)\n"
+        "    handle result {\n"
+        "        ok(value) { print(value) }\n"
+        "        error(problem) { print(problem) }\n"
+        "    }\n"
+        "    event := Event::value(values[0])\n"
+        "    handle event {\n"
+        "        value(value) { print(value) }\n"
+        "        done { print(\"done\") }\n"
+        "    }\n"
+        "}\n");
+    const auto [status, output] = capture_run(toro::NativeCompiler(), c_source);
+    expect(status == 0, "backend integration program failed");
+    expect(
+        output == "Toro\nToro\nnumber\n3\n1\nworker destroyed\n",
+        "backend integration program produced unexpected output");
+}
+
 void test_collection_bounds_failure()
 {
     try {
@@ -890,6 +964,8 @@ int main()
         test_generic_inheritance_interface_runtime_behavior();
         test_overload_and_conversion_runtime_behavior();
         test_collection_runtime_behavior();
+        test_initializer_collection_argument_value_semantics();
+        test_backend_integration_runtime_behavior();
         test_collection_bounds_failure();
         test_temporary_cleanup();
     } catch (const std::exception& error) {

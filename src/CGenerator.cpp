@@ -1316,7 +1316,16 @@ private:
         const std::vector<CValueType>& arguments)
     {
         const std::string key = specialization_key(declaration.name, arguments);
-        if (structs_.contains(key) || instantiating_types_.contains(key)) {
+        if (const auto existing = structs_.find(key); existing != structs_.end()) {
+            if (existing->second.declaration != &declaration) {
+                throw_backend_error(
+                    declaration.location,
+                    "C backend struct specialization identity collides with '"
+                        + existing->second.declaration->name + "'");
+            }
+            return CValueType{CValueKind::Struct, key};
+        }
+        if (instantiating_types_.contains(key)) {
             return CValueType{CValueKind::Struct, key};
         }
         instantiating_types_.insert(key);
@@ -1389,7 +1398,16 @@ private:
         const std::vector<CValueType>& arguments)
     {
         const std::string key = specialization_key(declaration.name, arguments);
-        if (classes_.contains(key) || instantiating_types_.contains(key)) {
+        if (const auto existing = classes_.find(key); existing != classes_.end()) {
+            if (existing->second.declaration != &declaration) {
+                throw_backend_error(
+                    declaration.location,
+                    "C backend class specialization identity collides with '"
+                        + existing->second.declaration->name + "'");
+            }
+            return CValueType{CValueKind::Class, key};
+        }
+        if (instantiating_types_.contains(key)) {
             return CValueType{CValueKind::Class, key};
         }
         instantiating_types_.insert(key);
@@ -1476,7 +1494,14 @@ private:
         const std::string key = method_source_key(
             owner, owner_kind, method, arguments);
         auto add_to = [&](auto& info) {
-            if (info.methods.contains(key)) {
+            if (const auto existing = info.methods.find(key);
+                existing != info.methods.end()) {
+                if (existing->second.declaration != &method) {
+                    throw_backend_error(
+                        method.location,
+                        "C backend method specialization identity collides with '"
+                            + existing->second.declaration->name + "'");
+                }
                 return;
             }
             const auto saved = current_substitutions_;
@@ -1541,7 +1566,6 @@ private:
             if (statement->kind == StmtKind::StructDeclaration) {
                 const auto& declaration =
                     static_cast<const StructDeclarationStmt&>(*statement);
-                struct_templates_.emplace(declaration.name, &declaration);
                 if (declaration.generic_parameters.empty()) {
                     static_cast<void>(instantiate_struct(declaration, {}));
                 }
@@ -1555,7 +1579,6 @@ private:
             } else if (statement->kind == StmtKind::ClassDeclaration) {
                 const auto& declaration =
                     static_cast<const ClassDeclarationStmt&>(*statement);
-                class_templates_.emplace(declaration.name, &declaration);
                 if (declaration.generic_parameters.empty()) {
                     static_cast<void>(instantiate_class(declaration, {}));
                 }
@@ -1648,7 +1671,14 @@ private:
                 function.name, function.parameters);
         }
         const std::string key = specialization_key(base_key, arguments);
-        if (functions_.contains(key)) {
+        if (const auto existing = functions_.find(key);
+            existing != functions_.end()) {
+            if (existing->second.declaration != &function) {
+                throw_backend_error(
+                    function.location,
+                    "C backend function specialization identity collides with '"
+                        + existing->second.declaration->name + "'");
+            }
             return key;
         }
         const auto saved = current_substitutions_;
@@ -1704,6 +1734,15 @@ private:
         const CValueType& type,
         SourceLocation location)
     {
+        const std::size_t expected_arguments =
+            type.kind == CValueKind::Map ? 2U : 1U;
+        if ((type.kind != CValueKind::Array
+                && type.kind != CValueKind::List
+                && type.kind != CValueKind::Map)
+            || type.arguments.size() != expected_arguments) {
+            throw_backend_error(location,
+                "invalid concrete collection type reached the C backend");
+        }
         if (type.nullable) {
             throw_backend_error(location,
                 "nullable collection values are not supported by the C backend");
@@ -1727,6 +1766,31 @@ private:
                 return value == type;
             })) {
             collection_order_.push_back(type);
+        }
+    }
+
+    void register_result(const CValueType& type, SourceLocation location)
+    {
+        if (type.kind != CValueKind::Result || type.arguments.size() != 2) {
+            throw_backend_error(location,
+                "invalid concrete Result type reached the C backend");
+        }
+        if (type.nullable) {
+            throw_backend_error(location,
+                "nullable Result values are not supported by the C backend");
+        }
+        if (contains_class_reference(type)) {
+            throw_backend_error(location,
+                "class-reference Result payloads are not supported by the C backend");
+        }
+        if (contains_interface_value(type)) {
+            throw_backend_error(location,
+                "interface-valued Result payloads are not supported by the C backend");
+        }
+        if (std::ranges::none_of(
+                result_order_,
+                [&](const ResultInfo& existing) { return existing.type == type; })) {
+            result_order_.push_back(ResultInfo{type, location});
         }
     }
 
@@ -1773,23 +1837,7 @@ private:
                 {},
                 {lower_type(type.arguments[0]), lower_type(type.arguments[1])},
             };
-            if (contains_class_reference(result)) {
-                throw_backend_error(
-                    type.location,
-                    "class-reference Result payloads are not supported by the C backend");
-            }
-            if (contains_interface_value(result)) {
-                throw_backend_error(
-                    type.location,
-                    "interface-valued Result payloads are not supported by the C backend");
-            }
-            if (std::ranges::none_of(
-                    result_order_,
-                    [&](const ResultInfo& existing) {
-                        return existing.type == result;
-                    })) {
-                result_order_.push_back(ResultInfo{result, type.location});
-            }
+            register_result(result, type.location);
             return result;
         }
         if (type.name == "Array" || type.name == "List" || type.name == "Map") {
@@ -1889,13 +1937,7 @@ private:
         }
         if (type.name == "Result") {
             CValueType result{CValueKind::Result, {}, arguments, type.nullable};
-            if (std::ranges::none_of(
-                    result_order_,
-                    [&](const ResultInfo& existing) {
-                        return existing.type == result;
-                    })) {
-                result_order_.push_back(ResultInfo{result, current_location_});
-            }
+            register_result(result, current_location_);
             return result;
         }
         if (type.name == "Array" || type.name == "List" || type.name == "Map") {
@@ -3037,32 +3079,10 @@ private:
         push_scope();
         current_substitutions_ = info.substitutions;
         current_return_type_ = info.return_type;
-        for (std::size_t index = 0; index < function.parameters.size(); ++index) {
-            const bool owns_parameter =
-                is_managed_reference(info.parameter_types[index]);
-            scopes_.back().emplace(
-                function.parameters[index].name,
-                ValueInfo{
-                    info.parameter_types[index],
-                    parameter_name(function.parameters[index].name),
-                    false,
-                    owns_parameter,
-                });
-            if (owns_parameter) {
-                owned_reference_values_.back().push_back(ValueInfo{
-                    info.parameter_types[index],
-                    parameter_name(function.parameters[index].name),
-                    false,
-                    true,
-                });
-            }
-        }
+        bind_parameters(function.parameters, info.parameter_types);
 
         std::string output = function_declaration(key) + "\n{\n";
-        for (const auto& parameter : owned_reference_values_.back()) {
-            output += indent(1) + retain_call(parameter.type, parameter.c_name)
-                + ";\n";
-        }
+        output += retain_owned_parameters(1);
         output += emit_statement_list(function.body->statements, 1);
         if (!statements_guarantee_return(function.body->statements)) {
             output += scope_cleanup(scopes_.size() - 1, 1);
@@ -3093,33 +3113,11 @@ private:
                 "toro_self",
                 owner_kind == CValueKind::Struct,
             });
-        for (std::size_t index = 0; index < method.parameters.size(); ++index) {
-            const bool owns_parameter =
-                is_managed_reference(info.parameter_types[index]);
-            scopes_.back().emplace(
-                method.parameters[index].name,
-                ValueInfo{
-                    info.parameter_types[index],
-                    parameter_name(method.parameters[index].name),
-                    false,
-                    owns_parameter,
-                });
-            if (owns_parameter) {
-                owned_reference_values_.back().push_back(ValueInfo{
-                    info.parameter_types[index],
-                    parameter_name(method.parameters[index].name),
-                    false,
-                    true,
-                });
-            }
-        }
+        bind_parameters(method.parameters, info.parameter_types);
 
         std::string output = method_declaration_text(
             owner, owner_kind, method, info) + "\n{\n";
-        for (const auto& parameter : owned_reference_values_.back()) {
-            output += indent(1) + retain_call(parameter.type, parameter.c_name)
-                + ";\n";
-        }
+        output += retain_owned_parameters(1);
         output += emit_statement_list(method.body->statements, 1);
         if (!statements_guarantee_return(method.body->statements)) {
             output += scope_cleanup(scopes_.size() - 1, 1);
@@ -3905,6 +3903,37 @@ private:
             std::move(owned_arguments));
     }
 
+    std::string prepare_call_argument(
+        GeneratedExpression argument,
+        const CValueType& parameter_type,
+        std::string_view temporary_prefix,
+        std::string& prelude,
+        std::vector<ValueInfo>& owned_arguments)
+    {
+        prelude += argument.prelude;
+        if (parameter_type.kind == CValueKind::Array) {
+            const std::string temporary = std::string(temporary_prefix)
+                + std::to_string(temporary_index_++);
+            prelude += c_type_name(parameter_type) + " " + temporary + " = "
+                + (argument.owned ? argument.code
+                    : collection_name(parameter_type) + "_clone(" + argument.code + ")")
+                + ";\n";
+            owned_arguments.push_back(
+                ValueInfo{parameter_type, temporary, false, true});
+            return temporary;
+        }
+        if (is_managed_reference(argument.type) && argument.owned) {
+            const std::string temporary = std::string(temporary_prefix)
+                + std::to_string(temporary_index_++);
+            prelude += c_type_name(argument.type) + " " + temporary
+                + " = " + argument.code + ";\n";
+            owned_arguments.push_back(
+                ValueInfo{argument.type, temporary, false, true});
+            return temporary;
+        }
+        return argument.code;
+    }
+
     GeneratedExpression emit_call(
         const CallExpr& call,
         std::optional<CValueType> expected_type)
@@ -4001,28 +4030,12 @@ private:
             }
             const auto argument = emit_expression(
                 *ordered[index]->value, function->second.parameter_types[index]);
-            prelude += argument.prelude;
-            if (function->second.parameter_types[index].kind == CValueKind::Array) {
-                const std::string temporary =
-                    "toro_argument_array_" + std::to_string(temporary_index_++);
-                prelude += c_type_name(argument.type) + " " + temporary + " = "
-                    + (argument.owned ? argument.code
-                        : collection_name(argument.type) + "_clone(" + argument.code + ")")
-                    + ";\n";
-                owned_arguments.push_back(
-                    ValueInfo{argument.type, temporary, false, true});
-                code += temporary;
-            } else if (is_managed_reference(argument.type) && argument.owned) {
-                const std::string temporary =
-                    "toro_argument_class_" + std::to_string(temporary_index_++);
-                prelude += c_type_name(argument.type) + " " + temporary
-                    + " = " + argument.code + ";\n";
-                owned_arguments.push_back(
-                    ValueInfo{argument.type, temporary, false, true});
-                code += temporary;
-            } else {
-                code += argument.code;
-            }
+            code += prepare_call_argument(
+                argument,
+                function->second.parameter_types[index],
+                "toro_call_argument_",
+                prelude,
+                owned_arguments);
         }
         code += ")";
         return complete_call(
@@ -4466,26 +4479,17 @@ private:
         for (std::size_t index = 0; index < ordered.size(); ++index) {
             const auto argument = emit_expression(
                 *ordered[index]->value, initializer.parameter_types[index]);
-            prelude += argument.prelude;
             invocation += ", ";
-            if (is_managed_reference(argument.type) && argument.owned) {
-                const std::string argument_temporary =
-                    "toro_argument_class_" + std::to_string(temporary_index_++);
-                prelude += c_type_name(argument.type) + " " + argument_temporary
-                    + " = " + argument.code + ";\n";
-                owned_arguments.push_back(
-                    ValueInfo{argument.type, argument_temporary, false, true});
-                invocation += argument_temporary;
-            } else {
-                invocation += argument.code;
-            }
+            invocation += prepare_call_argument(
+                argument,
+                initializer.parameter_types[index],
+                "toro_init_argument_",
+                prelude,
+                owned_arguments);
         }
         invocation += ");\n";
         prelude += invocation;
-        for (auto argument = owned_arguments.rbegin();
-             argument != owned_arguments.rend(); ++argument) {
-            prelude += release_call(argument->type, argument->c_name) + ";\n";
-        }
+        prelude += release_owned_values(owned_arguments);
         return {temporary, type, true, false, std::move(prelude), true};
     }
 
@@ -5037,29 +5041,13 @@ private:
         for (std::size_t index = 0; index < ordered.size(); ++index) {
             const auto argument = emit_expression(
                 *ordered[index]->value, method_info->parameter_types[index]);
-            prelude += argument.prelude;
             code += ", ";
-            if (method_info->parameter_types[index].kind == CValueKind::Array) {
-                const std::string temporary =
-                    "toro_method_array_" + std::to_string(temporary_index_++);
-                prelude += c_type_name(argument.type) + " " + temporary + " = "
-                    + (argument.owned ? argument.code
-                        : collection_name(argument.type) + "_clone(" + argument.code + ")")
-                    + ";\n";
-                owned_arguments.push_back(
-                    ValueInfo{argument.type, temporary, false, true});
-                code += temporary;
-            } else if (is_managed_reference(argument.type) && argument.owned) {
-                const std::string temporary =
-                    "toro_argument_class_" + std::to_string(temporary_index_++);
-                prelude += c_type_name(argument.type) + " " + temporary
-                    + " = " + argument.code + ";\n";
-                owned_arguments.push_back(
-                    ValueInfo{argument.type, temporary, false, true});
-                code += temporary;
-            } else {
-                code += argument.code;
-            }
+            code += prepare_call_argument(
+                argument,
+                method_info->parameter_types[index],
+                "toro_method_argument_",
+                prelude,
+                owned_arguments);
         }
         code += ")";
         return complete_call(
@@ -5107,30 +5095,13 @@ private:
         for (std::size_t index = 0; index < ordered.size(); ++index) {
             const auto argument = emit_expression(
                 *ordered[index]->value, method.parameter_types[index]);
-            prelude += argument.prelude;
             code += ", ";
-            if (method.parameter_types[index].kind == CValueKind::Array) {
-                const std::string temporary =
-                    "toro_interface_array_" + std::to_string(temporary_index_++);
-                prelude += c_type_name(argument.type) + " " + temporary + " = "
-                    + (argument.owned ? argument.code
-                        : collection_name(argument.type) + "_clone(" + argument.code + ")")
-                    + ";\n";
-                owned_arguments.push_back(
-                    ValueInfo{argument.type, temporary, false, true});
-                code += temporary;
-            } else if (is_managed_reference(argument.type) && argument.owned) {
-                const std::string temporary =
-                    "toro_interface_argument_"
-                    + std::to_string(temporary_index_++);
-                prelude += c_type_name(argument.type) + " " + temporary
-                    + " = " + argument.code + ";\n";
-                owned_arguments.push_back(
-                    ValueInfo{argument.type, temporary, false, true});
-                code += temporary;
-            } else {
-                code += argument.code;
-            }
+            code += prepare_call_argument(
+                argument,
+                method.parameter_types[index],
+                "toro_interface_argument_",
+                prelude,
+                owned_arguments);
         }
         code += ")";
         return complete_call(
@@ -5165,10 +5136,7 @@ private:
             prelude += c_type_name(result_type) + " " + result_code
                 + " = " + code + ";\n";
         }
-        for (auto argument = owned_arguments.rbegin();
-             argument != owned_arguments.rend(); ++argument) {
-            prelude += release_call(argument->type, argument->c_name) + ";\n";
-        }
+        prelude += release_owned_values(owned_arguments);
         return {
             std::move(result_code),
             result_type,
@@ -5253,6 +5221,48 @@ private:
     {
         scopes_.pop_back();
         owned_reference_values_.pop_back();
+    }
+
+    void bind_parameters(
+        const std::vector<Parameter>& parameters,
+        const std::vector<CValueType>& parameter_types)
+    {
+        if (parameters.size() != parameter_types.size()) {
+            throw_backend_error(
+                current_location_, "internal C backend parameter-type mismatch");
+        }
+        for (std::size_t index = 0; index < parameters.size(); ++index) {
+            const bool owns_parameter =
+                is_managed_reference(parameter_types[index]);
+            const std::string name = parameter_name(parameters[index].name);
+            scopes_.back().emplace(
+                parameters[index].name,
+                ValueInfo{parameter_types[index], name, false, owns_parameter});
+            if (owns_parameter) {
+                owned_reference_values_.back().push_back(
+                    ValueInfo{parameter_types[index], name, false, true});
+            }
+        }
+    }
+
+    std::string retain_owned_parameters(std::size_t depth) const
+    {
+        std::string output;
+        for (const auto& parameter : owned_reference_values_.back()) {
+            output += indent(depth)
+                + retain_call(parameter.type, parameter.c_name) + ";\n";
+        }
+        return output;
+    }
+
+    std::string release_owned_values(
+        const std::vector<ValueInfo>& values) const
+    {
+        std::string output;
+        for (auto value = values.rbegin(); value != values.rend(); ++value) {
+            output += release_call(value->type, value->c_name) + ";\n";
+        }
+        return output;
     }
 
     std::string scope_cleanup(std::size_t scope_index, std::size_t depth) const

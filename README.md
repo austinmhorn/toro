@@ -44,6 +44,9 @@ Concrete core collections also execute natively: `Array<T>` is a fixed-size
 value with independent copies, while `List<T>` and `Map<string, V>` are shared
 reference-backed containers with explicit `clone()` operations. Indexing,
 mutation, counts, Array/List iteration, and class-element ARC are supported.
+The Phase 6 backend baseline is hardened for deterministic generated C,
+centralized runtime-type validation, consistent call-temporary ownership, and
+clear unsupported-feature diagnostics. Phase 7 application features are next.
 
 ## Build
 
@@ -183,6 +186,7 @@ Build and run through temporary artifacts:
 ./build/toro run examples/overloads.toro
 ./build/toro run examples/conversions.toro
 ./build/toro run examples/collections.toro
+./build/toro run examples/backend_hardening.toro
 ```
 
 `run` forwards program output and returns its exit status. Its temporary C source
@@ -282,6 +286,14 @@ Initializer overloading, base-initializer chaining, generic interfaces and
 interface methods, interface-valued fields, class-reference struct fields, class-valued
 enum/Result payloads, and field access through a
 temporary class reference remain explicit backend errors.
+
+Generated declaration and helper ordering follows deterministic discovery
+registries rather than unordered lookup-map iteration. Concrete specialization
+names include signature and recursive type identity, with collision checks at
+backend registration. Repeated generation is tested for byte-identical C, and
+representative output is validated as strict C11. The focused
+`backend_hardening.toro` example combines the major Phase 6 runtime features in
+one native program.
 
 ## Logical operators
 
