@@ -440,6 +440,13 @@ void test_user_defined_conversions()
         "}\n"
         "player := Player()\n"
         "label := player as Label\n");
+    expect_valid(
+        "struct Unbox<T> {\n"
+        "    value: T\n"
+        "    overload as T { return self.value }\n"
+        "}\n"
+        "number := Unbox<int>(value: 10) as int\n"
+        "text := Unbox<string>(value: \"Toro\") as string\n");
     expect_error(
         "class Broken {\n"
         "    overload as int { return \"wrong\" }\n"

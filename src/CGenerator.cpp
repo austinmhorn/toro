@@ -81,6 +81,12 @@ struct MethodInfo {
     std::vector<CValueType> parameter_types;
 };
 
+struct ConversionInfo {
+    const ConversionOverload* declaration;
+    std::string key;
+    CValueType target_type;
+};
+
 struct StructInfo {
     const StructDeclarationStmt* declaration;
     std::string key;
@@ -89,6 +95,7 @@ struct StructInfo {
     std::unordered_map<std::string, std::size_t> field_indices;
     std::unordered_map<std::string, MethodInfo> methods;
     std::vector<std::string> method_order;
+    std::vector<ConversionInfo> conversions;
 };
 
 struct ClassFieldInfo {
@@ -105,10 +112,12 @@ struct ClassInfo {
     std::unordered_map<std::string, std::size_t> field_indices;
     std::unordered_map<std::string, MethodInfo> methods;
     std::vector<std::string> method_order;
+    std::vector<ConversionInfo> conversions;
 };
 
 struct InterfaceMethodInfo {
     const InterfaceMethod* declaration;
+    std::string key;
     CValueType return_type;
     std::vector<CValueType> parameter_types;
 };
@@ -390,6 +399,36 @@ std::string specialization_key(
     return key;
 }
 
+std::string type_reference_mangle(const TypeReference& type)
+{
+    std::string result = "n" + std::to_string(type.name.size()) + "_" + type.name;
+    if (!type.arguments.empty()) {
+        result += "_g" + std::to_string(type.arguments.size());
+        for (const auto& argument : type.arguments) {
+            const std::string mangled = type_reference_mangle(argument);
+            result += "_" + std::to_string(mangled.size()) + "_" + mangled;
+        }
+    }
+    if (type.nullable) {
+        result += "_nullable";
+    }
+    return result;
+}
+
+template <typename Parameters>
+std::string source_signature_key(
+    std::string_view name,
+    const Parameters& parameters)
+{
+    std::string result{name};
+    result += "__signature";
+    for (const auto& parameter : parameters) {
+        const std::string mangled = type_reference_mangle(parameter.type);
+        result += "__" + std::to_string(mangled.size()) + "_" + mangled;
+    }
+    return result;
+}
+
 std::string result_name(const CValueType& type)
 {
     return "toro_result_" + type_mangle(type);
@@ -404,6 +443,12 @@ std::string method_name(std::string_view owner, std::string_view name)
 {
     return "toro_method_" + std::to_string(owner.size()) + "_"
         + std::string(owner) + "_" + std::string(name);
+}
+
+std::string conversion_name(std::string_view owner, std::string_view key)
+{
+    return "toro_conversion_" + std::to_string(owner.size()) + "_"
+        + std::string(owner) + "_" + std::string(key);
 }
 
 std::string parameter_name(std::string_view name)
@@ -601,6 +646,10 @@ public:
                     method_info);
                 output += ";\n";
             }
+            for (const auto& conversion : info.conversions) {
+                output += conversion_declaration_text(
+                    key, CValueKind::Struct, conversion) + ";\n";
+            }
         }
         for (const auto& key : class_order_) {
             const auto& info = classes_.at(key);
@@ -616,6 +665,10 @@ public:
                     method,
                     method_info);
                 output += ";\n";
+            }
+            for (const auto& conversion : info.conversions) {
+                output += conversion_declaration_text(
+                    key, CValueKind::Class, conversion) + ";\n";
             }
         }
 
@@ -669,6 +722,10 @@ public:
                     method_info);
                 output += '\n';
             }
+            for (const auto& conversion : info.conversions) {
+                output += emit_conversion(
+                    key, CValueKind::Struct, conversion) + '\n';
+            }
         }
         for (const auto& key : class_order_) {
             const auto& info = classes_.at(key);
@@ -684,6 +741,10 @@ public:
                     method,
                     method_info);
                 output += '\n';
+            }
+            for (const auto& conversion : info.conversions) {
+                output += emit_conversion(
+                    key, CValueKind::Class, conversion) + '\n';
             }
         }
 
@@ -849,10 +910,19 @@ private:
                 if (!method.is_virtual || method.is_override) {
                     continue;
                 }
+                const auto runtime_method = std::ranges::find_if(
+                    info.methods,
+                    [&](const auto& entry) {
+                        return entry.second.declaration == &method;
+                    });
+                if (runtime_method == info.methods.end()) {
+                    throw_backend_error(
+                        method.location, "missing virtual method runtime declaration");
+                }
                 slots.push_back(VirtualSlot{
                     method.name,
                     key,
-                    &info.methods.at(method.name),
+                    &runtime_method->second,
                 });
             }
         }
@@ -861,13 +931,15 @@ private:
 
     std::optional<VirtualSlot> find_virtual_slot(
         const std::string& class_type,
-        const std::string& method_name_value) const
+        const MethodInfo& method) const
     {
         const auto slots = virtual_slots(class_root(class_type));
         const auto slot = std::ranges::find_if(
             slots,
             [&](const VirtualSlot& candidate) {
-                return candidate.name == method_name_value
+                return candidate.name == method.declaration->name
+                    && candidate.declaration->parameter_types
+                        == method.parameter_types
                     && is_class_base_of(
                         candidate.declaration_owner, class_type);
             });
@@ -994,6 +1066,28 @@ private:
             : std::nullopt;
     }
 
+    std::optional<std::pair<std::string, const MethodInfo*>> find_class_method(
+        const std::string& name,
+        const std::string& method_name_value,
+        const std::vector<CValueType>& parameter_types) const
+    {
+        const auto& info = classes_.at(name);
+        const auto method = std::ranges::find_if(
+            info.methods,
+            [&](const auto& entry) {
+                return entry.second.declaration->name == method_name_value
+                    && entry.second.parameter_types == parameter_types;
+            });
+        if (method != info.methods.end()) {
+            return std::pair<std::string, const MethodInfo*>{
+                name, &method->second};
+        }
+        return info.base_name
+            ? find_class_method(
+                  *info.base_name, method_name_value, parameter_types)
+            : std::nullopt;
+    }
+
     std::optional<std::pair<std::string, const MethodDeclaration*>>
     find_class_method_declaration(
         const std::string& name,
@@ -1012,6 +1106,87 @@ private:
         }
         return info.base_name
             ? find_class_method_declaration(*info.base_name, method_name_value)
+            : std::nullopt;
+    }
+
+    template <typename Members>
+    static std::string method_source_key(
+        const Members& members,
+        const MethodDeclaration& selected,
+        const std::vector<CValueType>& generic_arguments)
+    {
+        std::size_t overload_count = 0;
+        for (const auto& member : members) {
+            if (member->kind != ClassMemberKind::Method) {
+                continue;
+            }
+            const auto& method = static_cast<const MethodDeclaration&>(*member);
+            if (method.name != selected.name) {
+                continue;
+            }
+            ++overload_count;
+        }
+        std::string base = selected.name;
+        if (overload_count > 1) {
+            base = source_signature_key(selected.name, selected.parameters);
+        }
+        return specialization_key(base, generic_arguments);
+    }
+
+    std::string method_source_key(
+        const std::string& owner,
+        CValueKind owner_kind,
+        const MethodDeclaration& method,
+        const std::vector<CValueType>& generic_arguments) const
+    {
+        if (owner_kind == CValueKind::Struct) {
+            return method_source_key(
+                structs_.at(owner).declaration->methods,
+                method,
+                generic_arguments);
+        }
+        return method_source_key(
+            classes_.at(owner).declaration->members,
+            method,
+            generic_arguments);
+    }
+
+    std::optional<std::pair<std::string, const MethodInfo*>>
+    find_class_method_by_declaration(
+        const std::string& name,
+        const MethodDeclaration& declaration) const
+    {
+        const auto& info = classes_.at(name);
+        const auto method = std::ranges::find_if(
+            info.methods,
+            [&](const auto& entry) {
+                return entry.second.declaration == &declaration;
+            });
+        if (method != info.methods.end()) {
+            return std::pair<std::string, const MethodInfo*>{
+                name, &method->second};
+        }
+        return info.base_name
+            ? find_class_method_by_declaration(*info.base_name, declaration)
+            : std::nullopt;
+    }
+
+    std::optional<std::string> find_class_method_owner(
+        const std::string& name,
+        const MethodDeclaration& declaration) const
+    {
+        const auto& info = classes_.at(name);
+        const bool declared_here = std::ranges::any_of(
+            info.declaration->members,
+            [&](const auto& member) {
+                return member->kind == ClassMemberKind::Method
+                    && member.get() == &declaration;
+            });
+        if (declared_here) {
+            return name;
+        }
+        return info.base_name
+            ? find_class_method_owner(*info.base_name, declaration)
             : std::nullopt;
     }
 
@@ -1097,7 +1272,7 @@ private:
         current_substitutions_ = substitutions_for(
             declaration.generic_parameters, arguments, declaration.location);
         StructInfo info{
-            &declaration, key, current_substitutions_, {}, {}, {}, {}};
+            &declaration, key, current_substitutions_, {}, {}, {}, {}, {}};
         for (const auto& field : declaration.fields) {
             const CValueType field_type = lower_type(field.type);
             if (field_type.kind == CValueKind::Interface) {
@@ -1113,15 +1288,8 @@ private:
             info.field_indices.emplace(field.name, info.fields.size());
             info.fields.push_back(StructFieldInfo{&field, field_type});
         }
-        std::unordered_set<std::string> method_names;
         for (const auto& member : declaration.methods) {
             const auto& method = static_cast<const MethodDeclaration&>(*member);
-            if (!method_names.insert(method.name).second) {
-                throw_backend_error(
-                    method.location,
-                    "struct method overloads are not supported by the C backend: '"
-                        + declaration.name + "." + method.name + "'");
-            }
             if (!method.generic_parameters.empty()) {
                 if (method.is_virtual || method.is_override) {
                     throw_backend_error(
@@ -1135,21 +1303,26 @@ private:
                     method.location,
                     "virtual or bodyless struct methods are not supported by the C backend");
             }
+            const std::string method_key = method_source_key(
+                declaration.methods, method, {});
             MethodInfo method_info{
-                &method, method.name, current_substitutions_, void_type, {}};
+                &method, method_key, current_substitutions_, void_type, {}};
             if (method.return_type) {
                 method_info.return_type = lower_type(*method.return_type);
             }
             for (const auto& parameter : method.parameters) {
                 method_info.parameter_types.push_back(lower_type(parameter.type));
             }
-            if (!info.methods.emplace(method.name, std::move(method_info)).second) {
-                throw_backend_error(
-                    method.location,
-                    "struct method overloads are not supported by the C backend: '"
-                        + declaration.name + "." + method.name + "'");
-            }
-            info.method_order.push_back(method.name);
+            info.methods.emplace(method_key, std::move(method_info));
+            info.method_order.push_back(method_key);
+        }
+        for (const auto& conversion : declaration.conversions) {
+            const CValueType target_type = lower_type(conversion->target_type);
+            info.conversions.push_back(ConversionInfo{
+                conversion.get(),
+                "as__" + type_mangle(target_type),
+                target_type,
+            });
         }
         current_substitutions_ = saved;
         instantiating_types_.erase(key);
@@ -1176,13 +1349,18 @@ private:
             base_name = lower_type(*declaration.base_type).nominal_name;
         }
         ClassInfo info{
-            &declaration, key, current_substitutions_, base_name, {}, {}, {}, {}};
-        std::unordered_set<std::string> method_names;
+            &declaration, key, current_substitutions_, base_name, {}, {}, {}, {}, {}};
         for (const auto& member : declaration.members) {
             if (member->kind == ClassMemberKind::Conversion) {
-                throw_backend_error(
-                    member->location,
-                    "class conversion overloads are not supported by the C backend");
+                const auto& conversion =
+                    static_cast<const ConversionOverload&>(*member);
+                const CValueType target_type = lower_type(conversion.target_type);
+                info.conversions.push_back(ConversionInfo{
+                    &conversion,
+                    "as__" + type_mangle(target_type),
+                    target_type,
+                });
+                continue;
             }
             if (member->kind == ClassMemberKind::Field) {
                 const auto& field = static_cast<const ClassField&>(*member);
@@ -1203,12 +1381,6 @@ private:
                 continue;
             }
             const auto& method = static_cast<const MethodDeclaration&>(*member);
-            if (!method_names.insert(method.name).second) {
-                throw_backend_error(
-                    method.location,
-                    "class method overloads are not supported by the C backend: '"
-                        + declaration.name + "." + method.name + "'");
-            }
             if (!method.generic_parameters.empty()) {
                 if (method.is_virtual || method.is_override) {
                     throw_backend_error(
@@ -1222,21 +1394,18 @@ private:
                     method.location,
                     "only virtual class methods may omit a body in the C backend");
             }
+            const std::string method_key = method_source_key(
+                declaration.members, method, {});
             MethodInfo method_info{
-                &method, method.name, current_substitutions_, void_type, {}};
+                &method, method_key, current_substitutions_, void_type, {}};
             if (method.return_type) {
                 method_info.return_type = lower_type(*method.return_type);
             }
             for (const auto& parameter : method.parameters) {
                 method_info.parameter_types.push_back(lower_type(parameter.type));
             }
-            if (!info.methods.emplace(method.name, std::move(method_info)).second) {
-                throw_backend_error(
-                    method.location,
-                    "class method overloads are not supported by the C backend: '"
-                        + declaration.name + "." + method.name + "'");
-            }
-            info.method_order.push_back(method.name);
+            info.methods.emplace(method_key, std::move(method_info));
+            info.method_order.push_back(method_key);
         }
         current_substitutions_ = saved;
         instantiating_types_.erase(key);
@@ -1252,7 +1421,8 @@ private:
         const MethodDeclaration& method,
         const std::vector<CValueType>& arguments)
     {
-        const std::string key = specialization_key(method.name, arguments);
+        const std::string key = method_source_key(
+            owner, owner_kind, method, arguments);
         auto add_to = [&](auto& info) {
             if (info.methods.contains(key)) {
                 return;
@@ -1319,11 +1489,6 @@ private:
             if (statement->kind == StmtKind::StructDeclaration) {
                 const auto& declaration =
                     static_cast<const StructDeclarationStmt&>(*statement);
-                if (!declaration.conversions.empty()) {
-                    throw_backend_error(
-                        declaration.location,
-                        "struct conversion overloads are not supported by the C backend");
-                }
                 struct_templates_.emplace(declaration.name, &declaration);
                 if (declaration.generic_parameters.empty()) {
                     static_cast<void>(instantiate_struct(declaration, {}));
@@ -1347,26 +1512,39 @@ private:
 
         for (const auto* declaration : interface_order_) {
             auto& info = interfaces_.at(declaration->name);
-            for (const auto& method : declaration->methods) {
+            for (std::size_t method_index = 0;
+                 method_index < declaration->methods.size(); ++method_index) {
+                const auto& method = declaration->methods[method_index];
                 if (!method.generic_parameters.empty()) {
                     throw_backend_error(
                         method.location,
                         "generic interface methods are not supported by the C backend");
                 }
-                if (info.method_indices.contains(method.name)) {
-                    throw_backend_error(
-                        method.location,
-                        "interface method overloads are not supported by the C backend: '"
-                            + declaration->name + "." + method.name + "'");
+                std::size_t overload_count = 0;
+                std::size_t overload_index = 0;
+                for (std::size_t index = 0;
+                     index < declaration->methods.size(); ++index) {
+                    if (declaration->methods[index].name != method.name) {
+                        continue;
+                    }
+                    if (index == method_index) {
+                        overload_index = overload_count;
+                    }
+                    ++overload_count;
                 }
-                InterfaceMethodInfo method_info{&method, void_type, {}};
+                std::string method_key = method.name;
+                if (overload_count > 1) {
+                    method_key += "__overload_" + std::to_string(overload_index);
+                }
+                InterfaceMethodInfo method_info{
+                    &method, method_key, void_type, {}};
                 if (method.return_type) {
                     method_info.return_type = lower_type(*method.return_type);
                 }
                 for (const auto& parameter : method.parameters) {
                     method_info.parameter_types.push_back(lower_type(parameter.type));
                 }
-                info.method_indices.emplace(method.name, info.methods.size());
+                info.method_indices.emplace(method_key, info.methods.size());
                 info.methods.push_back(std::move(method_info));
             }
         }
@@ -1402,7 +1580,22 @@ private:
         const FunctionDeclarationStmt& function,
         const std::vector<CValueType>& arguments)
     {
-        const std::string key = specialization_key(function.name, arguments);
+        const auto templates = function_templates_.find(function.name);
+        if (templates == function_templates_.end()) {
+            throw_backend_error(function.location,
+                "missing backend function template for '" + function.name + "'");
+        }
+        if (std::ranges::find(templates->second, &function)
+            == templates->second.end()) {
+            throw_backend_error(function.location,
+                "missing backend overload declaration for '" + function.name + "'");
+        }
+        std::string base_key = function.name;
+        if (templates->second.size() > 1) {
+            base_key = source_signature_key(
+                function.name, function.parameters);
+        }
+        const std::string key = specialization_key(base_key, arguments);
         if (functions_.contains(key)) {
             return key;
         }
@@ -1426,6 +1619,19 @@ private:
     void collect_functions(const Program& program)
     {
         for (const auto& statement : program.statements) {
+            if (statement->kind == StmtKind::FunctionDeclaration) {
+                const auto& function =
+                    static_cast<const FunctionDeclarationStmt&>(*statement);
+                function_templates_[function.name].push_back(&function);
+            }
+        }
+        if (const auto main = function_templates_.find("main");
+            main != function_templates_.end() && main->second.size() != 1) {
+            throw_backend_error(
+                main->second.front()->location,
+                "toro entry function 'main' cannot be overloaded in the C backend");
+        }
+        for (const auto& statement : program.statements) {
             if (statement->kind != StmtKind::FunctionDeclaration) {
                 continue;
             }
@@ -1435,12 +1641,6 @@ private:
                 throw_backend_error(
                     function.location,
                     "toro entry function 'main' cannot be generic in the C backend");
-            }
-            if (!function_templates_.emplace(function.name, &function).second) {
-                throw_backend_error(
-                    function.location,
-                    "function overloads are not supported by the C backend: '"
-                        + function.name + "'");
             }
             if (function.generic_parameters.empty()) {
                 static_cast<void>(instantiate_function(function, {}));
@@ -1665,11 +1865,11 @@ private:
             if (call.callee->kind == ExprKind::Identifier) {
                 const auto& callee =
                     static_cast<const IdentifierExpr&>(*call.callee);
-                if (const auto found = function_templates_.find(callee.name);
-                    found != function_templates_.end()
-                    && !found->second->generic_parameters.empty()) {
+                if (call.resolved_function
+                    && !call.resolved_function->generic_parameters.empty()) {
                     std::vector<CValueType> arguments;
-                    for (const auto& parameter : found->second->generic_parameters) {
+                    for (const auto& parameter :
+                         call.resolved_function->generic_parameters) {
                         const auto substitution = std::ranges::find_if(
                             call.resolved_substitutions,
                             [&](const auto& value) {
@@ -1683,7 +1883,8 @@ private:
                         }
                         arguments.push_back(lower_type(substitution->second));
                     }
-                    static_cast<void>(instantiate_function(*found->second, arguments));
+                    static_cast<void>(instantiate_function(
+                        *call.resolved_function, arguments));
                 }
             } else if (call.callee->kind == ExprKind::MemberAccess) {
                 const auto& member =
@@ -1693,24 +1894,7 @@ private:
                         lower_type(*member.object->resolved_type);
                     if (owner_type.kind == CValueKind::Struct
                         || owner_type.kind == CValueKind::Class) {
-                        const MethodDeclaration* method = nullptr;
-                        if (owner_type.kind == CValueKind::Struct) {
-                            for (const auto& candidate :
-                                 structs_.at(owner_type.nominal_name)
-                                     .declaration->methods) {
-                                const auto& declaration =
-                                    static_cast<const MethodDeclaration&>(*candidate);
-                                if (declaration.name == member.member) {
-                                    method = &declaration;
-                                    break;
-                                }
-                            }
-                        } else {
-                            if (const auto found = find_class_method_declaration(
-                                    owner_type.nominal_name, member.member)) {
-                                method = found->second;
-                            }
-                        }
+                        const MethodDeclaration* method = call.resolved_method;
                         if (method && !method->generic_parameters.empty()) {
                             std::vector<CValueType> arguments;
                             for (const auto& parameter : method->generic_parameters) {
@@ -1729,8 +1913,14 @@ private:
                             }
                             std::string method_owner = owner_type.nominal_name;
                             if (owner_type.kind == CValueKind::Class) {
-                                method_owner = find_class_method_declaration(
-                                    owner_type.nominal_name, member.member)->first;
+                                const auto found = find_class_method_owner(
+                                    owner_type.nominal_name, *method);
+                                if (!found) {
+                                    throw_backend_error(current_location_,
+                                        "missing selected method declaration for '"
+                                            + member.member + "'");
+                                }
+                                method_owner = *found;
                             }
                             static_cast<void>(instantiate_method(
                                 method_owner, owner_type.kind, *method, arguments));
@@ -1870,6 +2060,9 @@ private:
                     discover_statement(*declaration.body);
                 }
             }
+            for (const auto& conversion : declaration->conversions) {
+                discover_statement(*conversion->body);
+            }
         }
         for (std::size_t index = 0; index < class_order_.size(); ++index) {
             const std::string key = class_order_[index];
@@ -1884,6 +2077,10 @@ private:
                     continue;
                 }
                 if (member->kind != ClassMemberKind::Method) {
+                    if (member->kind == ClassMemberKind::Conversion) {
+                        discover_statement(
+                            *static_cast<const ConversionOverload&>(*member).body);
+                    }
                     continue;
                 }
                 const auto& declaration =
@@ -1960,7 +2157,8 @@ private:
         for (const auto& slot : slots) {
             output += "    " + c_type_name(slot.declaration->return_type)
                 + " (*" + virtual_slot_name(
-                    slot.declaration_owner, slot.name) + ")(void* toro_object";
+                    slot.declaration_owner, slot.declaration->key)
+                + ")(void* toro_object";
             for (std::size_t index = 0;
                  index < slot.declaration->parameter_types.size(); ++index) {
                 output += ", "
@@ -1992,7 +2190,8 @@ private:
             if (!is_class_base_of(slot.declaration_owner, concrete)) {
                 continue;
             }
-            const auto implementation = find_class_method(concrete, slot.name);
+            const auto implementation = find_class_method(
+                concrete, slot.name, slot.declaration->parameter_types);
             if (!implementation || !implementation->second->declaration->body) {
                 throw_backend_error(
                     concrete_info.declaration->location,
@@ -2002,7 +2201,7 @@ private:
             }
             output += "static "
                 + c_type_name(slot.declaration->return_type) + " "
-                + virtual_thunk_name(concrete, slot.name)
+                + virtual_thunk_name(concrete, slot.declaration->key)
                 + "(void* toro_object";
             for (std::size_t index = 0;
                  index < slot.declaration->parameter_types.size(); ++index) {
@@ -2020,7 +2219,8 @@ private:
             if (slot.declaration->return_type != void_type) {
                 output += "return ";
             }
-            output += method_name(implementation->first, slot.name) + "("
+            output += method_name(
+                implementation->first, implementation->second->key) + "("
                 + receiver;
             for (const auto& parameter :
                  slot.declaration->declaration->parameters) {
@@ -2042,9 +2242,10 @@ private:
             + vtable_instance_name(concrete) + " =\n{\n";
         for (const auto& slot : slots) {
             output += "    ." + virtual_slot_name(
-                slot.declaration_owner, slot.name) + " = ";
+                slot.declaration_owner, slot.declaration->key) + " = ";
             if (is_class_base_of(slot.declaration_owner, concrete)) {
-                output += virtual_thunk_name(concrete, slot.name);
+                output += virtual_thunk_name(
+                    concrete, slot.declaration->key);
             } else {
                 output += "NULL";
             }
@@ -2093,7 +2294,7 @@ private:
         }
         for (const auto& method : info.methods) {
             output += "    " + c_type_name(method.return_type) + " (*"
-                + interface_slot_name(declaration.name, method.declaration->name)
+                + interface_slot_name(declaration.name, method.key)
                 + ")(" + value_type + "* toro_interface_self";
             for (std::size_t index = 0;
                  index < method.parameter_types.size(); ++index) {
@@ -2137,7 +2338,7 @@ private:
         for (const auto& requirement : info.methods) {
             output += "static " + c_type_name(requirement.return_type) + " "
                 + interface_thunk_name(
-                    interface, implementer, requirement.declaration->name)
+                    interface, implementer, requirement.key)
                 + "(" + value_type + "* toro_interface_self";
             for (std::size_t index = 0;
                  index < requirement.parameter_types.size(); ++index) {
@@ -2151,18 +2352,27 @@ private:
             }
             if (implementer_kind == CValueKind::Struct) {
                 const auto& methods = structs_.at(implementer).methods;
-                const auto method = methods.find(requirement.declaration->name);
+                const auto method = std::ranges::find_if(
+                    methods,
+                    [&](const auto& entry) {
+                        return entry.second.declaration->name
+                                == requirement.declaration->name
+                            && entry.second.parameter_types
+                                == requirement.parameter_types;
+                    });
                 if (method == methods.end()) {
                     throw_backend_error(
                         requirement.declaration->location,
                         "missing runtime struct interface implementation");
                 }
-                output += method_name(implementer, requirement.declaration->name)
+                output += method_name(implementer, method->second.key)
                     + "(&toro_interface_self->toro_value."
                     + interface_struct_storage_name(implementer);
             } else {
                 const auto implementation = find_class_method(
-                    implementer, requirement.declaration->name);
+                    implementer,
+                    requirement.declaration->name,
+                    requirement.parameter_types);
                 if (!implementation) {
                     throw_backend_error(
                         requirement.declaration->location,
@@ -2171,20 +2381,20 @@ private:
                 std::string receiver = "(" + class_name(implementer)
                     + "*)toro_interface_self->toro_object";
                 const auto slot = find_virtual_slot(
-                    implementer, requirement.declaration->name);
+                    implementer, *implementation->second);
                 if (slot) {
                     const std::string table = class_header_access(
                         receiver, implementer, "toro_vtable");
                     const std::string control = class_header_access(
                         receiver, implementer, "toro_weak_control");
                     output += table + "->" + virtual_slot_name(
-                        slot->declaration_owner, requirement.declaration->name)
+                        slot->declaration_owner, slot->declaration->key)
                         + "(" + control + "->toro_object";
                 } else {
                     receiver = class_upcast(
                         receiver, implementer, implementation->first);
                     output += method_name(
-                        implementation->first, requirement.declaration->name)
+                        implementation->first, implementation->second->key)
                         + "(" + receiver;
                 }
             }
@@ -2210,9 +2420,9 @@ private:
         }
         for (const auto& method : info.methods) {
             output += "    ." + interface_slot_name(
-                interface, method.declaration->name) + " = "
+                interface, method.key) + " = "
                 + interface_thunk_name(
-                    interface, implementer, method.declaration->name) + ",\n";
+                    interface, implementer, method.key) + ",\n";
         }
         output += "};\n\n";
         return output;
@@ -2461,6 +2671,18 @@ private:
         return output;
     }
 
+    std::string conversion_declaration_text(
+        const std::string& owner,
+        CValueKind owner_kind,
+        const ConversionInfo& info) const
+    {
+        return "static " + c_type_name(info.target_type) + " "
+            + conversion_name(owner, info.key) + "("
+            + c_type_name(CValueType{owner_kind, owner})
+            + (owner_kind == CValueKind::Struct ? "*" : "")
+            + " toro_self)";
+    }
+
     std::string function_declaration(const std::string& key) const
     {
         const auto& info = functions_.at(key);
@@ -2579,6 +2801,37 @@ private:
         if (!statements_guarantee_return(method.body->statements)) {
             output += scope_cleanup(scopes_.size() - 1, 1);
         }
+        output += "}\n";
+        pop_scope();
+        current_return_type_.reset();
+        current_substitutions_.clear();
+        return output;
+    }
+
+    std::string emit_conversion(
+        const std::string& owner,
+        CValueKind owner_kind,
+        const ConversionInfo& info)
+    {
+        const auto& conversion = *info.declaration;
+        current_location_ = conversion.location;
+        current_substitutions_ = owner_kind == CValueKind::Struct
+            ? structs_.at(owner).substitutions
+            : classes_.at(owner).substitutions;
+        scopes_.clear();
+        owned_reference_values_.clear();
+        push_scope();
+        current_return_type_ = info.target_type;
+        scopes_.back().emplace(
+            "self",
+            ValueInfo{
+                CValueType{owner_kind, owner},
+                "toro_self",
+                owner_kind == CValueKind::Struct,
+            });
+        std::string output = conversion_declaration_text(
+            owner, owner_kind, info) + "\n{\n";
+        output += emit_statement_list(conversion.body->statements, 1);
         output += "}\n";
         pop_scope();
         current_return_type_.reset();
@@ -3021,9 +3274,7 @@ private:
             return emit_propagation(
                 static_cast<const PropagationExpr&>(expression));
         case ExprKind::Cast:
-            throw_backend_error(
-                current_location_,
-                "expression is not supported by the C backend");
+            return emit_cast(static_cast<const CastExpr&>(expression));
         }
         throw_backend_error(current_location_, "unknown expression");
     }
@@ -3136,6 +3387,97 @@ private:
         };
     }
 
+    GeneratedExpression emit_cast(const CastExpr& cast)
+    {
+        if (!cast.resolved_type) {
+            throw_backend_error(current_location_,
+                "missing resolved type for explicit conversion");
+        }
+        const CValueType target = lower_type(*cast.resolved_type);
+        auto source = emit_expression(*cast.expression);
+        if (!cast.resolved_conversion) {
+            if (source.type == target
+                || (source.type.kind == CValueKind::Class
+                    && source.type.nominal_name == target.nominal_name
+                    && source.type.arguments == target.arguments)) {
+                source.type = target;
+                return source;
+            }
+            if (source.type.kind == CValueKind::Int
+                && target.kind == CValueKind::Dec) {
+                source.code = "((double)(" + source.code + "))";
+                source.type = target;
+                return source;
+            }
+            if (source.type.kind == CValueKind::Dec
+                && target.kind == CValueKind::Int) {
+                source.code = "((int64_t)(" + source.code + "))";
+                source.type = target;
+                return source;
+            }
+            throw_backend_error(current_location_,
+                "explicit conversion is not supported by the C backend");
+        }
+
+        const ConversionInfo* conversion = nullptr;
+        if (source.type.kind == CValueKind::Struct) {
+            for (const auto& candidate :
+                 structs_.at(source.type.nominal_name).conversions) {
+                if (candidate.declaration == cast.resolved_conversion) {
+                    conversion = &candidate;
+                    break;
+                }
+            }
+        } else if (source.type.kind == CValueKind::Class) {
+            for (const auto& candidate :
+                 classes_.at(source.type.nominal_name).conversions) {
+                if (candidate.declaration == cast.resolved_conversion) {
+                    conversion = &candidate;
+                    break;
+                }
+            }
+        }
+        if (!conversion) {
+            throw_backend_error(current_location_,
+                "missing selected user-defined conversion in C backend");
+        }
+
+        std::string prelude = source.prelude;
+        std::vector<ValueInfo> owned_arguments;
+        std::string receiver;
+        if (source.type.kind == CValueKind::Struct) {
+            if (source.addressable || source.pointer) {
+                receiver = source.pointer ? source.code : "&(" + source.code + ")";
+            } else {
+                const std::string temporary =
+                    "toro_conversion_value_" + std::to_string(temporary_index_++);
+                prelude += c_type_name(source.type) + " " + temporary
+                    + " = " + source.code + ";\n";
+                receiver = "&" + temporary;
+            }
+        } else if (source.type.kind == CValueKind::Class) {
+            receiver = source.code;
+            if (source.owned) {
+                const std::string temporary =
+                    "toro_conversion_class_" + std::to_string(temporary_index_++);
+                prelude += c_type_name(source.type) + " " + temporary
+                    + " = " + source.code + ";\n";
+                receiver = temporary;
+                owned_arguments.push_back(
+                    ValueInfo{source.type, temporary, false, true});
+            }
+        } else {
+            throw_backend_error(current_location_,
+                "user-defined conversions require a struct or class value");
+        }
+        return complete_call(
+            conversion_name(source.type.nominal_name, conversion->key)
+                + "(" + receiver + ")",
+            target,
+            std::move(prelude),
+            std::move(owned_arguments));
+    }
+
     GeneratedExpression emit_call(
         const CallExpr& call,
         std::optional<CValueType> expected_type)
@@ -3181,12 +3523,14 @@ private:
             const auto type = lower_type(*call.resolved_type);
             return emit_class_construction(type.nominal_name, call);
         }
-        std::string function_key = callee.name;
-        if (const auto source = function_templates_.find(callee.name);
-            source != function_templates_.end()
-            && !source->second->generic_parameters.empty()) {
-            std::vector<CValueType> arguments;
-            for (const auto& parameter : source->second->generic_parameters) {
+        if (!call.resolved_function) {
+            throw_backend_error(current_location_,
+                "missing resolved overload for function '" + callee.name + "'");
+        }
+        std::vector<CValueType> generic_arguments;
+        if (!call.resolved_function->generic_parameters.empty()) {
+            for (const auto& parameter :
+                 call.resolved_function->generic_parameters) {
                 const auto substitution = std::ranges::find_if(
                     call.resolved_substitutions,
                     [&](const auto& value) {
@@ -3198,10 +3542,11 @@ private:
                         "missing resolved generic argument for function '"
                             + callee.name + "'");
                 }
-                arguments.push_back(lower_type(substitution->second));
+                generic_arguments.push_back(lower_type(substitution->second));
             }
-            function_key = instantiate_function(*source->second, arguments);
         }
+        const std::string function_key = instantiate_function(
+            *call.resolved_function, generic_arguments);
         const auto function = functions_.find(function_key);
         if (function == functions_.end()) {
             throw_backend_error(
@@ -3914,9 +4259,12 @@ private:
         const MethodInfo* method_info = nullptr;
         std::string method_owner = receiver.type.nominal_name;
         std::string method_key = member.member;
-        const auto resolved_method_key = [&](const MethodDeclaration& method) {
+        const auto resolved_method_key = [&](
+            const std::string& owner,
+            CValueKind owner_kind,
+            const MethodDeclaration& method) {
             if (method.generic_parameters.empty()) {
-                return method.name;
+                return method_source_key(owner, owner_kind, method, {});
             }
             std::vector<CValueType> arguments;
             for (const auto& parameter : method.generic_parameters) {
@@ -3933,34 +4281,44 @@ private:
                 }
                 arguments.push_back(lower_type(substitution->second));
             }
-            return specialization_key(method.name, arguments);
+            return method_source_key(owner, owner_kind, method, arguments);
         };
         if (receiver.type.kind == CValueKind::Struct) {
             const auto& struct_info = structs_.at(receiver.type.nominal_name);
-            for (const auto& candidate : struct_info.declaration->methods) {
-                const auto& declaration =
-                    static_cast<const MethodDeclaration&>(*candidate);
-                if (declaration.name == member.member) {
-                    method_key = resolved_method_key(declaration);
-                    break;
-                }
+            if (!call.resolved_method) {
+                throw_backend_error(current_location_,
+                    "missing resolved overload for method '" + member.member + "'");
             }
+            method_key = resolved_method_key(
+                receiver.type.nominal_name,
+                CValueKind::Struct,
+                *call.resolved_method);
             const auto& methods = struct_info.methods;
             const auto method = methods.find(method_key);
             if (method != methods.end()) {
                 method_info = &method->second;
             }
         } else {
-            if (const auto declaration = find_class_method_declaration(
-                    receiver.type.nominal_name, member.member)) {
-                method_key = resolved_method_key(*declaration->second);
+            if (!call.resolved_method) {
+                throw_backend_error(current_location_,
+                    "missing resolved overload for method '" + member.member + "'");
+            }
+            if (const auto selected = find_class_method_by_declaration(
+                    receiver.type.nominal_name, *call.resolved_method)) {
+                method_owner = selected->first;
+                method_key = resolved_method_key(
+                    method_owner,
+                    CValueKind::Class,
+                    *call.resolved_method);
             }
         }
         if (receiver.type.kind == CValueKind::Class) {
-            if (const auto method = find_class_method(
-                    receiver.type.nominal_name, method_key)) {
-                method_owner = method->first;
-                method_info = method->second;
+            if (call.resolved_method) {
+                if (const auto method = find_class_method_by_declaration(
+                        receiver.type.nominal_name, *call.resolved_method)) {
+                    method_owner = method->first;
+                    method_info = method->second;
+                }
             }
         }
         if (!method_info) {
@@ -3970,7 +4328,7 @@ private:
                     + member.member + "'");
         }
         const auto virtual_slot = receiver.type.kind == CValueKind::Class
-            ? find_virtual_slot(receiver.type.nominal_name, member.member)
+            ? find_virtual_slot(receiver.type.nominal_name, *method_info)
             : std::nullopt;
         if (receiver.type.kind == CValueKind::Struct
             && !receiver.pointer && !receiver.addressable) {
@@ -4003,7 +4361,8 @@ private:
             const std::string control = class_header_access(
                 receiver_code, receiver.type.nominal_name, "toro_weak_control");
             code = vtable + "->" + virtual_slot_name(
-                virtual_slot->declaration_owner, member.member) + "("
+                virtual_slot->declaration_owner,
+                virtual_slot->declaration->key) + "("
                 + control + "->toro_object";
         } else {
             if (receiver.type.kind == CValueKind::Class
@@ -4044,14 +4403,18 @@ private:
         const GeneratedExpression& receiver)
     {
         const auto& interface = interfaces_.at(receiver.type.nominal_name);
-        const auto found = interface.method_indices.find(member.member);
-        if (found == interface.method_indices.end()) {
+        const auto found = std::ranges::find_if(
+            interface.methods,
+            [&](const InterfaceMethodInfo& candidate) {
+                return candidate.declaration == call.resolved_interface_method;
+            });
+        if (found == interface.methods.end()) {
             throw_backend_error(
                 current_location_,
-                "interface '" + receiver.type.nominal_name
-                    + "' has no method named '" + member.member + "'");
+                "missing resolved interface overload for '"
+                    + receiver.type.nominal_name + "." + member.member + "'");
         }
-        const auto& method = interface.methods[found->second];
+        const auto& method = *found;
         const auto ordered = order_arguments(call, method.declaration->parameters);
         std::string prelude = receiver.prelude;
         std::vector<ValueInfo> owned_arguments;
@@ -4067,7 +4430,7 @@ private:
             }
         }
         std::string code = receiver_code + ".toro_vtable->"
-            + interface_slot_name(receiver.type.nominal_name, member.member)
+            + interface_slot_name(receiver.type.nominal_name, method.key)
             + "(&" + receiver_code;
         for (std::size_t index = 0; index < ordered.size(); ++index) {
             const auto argument = emit_expression(
@@ -4249,7 +4612,8 @@ private:
     std::vector<CValueType> nominal_order_;
     std::vector<ResultInfo> result_order_;
     std::unordered_map<std::string, FunctionInfo> functions_;
-    std::unordered_map<std::string, const FunctionDeclarationStmt*> function_templates_;
+    std::unordered_map<std::string,
+        std::vector<const FunctionDeclarationStmt*>> function_templates_;
     std::vector<std::string> function_order_;
     std::vector<std::unordered_map<std::string, ValueInfo>> scopes_;
     std::vector<std::vector<ValueInfo>> owned_reference_values_;

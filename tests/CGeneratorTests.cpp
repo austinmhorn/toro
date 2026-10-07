@@ -734,18 +734,8 @@ void test_interface_lowering()
 void test_unsupported_features()
 {
     expect_backend_error(
-        "function convert(value: int) -> int { return value }\n"
-        "function convert(value: string) -> string { return value }\n",
-        "function overloads are not supported by the C backend");
-    expect_backend_error(
         "struct MaybeOwner { owner: string? }\n",
         "nullable type 'string?' is not supported by the C backend");
-    expect_backend_error(
-        "struct Named {\n"
-        "    name: string\n"
-        "    overload as string { return self.name }\n"
-        "}\n",
-        "conversion overloads are not supported by the C backend");
     expect_backend_error(
         "struct Counter {\n"
         "    value: int\n"
@@ -780,17 +770,83 @@ void test_unsupported_features()
         "function main() { child := Child() }\n",
         "requires unsupported base initializer chaining");
     expect_backend_error(
-        "class Named {\n"
-        "    public name: string\n"
-        "    overload as string { return self.name }\n"
-        "}\n",
-        "class conversion overloads are not supported by the C backend");
-    expect_backend_error(
         "class Node { weak next: Node }\n",
         "weak fields require a nullable class type");
     expect_backend_error(
         "function consume(result: Result<int?, string>) {}\n",
         "nullable type 'int?' is not supported by the C backend");
+}
+
+void test_overload_and_conversion_lowering()
+{
+    const auto output = generate(
+        "function choose(value: int) -> string { return \"int\" }\n"
+        "function choose(value: string) -> string { return value }\n"
+        "function choose<T>(value: T) -> string { return \"generic\" }\n"
+        "struct Box<T> {\n"
+        "    value: T\n"
+        "    function show(value: int) -> string { return \"method int\" }\n"
+        "    function show(value: string) -> string { return value }\n"
+        "    overload as string { return \"box\" }\n"
+        "}\n"
+        "struct Unbox<T> {\n"
+        "    value: T\n"
+        "    overload as T { return self.value }\n"
+        "}\n"
+        "class Named {\n"
+        "    public name: string\n"
+        "    overload as string { return self.name }\n"
+        "}\n"
+        "function main() {\n"
+        "    box := Box<int>(value: 1)\n"
+        "    named := Named(name: \"Toro\")\n"
+        "    unbox := Unbox<int>(value: 7)\n"
+        "    print(choose(1))\n"
+        "    print(choose(\"text\"))\n"
+        "    print(choose(true))\n"
+        "    print(box.show(1))\n"
+        "    print(box.show(\"method\"))\n"
+        "    print(19.9 as int)\n"
+        "    print(10 as dec)\n"
+        "    print(box as string)\n"
+        "    print(named as string)\n"
+        "    print(unbox as int)\n"
+        "}\n");
+
+    expect_contains(
+        output,
+        "toro_fn_choose__signature__6_n3_int",
+        "integer free-overload symbol");
+    expect_contains(
+        output,
+        "toro_fn_choose__signature__9_n6_string",
+        "string free-overload symbol");
+    expect_contains(
+        output,
+        "toro_fn_choose__signature__4_n1_T__1_b",
+        "generic fallback specialization symbol");
+    expect_contains(
+        output,
+        "toro_method_8_Box__1_i_show__signature__6_n3_int",
+        "first method overload symbol");
+    expect_contains(
+        output,
+        "toro_method_8_Box__1_i_show__signature__9_n6_string",
+        "second method overload symbol");
+    expect_contains(output, "((int64_t)(19.9))", "dec-to-int cast");
+    expect_contains(output, "((double)(10))", "int-to-dec cast");
+    expect_contains(
+        output,
+        "toro_conversion_8_Box__1_i_as__s",
+        "generic struct conversion symbol");
+    expect_contains(
+        output,
+        "toro_conversion_5_Named_as__s",
+        "class conversion symbol");
+    expect_contains(
+        output,
+        "toro_conversion_10_Unbox__1_i_as__i",
+        "generic substituted-target conversion symbol");
 }
 
 void test_generic_monomorphization()
@@ -897,6 +953,7 @@ int main()
         test_class_initializer_lowering();
         test_interface_lowering();
         test_generic_monomorphization();
+        test_overload_and_conversion_lowering();
         test_unsupported_features();
         test_generated_c_compiles();
     } catch (const std::exception& error) {

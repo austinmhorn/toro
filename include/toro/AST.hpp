@@ -150,6 +150,11 @@ struct CallArgument {
     std::unique_ptr<Expr> value;
 };
 
+struct FunctionDeclarationStmt;
+struct MethodDeclaration;
+struct InterfaceMethod;
+struct ConversionOverload;
+
 struct CallExpr final : Expr {
     CallExpr(
         std::unique_ptr<Expr> callee,
@@ -166,6 +171,9 @@ struct CallExpr final : Expr {
     std::vector<TypeReference> generic_arguments;
     std::vector<CallArgument> arguments;
     mutable std::vector<std::pair<std::string, Type>> resolved_substitutions;
+    mutable const FunctionDeclarationStmt* resolved_function{nullptr};
+    mutable const MethodDeclaration* resolved_method{nullptr};
+    mutable const InterfaceMethod* resolved_interface_method{nullptr};
 };
 
 struct MemberAccessExpr final : Expr {
@@ -214,6 +222,7 @@ struct CastExpr final : Expr {
 
     std::unique_ptr<Expr> expression;
     TypeReference target_type;
+    mutable const ConversionOverload* resolved_conversion{nullptr};
 };
 
 struct GroupingExpr final : Expr {

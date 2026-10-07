@@ -83,16 +83,18 @@ classes, and methods. Substitution flows through nested types, members, calls,
 and returns, while generic classes reuse the existing ARC, inheritance, virtual,
 interface, and lifecycle machinery.
 
-## 6.13 Remaining overload/conversion runtime support
+## 6.13 Remaining overload/conversion runtime support — completed
 
 Complete runtime lowering for semantics already understood by the frontend.
 
-Goals may include:
+Completed behavior:
 
-- method overload sets where not yet lowered;
-- user-defined `overload as Type`;
-- interaction with inheritance and generic instantiations;
-- explicit rejection of ambiguous/unsupported runtime cases.
+- free-function, method, virtual-method, and interface-method overload sets;
+- declaration-identity handoff from type checking to code generation;
+- deterministic signature-derived native symbols;
+- built-in numeric casts and user-defined `overload as Type`;
+- interaction with inheritance, interfaces, and concrete generic instantiations;
+- preserved class ARC and struct value semantics during conversions.
 
 ## 6.14 Core collections and strings
 

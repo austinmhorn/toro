@@ -423,7 +423,7 @@ field: explicit source defaults take priority, while omitted `int`, `dec`,
 `bool`, and `string` fields use `0`, `0.0`, `false`, and `""`. Omitted nested
 struct values remain unsupported unless explicitly supplied.
 
-Method overloads, conversions, generic interfaces and interface methods,
+Generic interfaces and generic interface methods,
 interface-valued fields, class-reference struct fields, nullable non-class fields,
 collections, thread-safe ARC, and
 cyclic-reference collection are not lowered yet. Enum and
@@ -530,8 +530,8 @@ result := integer as dec + 1.0
 ```
 
 `int` and `dec` may be converted in either direction, but are never converted
-implicitly. When cast/conversion backend lowering is implemented, `dec as int`
-will truncate toward zero. Same-type casts are valid. A nullable `T?` cast to
+implicitly. Native `dec as int` conversion truncates toward zero. Same-type
+casts are valid. A nullable `T?` cast to
 `T` does not unwrap the value and is rejected.
 
 Classes and structs may define one explicit conversion per target type:
@@ -548,4 +548,6 @@ class Player {
 
 The conversion runs only when requested with `player as string`; assignments,
 arguments, and `print(player)` do not invoke it implicitly. General operator
-overloads and code generation for conversions are not implemented yet.
+overloads are not implemented. Concrete class and struct conversions lower to
+ordinary deterministic C functions, preserving class ARC and struct value
+semantics.

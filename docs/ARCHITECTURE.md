@@ -249,6 +249,22 @@ generic classes use the existing ARC/weak/lifecycle, inheritance, vtable, and
 interface paths. This is compile-time specialization only: the runtime gains no
 type descriptors, erasure layer, reflection, or RTTI.
 
+### Overloads and explicit conversions
+
+Type checking records the exact function, method, or interface declaration
+selected for each call. The backend consumes that declaration identity together
+with any concrete generic substitutions; it does not repeat overload resolution.
+Overload symbols include a deterministic source-signature mangle, while generic
+specializations additionally include their concrete type arguments. The same
+identity flows through inherited lookup, virtual slots, interface thunks, and
+named-argument ordering.
+
+Built-in `int`/`dec` casts lower directly to C conversions. A class or struct
+`overload as Type` declaration lowers to a receiver function selected by the
+typed cast annotation. Struct operands preserve value semantics, and temporary
+class operands use the ordinary ARC call-temporary path so each operand is
+evaluated once and released exactly once.
+
 ## Current known runtime boundaries
 
 After the generic-runtime milestone, important unsupported or deferred runtime features include:
@@ -256,8 +272,6 @@ After the generic-runtime milestone, important unsupported or deferred runtime f
 - generic interfaces and generic interface methods;
 - interface-valued fields;
 - class-reference struct fields;
-- function/method overload lowering where the backend does not yet support it;
-- user-defined conversion overload lowering;
 - RTTI/dynamic casts;
 - multiple inheritance;
 - base-initializer chaining;

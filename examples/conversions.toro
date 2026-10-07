@@ -1,0 +1,37 @@
+struct Score {
+    value: int
+
+    overload as string {
+        return "score"
+    }
+}
+
+struct Unbox<T> {
+    value: T
+
+    overload as T {
+        return self.value
+    }
+}
+
+class Player {
+    public name: string
+
+    overload as string {
+        return self.name
+    }
+}
+
+function main() {
+    whole := 19.9 as int
+    decimal := 10 as dec
+    score := Score(value: 10)
+    player := Player(name: "Austin")
+    boxed := Unbox<int>(value: 7)
+
+    print(whole)
+    print(decimal)
+    print(score as string)
+    print(player as string)
+    print(boxed as int)
+}

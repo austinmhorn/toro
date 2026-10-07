@@ -1,0 +1,103 @@
+function describe(value: int) -> string {
+    return "int"
+}
+
+function describe(value: string) -> string {
+    return value
+}
+
+function describe<T>(value: T) -> string {
+    return "generic"
+}
+
+struct Formatter {
+    function format(value: int) -> string {
+        return "number"
+    }
+
+    function format(value: string) -> string {
+        return value
+    }
+}
+
+class Labeler {
+    public function label(value: int) -> string {
+        return "integer"
+    }
+
+    public function label(value: string) -> string {
+        return value
+    }
+}
+
+class BasePicker {
+    public function pick(value: int) -> string {
+        return "base int"
+    }
+
+    public function pick(value: string) -> string {
+        return value
+    }
+}
+
+class Picker : BasePicker {
+}
+
+class Speaker {
+    public virtual function speak(value: int) -> string {
+        return "base int"
+    }
+
+    public virtual function speak(value: string) -> string {
+        return "base string"
+    }
+}
+
+class DogSpeaker : Speaker {
+    public override function speak(value: int) -> string {
+        return "dog int"
+    }
+
+    public override function speak(value: string) -> string {
+        return value
+    }
+}
+
+interface Renderer {
+    function render(value: int) -> string
+    function render(value: string) -> string
+}
+
+struct TextRenderer implements Renderer {
+    function render(value: int) -> string {
+        return "render int"
+    }
+
+    function render(value: string) -> string {
+        return value
+    }
+}
+
+function show_rendering(renderer: Renderer) {
+    print(renderer.render(3))
+    print(renderer.render("render string"))
+}
+
+function main() {
+    print(describe(10))
+    print(describe("Toro"))
+    print(describe(true))
+    formatter := Formatter()
+    print(formatter.format(42))
+    print(formatter.format("overload"))
+    labeler := Labeler()
+    print(labeler.label(7))
+    print(labeler.label("class"))
+    picker := Picker()
+    print(picker.pick(1))
+    print(picker.pick("inherited"))
+    speaker: Speaker = DogSpeaker()
+    print(speaker.speak(2))
+    print(speaker.speak("dog string"))
+    show_rendering(TextRenderer())
+}

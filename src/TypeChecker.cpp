@@ -147,6 +147,7 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                 {},
                 function.location,
             };
+            signature.function_declaration = &function;
             signature.parameters.reserve(function.parameters.size());
             for (const auto& parameter : function.parameters) {
                 signature.parameters.push_back(FunctionParameterType{
@@ -206,6 +207,7 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                     {},
                     method_declaration.location,
                 };
+                signature.method_declaration = &method_declaration;
                 for (const auto& parameter : method_declaration.parameters) {
                     signature.parameters.push_back(FunctionParameterType{
                         parameter.name, resolve_type(parameter.type), parameter.type});
@@ -225,7 +227,10 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                     false, false, false});
             }
             for (const auto& conversion : declaration.conversions) {
-                declare_conversion(declaration.name, resolve_type(conversion->target_type));
+                type_info.conversions.push_back(ConversionInfo{
+                    conversion->target_type,
+                    conversion.get(),
+                });
             }
             scopes_.back().nominal_types.emplace(declaration.name, std::move(type_info));
             pop_generic_parameters();
@@ -271,6 +276,7 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                         {},
                         method.location,
                     };
+                    signature.method_declaration = &method;
                     signature.parameters.reserve(method.parameters.size());
                     for (const auto& parameter : method.parameters) {
                         signature.parameters.push_back(FunctionParameterType{
@@ -295,8 +301,10 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                         method.body == nullptr, method.is_override});
                 } else {
                     const auto& conversion = static_cast<const ConversionOverload&>(*member);
-                    declare_conversion(
-                        declaration.name, resolve_type(conversion.target_type));
+                    type_info.conversions.push_back(ConversionInfo{
+                        conversion.target_type,
+                        &conversion,
+                    });
                 }
             }
             scopes_.back().nominal_types.emplace(declaration.name, std::move(type_info));
@@ -323,6 +331,7 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                     {},
                     method.location,
                 };
+                signature.interface_method = &method;
                 for (const auto& parameter : method.parameters) {
                     signature.parameters.push_back(FunctionParameterType{
                         parameter.name, resolve_type(parameter.type), parameter.type});
@@ -1026,6 +1035,7 @@ Type TypeChecker::check_call(
                 call.generic_arguments, candidates);
             call.resolved_substitutions.assign(
                 resolution.substitutions.begin(), resolution.substitutions.end());
+            call.resolved_function = resolution.signature->function_declaration;
             return resolution.return_type;
         }
 
@@ -1191,6 +1201,7 @@ Type TypeChecker::check_construction(
                 call.generic_arguments, candidates);
             call.resolved_substitutions.assign(
                 resolution.substitutions.begin(), resolution.substitutions.end());
+            call.resolved_method = resolution.signature->method_declaration;
             std::vector<Type> type_arguments;
             type_arguments.reserve(type_info.generic_parameters.size());
             for (const auto& parameter : type_info.generic_parameters) {
@@ -1439,6 +1450,8 @@ Type TypeChecker::check_method_call(
         });
     const auto method_index = static_cast<std::size_t>(selected - candidates.begin());
     const auto* method = methods[method_index];
+    call.resolved_method = method->signature.method_declaration;
+    call.resolved_interface_method = method->signature.interface_method;
     if (!can_access(method->visibility, method->owner)) {
         throw_type_error(
             current_location_, "method '" + method->owner + "." + callee.member
@@ -1899,7 +1912,8 @@ Type TypeChecker::check_cast(const CastExpr& cast)
     if (source.deferred || target.deferred) {
         return target;
     }
-    if (find_conversion(source, target)) {
+    if (const auto* conversion = find_conversion(source, target)) {
+        cast.resolved_conversion = conversion;
         return target;
     }
 
@@ -2426,13 +2440,6 @@ void TypeChecker::declare_value(const std::string& name, Type type)
     scopes_.back().values.emplace(name, type);
 }
 
-void TypeChecker::declare_conversion(
-    const std::string& source_name,
-    const Type& target_type)
-{
-    scopes_.back().conversions[source_name].insert(type_name(target_type));
-}
-
 std::optional<Type> TypeChecker::find_value(const std::string& name) const
 {
     for (auto scope = scopes_.rbegin(); scope != scopes_.rend(); ++scope) {
@@ -2534,23 +2541,31 @@ bool TypeChecker::can_access(
         || (current_type_name_ && *current_type_name_ == owner);
 }
 
-bool TypeChecker::find_conversion(
+const ConversionOverload* TypeChecker::find_conversion(
     const Type& source_type,
     const Type& target_type) const
 {
     if (source_type.name.empty()) {
-        return false;
+        return nullptr;
     }
-    for (auto scope = scopes_.rbegin(); scope != scopes_.rend(); ++scope) {
-        const auto source = scope->conversions.find(source_type.name);
-        if (source != scope->conversions.end()) {
-            return source->second.contains(type_name(target_type));
-        }
-        if (scope->values.contains(source_type.name)) {
-            return false;
+    const auto* type_info = find_nominal_type(source_type.name);
+    if (!type_info) {
+        return nullptr;
+    }
+    std::unordered_map<std::string, Type> substitutions;
+    if (source_type.arguments.size() == type_info->generic_parameters.size()) {
+        for (std::size_t index = 0; index < source_type.arguments.size(); ++index) {
+            substitutions.emplace(
+                type_info->generic_parameters[index].name,
+                source_type.arguments[index]);
         }
     }
-    return false;
+    for (const auto& conversion : type_info->conversions) {
+        if (substitute_type(conversion.target_type, substitutions) == target_type) {
+            return conversion.declaration;
+        }
+    }
+    return nullptr;
 }
 
 } // namespace toro

@@ -29,6 +29,9 @@ private:
         std::vector<GenericParameter> generic_parameters;
         std::unordered_map<std::string, Type> containing_substitutions;
         SourceLocation location;
+        const FunctionDeclarationStmt* function_declaration{nullptr};
+        const MethodDeclaration* method_declaration{nullptr};
+        const InterfaceMethod* interface_method{nullptr};
     };
 
     struct OverloadResolution {
@@ -60,6 +63,11 @@ private:
         SourceLocation location;
     };
 
+    struct ConversionInfo {
+        TypeReference target_type;
+        const ConversionOverload* declaration;
+    };
+
     enum class NominalKind { Struct, Class, Interface, Enum };
 
     struct NominalTypeInfo {
@@ -71,6 +79,7 @@ private:
         std::vector<std::string> field_order;
         std::unordered_map<std::string, FieldInfo> fields;
         std::unordered_map<std::string, std::vector<MethodInfo>> methods;
+        std::vector<ConversionInfo> conversions;
         std::vector<std::string> variant_order;
         std::unordered_map<std::string, EnumVariantInfo> variants;
         SourceLocation location;
@@ -80,7 +89,6 @@ private:
         std::unordered_map<std::string, Type> values;
         std::unordered_map<std::string, std::vector<FunctionSignature>> functions;
         std::unordered_map<std::string, NominalTypeInfo> nominal_types;
-        std::unordered_map<std::string, std::unordered_set<std::string>> conversions;
     };
 
     void check_statement_list(const std::vector<std::unique_ptr<Stmt>>& statements);
@@ -177,7 +185,6 @@ private:
     void push_generic_parameters(const std::vector<GenericParameter>& parameters);
     void pop_generic_parameters();
     void declare_value(const std::string& name, Type type);
-    void declare_conversion(const std::string& source_name, const Type& target_type);
     [[nodiscard]] std::optional<Type> find_value(const std::string& name) const;
     [[nodiscard]] std::vector<const FunctionSignature*> find_functions(
         const std::string& name) const;
@@ -189,7 +196,7 @@ private:
         const std::string& type_name,
         const std::string& method_name) const;
     [[nodiscard]] bool can_access(Visibility visibility, const std::string& owner) const;
-    [[nodiscard]] bool find_conversion(
+    [[nodiscard]] const ConversionOverload* find_conversion(
         const Type& source_type,
         const Type& target_type) const;
 

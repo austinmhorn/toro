@@ -176,6 +176,8 @@ Build and run through temporary artifacts:
 ./build/toro run examples/class_inheritance.toro
 ./build/toro run examples/virtual_dispatch.toro
 ./build/toro run examples/interfaces.toro
+./build/toro run examples/overloads.toro
+./build/toro run examples/conversions.toro
 ```
 
 `run` forwards program output and returns its exit status. Its temporary C source
@@ -215,8 +217,8 @@ deterministically prefixed C identifiers and emits a C entry-point wrapper for a
 Toro `main`. Enums lower to deterministic tagged unions; construction selects a
 tag and payload, while exhaustive `handle` statements lower to `switch` blocks
 with case-scoped payload bindings. Concrete generic functions and types are
-monomorphized on demand. Conversion overloads, unsupported nullable value
-fields, Results containing unsupported runtime payloads, and
+monomorphized on demand. Unsupported nullable value fields, Results containing
+unsupported runtime payloads, and
 other runtime types outside this subset fail with a backend diagnostic instead
 of producing partial or incorrect C. Classes use heap-backed pointer
 identity. Construction begins with one strong reference; local copies and class
@@ -256,6 +258,10 @@ the existing object reference and participate in the same ARC/weak lifetime;
 struct-backed values keep an inline copy and preserve value semantics. Native
 interface conversion, calls, parameters, returns, reassignment, multiple
 interfaces, inherited implementations, and virtual overrides are supported.
+Resolved free-function, struct-method, class-method, and interface-method
+overloads lower to deterministic signature-derived symbols; generic fallback
+specializations retain both overload and concrete-type identity. Explicit
+`int`/`dec` casts and class/struct `overload as Type` bodies execute natively.
 Initializer overloading, base-initializer chaining, generic interfaces and
 interface methods, interface-valued fields, class-reference struct fields, class-valued
 enum/Result payloads, and field access through a

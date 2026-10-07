@@ -716,6 +716,62 @@ void test_generic_inheritance_interface_runtime_behavior()
         "generic inheritance/interface program produced unexpected output");
 }
 
+void test_overload_and_conversion_runtime_behavior()
+{
+    const auto c_source = generate(
+        "interface Named { function label() -> string }\n"
+        "class Base implements Named {\n"
+        "    public function label() -> string { return \"base\" }\n"
+        "}\n"
+        "class Child : Base {}\n"
+        "function select(value: int) -> string { return \"int\" }\n"
+        "function select(value: string) -> string { return value }\n"
+        "function select<T>(value: T) -> string { return \"generic\" }\n"
+        "function classify(value: Base) -> string { return \"base compatible\" }\n"
+        "function classify(value: string) -> string { return value }\n"
+        "function identify(value: Named) -> string { return value.label() }\n"
+        "function identify(value: int) -> string { return \"number\" }\n"
+        "struct Converter<T> {\n"
+        "    value: T\n"
+        "    function convert(value: int) -> string { return \"method int\" }\n"
+        "    function convert(value: string) -> string { return value }\n"
+        "    overload as string { return \"struct conversion\" }\n"
+        "}\n"
+        "struct Unbox<T> {\n"
+        "    value: T\n"
+        "    overload as T { return self.value }\n"
+        "}\n"
+        "class Resource {\n"
+        "    public name: string\n"
+        "    overload as string { return self.name }\n"
+        "    destroy() { print(\"resource destroyed\") }\n"
+        "}\n"
+        "function main() {\n"
+        "    child := Child()\n"
+        "    converter := Converter<int>(value: 1)\n"
+        "    unbox := Unbox<int>(value: 7)\n"
+        "    print(select(1))\n"
+        "    print(select(\"string\"))\n"
+        "    print(select(true))\n"
+        "    print(classify(child))\n"
+        "    print(identify(child))\n"
+        "    print(converter.convert(1))\n"
+        "    print(converter.convert(\"method string\"))\n"
+        "    print(19.9 as int)\n"
+        "    print(10 as dec)\n"
+        "    print(converter as string)\n"
+        "    print(unbox as int)\n"
+        "    print(Resource(name: \"class conversion\") as string)\n"
+        "}\n");
+    const auto [status, output] = capture_run(toro::NativeCompiler(), c_source);
+    expect(status == 0, "overload/conversion program did not exit successfully");
+    expect(
+        output == "int\nstring\ngeneric\nbase compatible\nbase\nmethod int\n"
+                  "method string\n19\n10\nstruct conversion\n7\nresource destroyed\n"
+                  "class conversion\n",
+        "overload/conversion program produced unexpected output");
+}
+
 void test_temporary_cleanup()
 {
     const auto before = native_temporary_directories();
@@ -747,6 +803,7 @@ int main()
         test_compile_failure_reporting();
         test_generic_runtime_behavior();
         test_generic_inheritance_interface_runtime_behavior();
+        test_overload_and_conversion_runtime_behavior();
         test_temporary_cleanup();
     } catch (const std::exception& error) {
         std::cerr << "native compiler test failure: " << error.what() << '\n';
