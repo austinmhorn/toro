@@ -1,0 +1,19 @@
+import util.math
+
+public enum Rank {
+    novice
+    veteran
+}
+
+public struct Stats {
+    score: int
+}
+
+public class Player {
+    public name: string
+    public score: int
+
+    public function boosted_score() -> int {
+        return add(self.score, 1)
+    }
+}

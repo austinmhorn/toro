@@ -32,6 +32,8 @@ private:
         const FunctionDeclarationStmt* function_declaration{nullptr};
         const MethodDeclaration* method_declaration{nullptr};
         const InterfaceMethod* interface_method{nullptr};
+        std::string module_name;
+        bool is_public{false};
     };
 
     struct OverloadResolution {
@@ -83,6 +85,8 @@ private:
         std::vector<std::string> variant_order;
         std::unordered_map<std::string, EnumVariantInfo> variants;
         SourceLocation location;
+        std::string module_name;
+        bool is_public{false};
     };
 
     struct Scope {
@@ -199,9 +203,14 @@ private:
     [[nodiscard]] const ConversionOverload* find_conversion(
         const Type& source_type,
         const Type& target_type) const;
+    [[nodiscard]] bool is_module_accessible(
+        const std::string& module_name,
+        bool is_public) const;
 
     std::vector<Scope> scopes_;
     std::vector<std::unordered_set<std::string>> generic_parameter_scopes_;
+    std::unordered_map<std::string, std::unordered_set<std::string>> module_imports_;
+    std::string current_module_;
     std::optional<Type> current_return_type_;
     std::optional<std::string> current_type_name_;
     SourceLocation current_location_{1, 1};

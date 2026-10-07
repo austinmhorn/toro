@@ -53,11 +53,11 @@ void expect_token(
 void test_keywords_and_identifiers()
 {
     constexpr std::string_view source =
-        "function return if else while for in stop continue handle "
+        "import function return if else while for in stop continue handle "
         "public private class struct enum interface virtual override abstract implements overload "
         "true false null self and or as weak performance function_name";
     constexpr std::array expected{
-        TokenType::Function, TokenType::Return, TokenType::If, TokenType::Else,
+        TokenType::Import, TokenType::Function, TokenType::Return, TokenType::If, TokenType::Else,
         TokenType::While, TokenType::For, TokenType::In, TokenType::Stop,
         TokenType::Continue, TokenType::Handle, TokenType::Public, TokenType::Private,
         TokenType::Class, TokenType::Struct, TokenType::Enum, TokenType::Interface,

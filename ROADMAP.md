@@ -164,7 +164,7 @@ application features on this runtime baseline.
 
 The goal of this phase is to build non-trivial applications before optimizing hypothetical workloads.
 
-## 7.1 Modules and imports
+## 7.1 Modules and imports — completed
 
 Implement stable module-root imports:
 
@@ -176,9 +176,26 @@ import game.player
 
 Avoid fragile relative-header-style semantics.
 
+Completed behavior:
+
+- module-scope `import` declarations with dotted module-root identities;
+- deterministic entry-directory source-root resolution;
+- private-by-default top-level declarations and explicit `public` exports;
+- direct-import visibility without accidental transitive re-export;
+- duplicate-import deduplication, self-import diagnostics, missing-module
+  diagnostics, and cycle detection;
+- deterministic dependency-first flattening into the existing checked backend
+  program, with shared diamond imports emitted once;
+- `check`, `emit-c`, `build`, and `run` support for imported module graphs;
+- native multi-file example and focused frontend/runtime regression coverage.
+
+The project manifest, additional source roots, package resolution, aliases, and
+wildcard imports remain deferred.
+
 ## 7.2 Multi-file compilation
 
-Support projects containing multiple `.toro` files/modules.
+Expand the initial entry-root module graph into project-aware compilation units
+and build planning.
 
 Requirements:
 

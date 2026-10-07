@@ -1,5 +1,6 @@
 #include "toro/CGenerator.hpp"
 #include "toro/Lexer.hpp"
+#include "toro/ModuleLoader.hpp"
 #include "toro/NativeCompiler.hpp"
 #include "toro/Parser.hpp"
 #include "toro/SemanticAnalyzer.hpp"
@@ -62,40 +63,38 @@ void print_ast(std::string_view source)
     std::cout << toro::dump_program(program);
 }
 
-void check_source(std::string_view source)
+void check_source(const std::filesystem::path& path)
 {
-    auto tokens = toro::Lexer(source).tokenize();
-    const auto program = toro::Parser(std::move(tokens)).parse_program();
+    const auto program = toro::ModuleLoader().load(path);
     toro::SemanticAnalyzer().analyze(program);
     toro::TypeChecker().check(program);
     std::cout << "check passed\n";
 }
 
-std::string generate_c(std::string_view source)
+std::string generate_c(const std::filesystem::path& path)
 {
-    auto tokens = toro::Lexer(source).tokenize();
-    const auto program = toro::Parser(std::move(tokens)).parse_program();
+    const auto program = toro::ModuleLoader().load(path);
     toro::SemanticAnalyzer().analyze(program);
     toro::TypeChecker().check(program);
     return toro::CGenerator().generate(program);
 }
 
-void emit_c(std::string_view source)
+void emit_c(const std::filesystem::path& path)
 {
-    std::cout << generate_c(source);
+    std::cout << generate_c(path);
 }
 
 void build_native(
-    std::string_view source,
+    const std::filesystem::path& source_path,
     const std::filesystem::path& output_path)
 {
-    toro::NativeCompiler().build(generate_c(source), output_path);
+    toro::NativeCompiler().build(generate_c(source_path), output_path);
     std::cout << "built " << std::filesystem::absolute(output_path).string() << '\n';
 }
 
-int run_native(std::string_view source)
+int run_native(const std::filesystem::path& path)
 {
-    return toro::NativeCompiler().run(generate_c(source));
+    return toro::NativeCompiler().run(generate_c(path));
 }
 
 } // namespace
@@ -125,26 +124,24 @@ int main(int argc, char* argv[])
 
     try {
         if (build_with_output) {
-            const auto source = toro::load_source_file(argv[2]);
-            build_native(source.contents, argv[4]);
+            build_native(argv[2], argv[4]);
         } else if (argc == 3) {
-            const auto source = toro::load_source_file(argv[2]);
             if (std::string_view(argv[1]) == "tokens") {
-                print_tokens(source.contents);
+                print_tokens(toro::load_source_file(argv[2]).contents);
             } else if (std::string_view(argv[1]) == "ast-expression") {
-                print_expression_ast(source.contents);
+                print_expression_ast(toro::load_source_file(argv[2]).contents);
             } else if (std::string_view(argv[1]) == "check") {
-                check_source(source.contents);
+                check_source(argv[2]);
             } else if (std::string_view(argv[1]) == "emit-c") {
-                emit_c(source.contents);
+                emit_c(argv[2]);
             } else if (std::string_view(argv[1]) == "build") {
                 const auto output = std::filesystem::current_path()
                     / std::filesystem::path(argv[2]).stem();
-                build_native(source.contents, output);
+                build_native(argv[2], output);
             } else if (std::string_view(argv[1]) == "run") {
-                return run_native(source.contents);
+                return run_native(argv[2]);
             } else {
-                print_ast(source.contents);
+                print_ast(toro::load_source_file(argv[2]).contents);
             }
         } else {
             const auto source = toro::load_source_file(argv[1]);

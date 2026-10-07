@@ -19,6 +19,8 @@ public:
     [[nodiscard]] Program parse_program();
 
 private:
+    [[nodiscard]] std::unique_ptr<Stmt> parse_import_declaration();
+    [[nodiscard]] std::unique_ptr<Stmt> parse_top_level_declaration(bool is_public);
     [[nodiscard]] std::unique_ptr<Stmt> parse_statement();
     [[nodiscard]] std::unique_ptr<Stmt> parse_variable_declaration();
     [[nodiscard]] std::unique_ptr<Stmt> parse_function_declaration();

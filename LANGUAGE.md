@@ -39,6 +39,51 @@ function main() {
 }
 ```
 
+### Modules and imports
+
+Imports are module-root based and may appear only at module scope:
+
+```toro
+import io
+import net.http
+import game.player
+```
+
+For the current single-entry source-root model, the directory containing the
+entry file is the module root. A dotted identity maps deterministically to a
+source path beneath that root: `game.player` resolves to
+`game/player.toro`. Import paths contain identifiers separated by `.`, not file
+extensions, string paths, `../` traversal, aliases, or wildcards.
+
+Top-level declarations are private to their declaring module by default. The
+`public` modifier exports functions, structs, classes, enums, and interfaces:
+
+```toro
+public function load_player() -> Player {
+    return Player()
+}
+
+function validate_internal_state() -> bool {
+    return true
+}
+```
+
+An import exposes the imported module's public declarations unqualified to the
+importing module. Private declarations remain available to bodies within their
+own module and are not visible to importers. Imports are not implicitly
+re-exported: a module must directly import each module whose declarations it
+uses.
+
+Repeated imports of the same module are idempotent. A shared dependency in a
+diamond graph is loaded and compiled once. Unknown modules, self-imports, and
+cycles are errors. Imports are compile-time dependency declarations, not textual
+inclusion.
+
+In the current frontend-to-C compilation unit, nominal type declaration names
+must remain unique across the loaded module graph. Conflicts are diagnosed
+rather than silently merged; fully separate module symbol identities belong to
+the next multi-file compilation milestone.
+
 ### Logical Operators
 
 Toro uses the keywords `and` and `or` rather than symbolic logical operators.

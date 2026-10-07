@@ -1,5 +1,6 @@
 #include "toro/SemanticAnalyzer.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 #include <string>
 
@@ -18,15 +19,25 @@ namespace {
 void SemanticAnalyzer::analyze(const Program& program)
 {
     scopes_.clear();
+    module_imports_.clear();
+    current_module_.clear();
+    for (const auto& module : program.modules) {
+        auto& imports = module_imports_[module.name];
+        imports.insert(module.imports.begin(), module.imports.end());
+    }
     inside_class_method_ = false;
     push_scope();
-    scopes_.back().emplace("print", Symbol{SymbolKind::Builtin, SourceLocation{0, 0}});
-    scopes_.back().emplace("ok", Symbol{SymbolKind::Builtin, SourceLocation{0, 0}});
-    scopes_.back().emplace("error", Symbol{SymbolKind::Builtin, SourceLocation{0, 0}});
-    scopes_.back().emplace("Array", Symbol{SymbolKind::Builtin, SourceLocation{0, 0}});
-    scopes_.back().emplace("List", Symbol{SymbolKind::Builtin, SourceLocation{0, 0}});
-    scopes_.back().emplace("Map", Symbol{SymbolKind::Builtin, SourceLocation{0, 0}});
-    analyze_statement_list(program.statements);
+    declare("print", SymbolKind::Builtin, SourceLocation{0, 0}, {}, true);
+    declare("ok", SymbolKind::Builtin, SourceLocation{0, 0}, {}, true);
+    declare("error", SymbolKind::Builtin, SourceLocation{0, 0}, {}, true);
+    declare("Array", SymbolKind::Builtin, SourceLocation{0, 0}, {}, true);
+    declare("List", SymbolKind::Builtin, SourceLocation{0, 0}, {}, true);
+    declare("Map", SymbolKind::Builtin, SourceLocation{0, 0}, {}, true);
+    predeclare(program.statements);
+    for (const auto& statement : program.statements) {
+        current_module_ = statement->module_name;
+        analyze_statement(*statement);
+    }
     pop_scope();
 }
 
@@ -43,29 +54,36 @@ void SemanticAnalyzer::predeclare(const std::vector<std::unique_ptr<Stmt>>& stat
 {
     for (const auto& statement : statements) {
         switch (statement->kind) {
+        case StmtKind::ImportDeclaration:
+            break;
         case StmtKind::FunctionDeclaration: {
             const auto& function = static_cast<const FunctionDeclarationStmt&>(*statement);
-            declare(function.name, SymbolKind::Function, function.location);
+            declare(function.name, SymbolKind::Function, function.location,
+                statement->module_name, statement->is_public);
             break;
         }
         case StmtKind::StructDeclaration: {
             const auto& declaration = static_cast<const StructDeclarationStmt&>(*statement);
-            declare(declaration.name, SymbolKind::Struct, declaration.location);
+            declare(declaration.name, SymbolKind::Struct, declaration.location,
+                statement->module_name, statement->is_public);
             break;
         }
         case StmtKind::ClassDeclaration: {
             const auto& declaration = static_cast<const ClassDeclarationStmt&>(*statement);
-            declare(declaration.name, SymbolKind::Class, declaration.location);
+            declare(declaration.name, SymbolKind::Class, declaration.location,
+                statement->module_name, statement->is_public);
             break;
         }
         case StmtKind::InterfaceDeclaration: {
             const auto& declaration = static_cast<const InterfaceDeclarationStmt&>(*statement);
-            declare(declaration.name, SymbolKind::Interface, declaration.location);
+            declare(declaration.name, SymbolKind::Interface, declaration.location,
+                statement->module_name, statement->is_public);
             break;
         }
         case StmtKind::EnumDeclaration: {
             const auto& declaration = static_cast<const EnumDeclarationStmt&>(*statement);
-            declare(declaration.name, SymbolKind::Enum, declaration.location);
+            declare(declaration.name, SymbolKind::Enum, declaration.location,
+                statement->module_name, statement->is_public);
             break;
         }
         default:
@@ -78,6 +96,8 @@ void SemanticAnalyzer::analyze_statement(const Stmt& statement)
 {
     current_location_ = statement.location;
     switch (statement.kind) {
+    case StmtKind::ImportDeclaration:
+        return;
     case StmtKind::VariableDeclaration: {
         const auto& declaration = static_cast<const VariableDeclarationStmt&>(statement);
         analyze_expression(*declaration.initializer);
@@ -334,27 +354,52 @@ void SemanticAnalyzer::pop_scope()
 void SemanticAnalyzer::declare(
     const std::string& name,
     SymbolKind kind,
-    SourceLocation location)
+    SourceLocation location,
+    std::string module_name,
+    bool is_public)
 {
     auto& scope = scopes_.back();
-    if (const auto existing = scope.find(name); existing != scope.end()) {
+    auto& symbols = scope[name];
+    for (const auto& existing : symbols) {
+        if (existing.module_name != module_name) {
+            continue;
+        }
         if (kind == SymbolKind::Function
-            && existing->second.kind == SymbolKind::Function) {
+            && existing.kind == SymbolKind::Function) {
+            symbols.push_back(Symbol{
+                kind, location, std::move(module_name), is_public});
             return;
         }
-        throw_semantic_error(location, "duplicate declaration '" + name + "' in this scope");
+        throw_semantic_error(
+            location, "duplicate declaration '" + name + "' in this scope");
     }
-    scope.emplace(name, Symbol{kind, location});
+    symbols.push_back(Symbol{kind, location, std::move(module_name), is_public});
 }
 
 bool SemanticAnalyzer::resolve(const std::string& name) const
 {
     for (auto scope = scopes_.rbegin(); scope != scopes_.rend(); ++scope) {
-        if (scope->contains(name)) {
-            return true;
+        if (const auto symbols = scope->find(name); symbols != scope->end()) {
+            return std::ranges::any_of(
+                symbols->second,
+                [&](const Symbol& symbol) { return is_accessible(symbol); });
         }
     }
     return false;
+}
+
+bool SemanticAnalyzer::is_accessible(const Symbol& symbol) const
+{
+    if (symbol.kind == SymbolKind::Builtin || symbol.module_name.empty()
+        || current_module_.empty() || symbol.module_name == current_module_) {
+        return true;
+    }
+    if (!symbol.is_public) {
+        return false;
+    }
+    const auto imports = module_imports_.find(current_module_);
+    return imports != module_imports_.end()
+        && imports->second.contains(symbol.module_name);
 }
 
 } // namespace toro

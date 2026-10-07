@@ -16,6 +16,7 @@ include(CTest)
 add_library(toro_core
     src/CGenerator.cpp
     src/Lexer.cpp
+    src/ModuleLoader.cpp
     src/NativeCompiler.cpp
     src/Parser.cpp
     src/SemanticAnalyzer.cpp
@@ -78,4 +79,9 @@ if(BUILD_TESTING)
     target_link_libraries(toro_native_compiler_tests PRIVATE toro_core)
     toro_enable_warnings(toro_native_compiler_tests)
     add_test(NAME native_compiler COMMAND toro_native_compiler_tests)
+
+    add_executable(toro_module_tests tests/ModuleLoaderTests.cpp)
+    target_link_libraries(toro_module_tests PRIVATE toro_core)
+    toro_enable_warnings(toro_module_tests)
+    add_test(NAME modules COMMAND toro_module_tests)
 endif()

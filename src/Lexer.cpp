@@ -11,7 +11,8 @@ namespace {
 
 using Keyword = std::pair<std::string_view, TokenType>;
 
-constexpr std::array<Keyword, 30> keywords{{
+constexpr std::array<Keyword, 31> keywords{{
+    {"import", TokenType::Import},
     {"function", TokenType::Function},
     {"return", TokenType::Return},
     {"if", TokenType::If},

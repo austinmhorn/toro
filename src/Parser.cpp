@@ -160,6 +160,11 @@ void append_statement_dump(const Stmt& statement, std::size_t depth, std::string
     const std::string indentation(depth * 2, ' ');
 
     switch (statement.kind) {
+    case StmtKind::ImportDeclaration: {
+        const auto& import = static_cast<const ImportDeclarationStmt&>(statement);
+        output += indentation + "Import(" + import.module_path() + ")\n";
+        return;
+    }
     case StmtKind::VariableDeclaration: {
         const auto& declaration = static_cast<const VariableDeclarationStmt&>(statement);
         output += indentation + "VariableDeclaration(" + declaration.name + ")\n";
@@ -457,14 +462,56 @@ Program Parser::parse_program()
     Program program;
     while (!at_end()) {
         statement_line_ = peek().line;
-        program.statements.push_back(parse_statement());
+        if (check(TokenType::Import)) {
+            program.statements.push_back(parse_import_declaration());
+        } else if (match({TokenType::Public})) {
+            program.statements.push_back(parse_top_level_declaration(true));
+        } else if (match({TokenType::Private})) {
+            program.statements.push_back(parse_top_level_declaration(false));
+        } else {
+            program.statements.push_back(parse_statement());
+        }
     }
     statement_line_.reset();
     return program;
 }
 
+std::unique_ptr<Stmt> Parser::parse_import_declaration()
+{
+    const Token keyword = consume(TokenType::Import, "expected 'import'");
+    std::vector<std::string> path;
+    path.push_back(consume(
+        TokenType::Identifier, "expected module name after 'import'").lexeme);
+    while (match({TokenType::Dot})) {
+        path.push_back(consume(
+            TokenType::Identifier, "expected module path segment after '.'").lexeme);
+    }
+    require_statement_end();
+    return std::make_unique<ImportDeclarationStmt>(
+        SourceLocation{keyword.line, keyword.column}, std::move(path));
+}
+
+std::unique_ptr<Stmt> Parser::parse_top_level_declaration(bool is_public)
+{
+    if (!check(TokenType::Function) && !check(TokenType::Enum)
+        && !check(TokenType::Struct) && !check(TokenType::Class)
+        && !check(TokenType::Abstract) && !check(TokenType::Interface)) {
+        throw_parse_error(
+            peek(), "top-level visibility applies only to declarations");
+    }
+    auto declaration = parse_statement();
+    declaration->is_public = is_public;
+    return declaration;
+}
+
 std::unique_ptr<Stmt> Parser::parse_statement()
 {
+    if (check(TokenType::Import)) {
+        throw_parse_error(peek(), "imports are only valid at module scope");
+    }
+    if (check(TokenType::Public) || check(TokenType::Private)) {
+        throw_parse_error(peek(), "visibility modifiers are only valid on module or class declarations");
+    }
     if (check(TokenType::Function)) {
         return parse_function_declaration();
     }

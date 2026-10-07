@@ -117,6 +117,12 @@ void TypeChecker::check(const Program& program)
 {
     scopes_.clear();
     generic_parameter_scopes_.clear();
+    module_imports_.clear();
+    current_module_.clear();
+    for (const auto& module : program.modules) {
+        auto& imports = module_imports_[module.name];
+        imports.insert(module.imports.begin(), module.imports.end());
+    }
     current_return_type_.reset();
     current_type_name_.reset();
     current_location_ = SourceLocation{1, 1};
@@ -124,6 +130,7 @@ void TypeChecker::check(const Program& program)
     predeclare(program.statements);
     validate_nominal_types();
     for (const auto& statement : program.statements) {
+        current_module_ = statement->module_name;
         check_statement(*statement);
     }
     pop_scope();
@@ -140,7 +147,11 @@ void TypeChecker::check_statement_list(
 
 void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statements)
 {
+    const std::string enclosing_module = current_module_;
     for (const auto& statement : statements) {
+        if (!statement->module_name.empty()) {
+            current_module_ = statement->module_name;
+        }
         if (statement->kind == StmtKind::FunctionDeclaration) {
             const auto& function = static_cast<const FunctionDeclarationStmt&>(*statement);
             push_generic_parameters(function.generic_parameters);
@@ -151,8 +162,15 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                 function.generic_parameters,
                 {},
                 function.location,
+                nullptr,
+                nullptr,
+                nullptr,
+                {},
+                false,
             };
             signature.function_declaration = &function;
+            signature.module_name = current_module_;
+            signature.is_public = statement->is_public;
             signature.parameters.reserve(function.parameters.size());
             for (const auto& parameter : function.parameters) {
                 signature.parameters.push_back(FunctionParameterType{
@@ -165,7 +183,8 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
             auto& overloads = scopes_.back().functions[function.name];
             if (std::any_of(overloads.begin(), overloads.end(),
                     [&](const FunctionSignature& candidate) {
-                        return parameter_types_match(candidate, signature);
+                        return candidate.module_name == signature.module_name
+                            && parameter_types_match(candidate, signature);
                     })) {
                 throw_type_error(function.location,
                     "duplicate callable signature for function '" + function.name + "'");
@@ -183,6 +202,8 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
             NominalTypeInfo type_info;
             type_info.kind = NominalKind::Struct;
             type_info.location = declaration.location;
+            type_info.module_name = current_module_;
+            type_info.is_public = statement->is_public;
             type_info.generic_parameters = declaration.generic_parameters;
             for (const auto& interface_name : declaration.interfaces) {
                 type_info.interfaces.push_back(interface_name.name);
@@ -211,6 +232,11 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                     method_declaration.generic_parameters,
                     {},
                     method_declaration.location,
+                    nullptr,
+                    nullptr,
+                    nullptr,
+                    {},
+                    false,
                 };
                 signature.method_declaration = &method_declaration;
                 for (const auto& parameter : method_declaration.parameters) {
@@ -237,7 +263,11 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                     conversion.get(),
                 });
             }
-            scopes_.back().nominal_types.emplace(declaration.name, std::move(type_info));
+            if (!scopes_.back().nominal_types.emplace(
+                    declaration.name, std::move(type_info)).second) {
+                throw_type_error(declaration.location,
+                    "conflicting loaded type declaration '" + declaration.name + "'");
+            }
             pop_generic_parameters();
             break;
         }
@@ -250,6 +280,8 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
             type_info.kind = NominalKind::Class;
             type_info.is_abstract = declaration.is_abstract;
             type_info.location = declaration.location;
+            type_info.module_name = current_module_;
+            type_info.is_public = statement->is_public;
             type_info.generic_parameters = declaration.generic_parameters;
             if (declaration.base_type) {
                 type_info.base = declaration.base_type->name;
@@ -280,6 +312,11 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                         method.generic_parameters,
                         {},
                         method.location,
+                        nullptr,
+                        nullptr,
+                        nullptr,
+                        {},
+                        false,
                     };
                     signature.method_declaration = &method;
                     signature.parameters.reserve(method.parameters.size());
@@ -312,7 +349,11 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                     });
                 }
             }
-            scopes_.back().nominal_types.emplace(declaration.name, std::move(type_info));
+            if (!scopes_.back().nominal_types.emplace(
+                    declaration.name, std::move(type_info)).second) {
+                throw_type_error(declaration.location,
+                    "conflicting loaded type declaration '" + declaration.name + "'");
+            }
             pop_generic_parameters();
             break;
         }
@@ -325,6 +366,8 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
             type_info.kind = NominalKind::Interface;
             type_info.is_abstract = true;
             type_info.location = declaration.location;
+            type_info.module_name = current_module_;
+            type_info.is_public = statement->is_public;
             type_info.generic_parameters = declaration.generic_parameters;
             for (const auto& method : declaration.methods) {
                 push_generic_parameters(method.generic_parameters);
@@ -335,6 +378,11 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                     method.generic_parameters,
                     {},
                     method.location,
+                    nullptr,
+                    nullptr,
+                    nullptr,
+                    {},
+                    false,
                 };
                 signature.interface_method = &method;
                 for (const auto& parameter : method.parameters) {
@@ -355,7 +403,11 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                     std::move(signature), Visibility::Public, declaration.name,
                     false, true, false});
             }
-            scopes_.back().nominal_types.emplace(declaration.name, std::move(type_info));
+            if (!scopes_.back().nominal_types.emplace(
+                    declaration.name, std::move(type_info)).second) {
+                throw_type_error(declaration.location,
+                    "conflicting loaded type declaration '" + declaration.name + "'");
+            }
             pop_generic_parameters();
             break;
         }
@@ -366,6 +418,8 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
             NominalTypeInfo type_info;
             type_info.kind = NominalKind::Enum;
             type_info.location = declaration.location;
+            type_info.module_name = current_module_;
+            type_info.is_public = statement->is_public;
             for (const auto& variant : declaration.variants) {
                 const auto [unused, inserted] = type_info.variants.emplace(
                     variant.name,
@@ -383,14 +437,18 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                 }
                 type_info.variant_order.push_back(variant.name);
             }
-            scopes_.back().nominal_types.emplace(
-                declaration.name, std::move(type_info));
+            if (!scopes_.back().nominal_types.emplace(
+                    declaration.name, std::move(type_info)).second) {
+                throw_type_error(declaration.location,
+                    "conflicting loaded type declaration '" + declaration.name + "'");
+            }
             break;
         }
         default:
             break;
         }
     }
+    current_module_ = enclosing_module;
 }
 
 void TypeChecker::validate_nominal_types()
@@ -559,6 +617,8 @@ void TypeChecker::check_statement(const Stmt& statement)
 {
     current_location_ = statement.location;
     switch (statement.kind) {
+    case StmtKind::ImportDeclaration:
+        return;
     case StmtKind::VariableDeclaration: {
         const auto& declaration = static_cast<const VariableDeclarationStmt&>(statement);
         if (declaration.explicit_type) {
@@ -2145,6 +2205,8 @@ bool TypeChecker::statements_guarantee_return(
 bool TypeChecker::statement_guarantees_return(const Stmt& statement) const
 {
     switch (statement.kind) {
+    case StmtKind::ImportDeclaration:
+        return false;
     case StmtKind::Return:
         return true;
     case StmtKind::Block:
@@ -2194,6 +2256,19 @@ Type TypeChecker::resolve_type(const TypeReference& reference) const
             true,
             reference.name,
         };
+    }
+    for (auto scope = scopes_.rbegin(); scope != scopes_.rend(); ++scope) {
+        if (const auto declared = scope->nominal_types.find(reference.name);
+            declared != scope->nominal_types.end()) {
+            if (!is_module_accessible(
+                    declared->second.module_name, declared->second.is_public)) {
+                throw_type_error(
+                    reference.location,
+                    "type '" + reference.name + "' is private to module '"
+                        + declared->second.module_name + "'");
+            }
+            break;
+        }
     }
     if (!reference.arguments.empty()) {
         std::vector<Type> arguments;
@@ -2578,7 +2653,10 @@ std::vector<const TypeChecker::FunctionSignature*> TypeChecker::find_functions(
             std::vector<const FunctionSignature*> result;
             result.reserve(function->second.size());
             for (const auto& signature : function->second) {
-                result.push_back(&signature);
+                if (is_module_accessible(
+                        signature.module_name, signature.is_public)) {
+                    result.push_back(&signature);
+                }
             }
             return result;
         }
@@ -2592,13 +2670,32 @@ const TypeChecker::NominalTypeInfo* TypeChecker::find_nominal_type(
     for (auto scope = scopes_.rbegin(); scope != scopes_.rend(); ++scope) {
         if (const auto type = scope->nominal_types.find(name);
             type != scope->nominal_types.end()) {
-            return &type->second;
+            return is_module_accessible(
+                       type->second.module_name, type->second.is_public)
+                ? &type->second
+                : nullptr;
         }
         if (scope->values.contains(name)) {
             return nullptr;
         }
     }
     return nullptr;
+}
+
+bool TypeChecker::is_module_accessible(
+    const std::string& module_name,
+    bool is_public) const
+{
+    if (module_name.empty() || current_module_.empty()
+        || module_name == current_module_) {
+        return true;
+    }
+    if (!is_public) {
+        return false;
+    }
+    const auto imports = module_imports_.find(current_module_);
+    return imports != module_imports_.end()
+        && imports->second.contains(module_name);
 }
 
 const TypeChecker::FieldInfo* TypeChecker::find_field(

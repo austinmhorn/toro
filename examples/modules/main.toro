@@ -1,0 +1,25 @@
+import game.player
+import game.score
+import util.math
+
+function main() {
+    player := Player(name: identity<string>("Toro"), score: 40)
+    stats := Stats(score: player.boosted_score())
+    rank := Rank::veteran
+
+    print(player.name)
+    print(stats.score)
+    print(normalized_score(stats.score))
+    print(describe(stats.score))
+    print(describe("modules"))
+
+    handle rank {
+        novice {
+            print("novice")
+        }
+
+        veteran {
+            print("veteran")
+        }
+    }
+}

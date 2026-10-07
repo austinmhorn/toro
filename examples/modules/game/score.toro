@@ -1,0 +1,5 @@
+import util.math
+
+public function normalized_score(value: int) -> int {
+    return add(value, 0)
+}

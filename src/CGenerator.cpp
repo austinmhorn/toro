@@ -217,6 +217,30 @@ std::string function_name(std::string_view name)
     return "toro_fn_" + std::string(name);
 }
 
+std::string module_symbol_prefix(std::string_view module_name)
+{
+    if (module_name.empty()) {
+        return {};
+    }
+    std::string result = "module";
+    std::size_t start = 0;
+    while (start < module_name.size()) {
+        const std::size_t separator = module_name.find('.', start);
+        const std::string_view segment = module_name.substr(
+            start,
+            separator == std::string_view::npos
+                ? std::string_view::npos
+                : separator - start);
+        result += "__" + std::to_string(segment.size()) + "_"
+            + std::string(segment);
+        if (separator == std::string_view::npos) {
+            break;
+        }
+        start = separator + 1;
+    }
+    return result;
+}
+
 std::string struct_name(std::string_view name)
 {
     return "toro_struct_" + std::string(name);
@@ -1666,9 +1690,13 @@ private:
                 "missing backend overload declaration for '" + function.name + "'");
         }
         std::string base_key = function.name;
+        if (!function.module_name.empty() && function.name != "main") {
+            base_key = module_symbol_prefix(function.module_name)
+                + "__" + function.name;
+        }
         if (templates->second.size() > 1) {
             base_key = source_signature_key(
-                function.name, function.parameters);
+                base_key, function.parameters);
         }
         const std::string key = specialization_key(base_key, arguments);
         if (const auto existing = functions_.find(key);
@@ -2113,6 +2141,8 @@ private:
     {
         current_location_ = statement.location;
         switch (statement.kind) {
+        case StmtKind::ImportDeclaration:
+            return;
         case StmtKind::VariableDeclaration: {
             const auto& declaration =
                 static_cast<const VariableDeclarationStmt&>(statement);
@@ -2256,6 +2286,8 @@ private:
     void collect_local_types(const Stmt& statement)
     {
         switch (statement.kind) {
+        case StmtKind::ImportDeclaration:
+            return;
         case StmtKind::VariableDeclaration: {
             const auto& declaration =
                 static_cast<const VariableDeclarationStmt&>(statement);
@@ -3176,6 +3208,10 @@ private:
         current_location_ = statement.location;
         const std::string prefix = indent(depth);
         switch (statement.kind) {
+        case StmtKind::ImportDeclaration:
+            throw_backend_error(
+                statement.location,
+                "unresolved import reached the C backend");
         case StmtKind::VariableDeclaration: {
             const auto& declaration =
                 static_cast<const VariableDeclarationStmt&>(statement);

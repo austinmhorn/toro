@@ -46,7 +46,11 @@ reference-backed containers with explicit `clone()` operations. Indexing,
 mutation, counts, Array/List iteration, and class-element ARC are supported.
 The Phase 6 backend baseline is hardened for deterministic generated C,
 centralized runtime-type validation, consistent call-temporary ownership, and
-clear unsupported-feature diagnostics. Phase 7 application features are next.
+clear unsupported-feature diagnostics. Phase 7 application work now builds on
+that runtime baseline.
+Module-root imports now allow one entry file to load a deterministic graph of
+`.toro` modules. Top-level declarations are private by default and use `public`
+for explicit export.
 
 ## Build
 
@@ -142,6 +146,7 @@ Run the full semantic-analysis and type-checking pipeline on a source file:
 
 ```bash
 ./build/toro check examples/hello.toro
+./build/toro check examples/modules/main.toro
 ```
 
 Generate C after parsing and checking a source file:
@@ -187,7 +192,25 @@ Build and run through temporary artifacts:
 ./build/toro run examples/conversions.toro
 ./build/toro run examples/collections.toro
 ./build/toro run examples/backend_hardening.toro
+./build/toro run examples/modules/main.toro
 ```
+
+Imports use dotted module identities:
+
+```toro
+import game.player
+import util.math
+```
+
+The entry file's directory is currently the source root, so `game.player` maps
+to `game/player.toro`. Imported top-level declarations must be marked `public`;
+unmarked declarations remain private to their module. Duplicate and diamond
+imports are deduplicated, while missing modules, self-imports, and cycles are
+diagnosed. Project manifests, aliases, wildcards, external packages, and
+additional configured source roots remain deferred.
+Nominal type names must currently be unique across the loaded graph; conflicting
+type declarations are diagnosed pending separate module symbol identities in
+the next multi-file compilation milestone.
 
 `run` forwards program output and returns its exit status. Its temporary C source
 and executable are removed after the program finishes or compilation fails.

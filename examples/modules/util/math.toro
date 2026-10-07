@@ -1,0 +1,19 @@
+function offset() -> int {
+    return 1
+}
+
+public function add(left: int, right: int) -> int {
+    return left + right + offset()
+}
+
+public function describe(value: int) -> string {
+    return "int"
+}
+
+public function describe(value: string) -> string {
+    return value
+}
+
+public function identity<T>(value: T) -> T {
+    return value
+}

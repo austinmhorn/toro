@@ -5,9 +5,11 @@
 Toro currently uses a direct frontend-to-C architecture:
 
 ```text
-.toro source
+entry .toro source
     ↓
-SourceFile
+ModuleLoader / source-root resolver
+    ↓
+ordered module graph
     ↓
 Lexer
     ↓
@@ -52,6 +54,14 @@ toro run
 
 Source files use `.toro`.
 
+`ModuleLoader` owns filesystem-backed module discovery. The entry file's
+directory is currently the source root, and a dotted identity such as
+`game.player` maps to `game/player.toro` beneath that root. The loader performs a
+deterministic depth-first traversal, reports missing/self/cyclic imports,
+deduplicates repeated and diamond dependencies, and produces dependency-first
+module metadata plus one combined owned AST program. Filesystem resolution does
+not live in the parser, semantic analyzer, type checker, or C backend.
+
 The lexer tracks one-based line/column locations and recognizes canonical Toro
 syntax, including `::` for type-scoped enum variants.
 
@@ -74,10 +84,19 @@ The AST represents, among other features:
 - conversion overloads;
 - lifecycle declarations;
 - Result propagation.
+- module imports and top-level export visibility.
 
 ### Semantic analysis
 
-Semantic analysis handles scopes, declarations, name resolution, duplicate declarations, loop/handle bindings, and contextual validity such as `self`.
+Semantic analysis handles scopes, declarations, name resolution, duplicate
+declarations, loop/handle bindings, contextual validity such as `self`, and
+private-by-default module visibility. Only public declarations from directly
+imported modules participate in resolution.
+
+The type checker retains declaration module/export metadata while forming
+function overload sets and nominal types. The backend receives one deterministic
+dependency-first program with import declarations removed, so each shared module
+is emitted exactly once and module identity remains a frontend concern.
 
 ### Type checker
 
@@ -316,7 +335,12 @@ Important unsupported or deferred runtime features include:
 - Map iteration and non-string Map keys;
 - nested Array elements and interface-valued collection elements;
 - collection-valued struct/class fields;
-- modules/multi-file project compilation;
+- project manifests, multiple configured source roots, and project-wide build
+  planning beyond the current entry-root module graph;
+- import aliases, wildcard imports, and package dependencies;
+- duplicate nominal type names across loaded modules; the current combined
+  frontend/backend program diagnoses these until separate module symbol
+  identities arrive with project-aware multi-file compilation;
 - C/C++ FFI;
 - ownership/escape/borrow optimization;
 - `performance function` enforcement.

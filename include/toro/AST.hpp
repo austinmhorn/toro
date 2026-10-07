@@ -249,6 +249,7 @@ struct GroupingExpr final : Expr {
 };
 
 enum class StmtKind {
+    ImportDeclaration,
     VariableDeclaration,
     Assignment,
     MemberAssignment,
@@ -280,6 +281,32 @@ struct Stmt {
 
     StmtKind kind;
     SourceLocation location;
+    std::string module_name;
+    bool is_public{false};
+};
+
+struct ImportDeclarationStmt final : Stmt {
+    ImportDeclarationStmt(
+        SourceLocation location,
+        std::vector<std::string> path)
+        : Stmt(StmtKind::ImportDeclaration, location)
+        , path(std::move(path))
+    {
+    }
+
+    [[nodiscard]] std::string module_path() const
+    {
+        std::string result;
+        for (const auto& segment : path) {
+            if (!result.empty()) {
+                result += '.';
+            }
+            result += segment;
+        }
+        return result;
+    }
+
+    std::vector<std::string> path;
 };
 
 struct VariableDeclarationStmt final : Stmt {
@@ -696,6 +723,13 @@ struct InterfaceDeclarationStmt final : Stmt {
 
 struct Program {
     std::vector<std::unique_ptr<Stmt>> statements;
+    struct ModuleInfo {
+        std::string name;
+        std::string path;
+        std::vector<std::string> imports;
+    };
+    std::vector<ModuleInfo> modules;
+    std::string entry_module;
 };
 
 [[nodiscard]] std::string dump_expression(const Expr& expression);
