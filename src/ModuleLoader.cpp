@@ -73,10 +73,13 @@ public:
         result.entry_module = entry_name;
         for (const auto& name : emission_order_) {
             auto& module = modules_.at(name);
+            const std::size_t statement_begin = result.statements.size();
             result.modules.push_back(Program::ModuleInfo{
                 module.name,
                 module.path.string(),
                 module.imports,
+                statement_begin,
+                statement_begin,
             });
             for (auto& statement : module.program.statements) {
                 if (statement->kind == StmtKind::ImportDeclaration) {
@@ -94,6 +97,7 @@ public:
                 statement->module_name = module.name;
                 result.statements.push_back(std::move(statement));
             }
+            result.modules.back().statement_end = result.statements.size();
         }
         return result;
     }

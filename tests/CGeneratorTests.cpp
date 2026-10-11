@@ -49,7 +49,8 @@ void expect_backend_error(std::string_view source, std::string_view expected)
         }
         return;
     }
-    throw std::runtime_error("expected C backend failure");
+    throw std::runtime_error(
+        "expected C backend failure for source:\n" + std::string(source));
 }
 
 void test_primitive_variables_arithmetic_and_assignment()

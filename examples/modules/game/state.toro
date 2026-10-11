@@ -1,0 +1,8 @@
+public struct State {
+    score: int
+}
+
+public function game_state_score() -> int {
+    state := State(score: 7)
+    return state.score
+}

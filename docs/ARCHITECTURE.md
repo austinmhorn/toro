@@ -59,8 +59,11 @@ directory is currently the source root, and a dotted identity such as
 `game.player` maps to `game/player.toro` beneath that root. The loader performs a
 deterministic depth-first traversal, reports missing/self/cyclic imports,
 deduplicates repeated and diamond dependencies, and produces dependency-first
-module metadata plus one combined owned AST program. Filesystem resolution does
-not live in the parser, semantic analyzer, type checker, or C backend.
+module metadata plus one combined owned AST program. Each module records its
+statement range, imports, stable logical identity, and declaration ownership, so
+the combined storage does not erase compilation-unit boundaries. Filesystem
+resolution does not live in the parser, semantic analyzer, type checker, or C
+backend.
 
 The lexer tracks one-based line/column locations and recognizes canonical Toro
 syntax, including `::` for type-scoped enum variants.
@@ -93,10 +96,17 @@ declarations, loop/handle bindings, contextual validity such as `self`, and
 private-by-default module visibility. Only public declarations from directly
 imported modules participate in resolution.
 
-The type checker retains declaration module/export metadata while forming
-function overload sets and nominal types. The backend receives one deterministic
-dependency-first program with import declarations removed, so each shared module
-is emitted exactly once and module identity remains a frontend concern.
+The semantic analyzer and type checker use the current module plus its direct
+imports as a module-local lookup environment. They retain declaration
+module/export metadata while forming overload sets and nominal types. Nominal
+types use stable identities derived from logical module names rather than source
+spelling alone. A same-module declaration shadows imports; otherwise colliding
+public declarations from multiple direct imports produce an ambiguity error.
+
+The backend receives one deterministic dependency-first program with import
+declarations removed, so each shared module is emitted exactly once. It carries
+the same logical identities into type specializations and C symbols; absolute
+filesystem paths never participate in native naming.
 
 ### Type checker
 
@@ -338,9 +348,8 @@ Important unsupported or deferred runtime features include:
 - project manifests, multiple configured source roots, and project-wide build
   planning beyond the current entry-root module graph;
 - import aliases, wildcard imports, and package dependencies;
-- duplicate nominal type names across loaded modules; the current combined
-  frontend/backend program diagnoses these until separate module symbol
-  identities arrive with project-aware multi-file compilation;
+- source-level module qualification for disambiguating colliding public imports;
+- separate object-file compilation and linking per module;
 - C/C++ FFI;
 - ownership/escape/borrow optimization;
 - `performance function` enforcement.

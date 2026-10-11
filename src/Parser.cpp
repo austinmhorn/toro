@@ -1217,6 +1217,8 @@ TypeReference Parser::parse_type_reference(const char* message)
         name.lexeme,
         {},
         SourceLocation{name.line, name.column},
+        false,
+        std::nullopt,
     };
     if (match({TokenType::Less})) {
         if (check(TokenType::Greater)) {

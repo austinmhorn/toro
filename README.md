@@ -50,7 +50,9 @@ clear unsupported-feature diagnostics. Phase 7 application work now builds on
 that runtime baseline.
 Module-root imports now allow one entry file to load a deterministic graph of
 `.toro` modules. Top-level declarations are private by default and use `public`
-for explicit export.
+for explicit export. Module-aware declaration identities allow independent
+modules to reuse source-level names while preserving distinct types and native
+symbols.
 
 ## Build
 
@@ -208,9 +210,9 @@ unmarked declarations remain private to their module. Duplicate and diamond
 imports are deduplicated, while missing modules, self-imports, and cycles are
 diagnosed. Project manifests, aliases, wildcards, external packages, and
 additional configured source roots remain deferred.
-Nominal type names must currently be unique across the loaded graph; conflicting
-type declarations are diagnosed pending separate module symbol identities in
-the next multi-file compilation milestone.
+Same-named declarations in separate modules remain distinct. An unqualified use
+is diagnosed as ambiguous when two directly imported modules export that name;
+aliases and module-qualified source access remain deferred.
 
 `run` forwards program output and returns its exit status. Its temporary C source
 and executable are removed after the program finishes or compilation fails.

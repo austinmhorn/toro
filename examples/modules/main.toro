@@ -1,5 +1,7 @@
 import game.player
 import game.score
+import game.state
+import network.state
 import util.math
 
 function main() {
@@ -12,6 +14,8 @@ function main() {
     print(normalized_score(stats.score))
     print(describe(stats.score))
     print(describe("modules"))
+    print(game_state_score())
+    print(network_state_code())
 
     handle rank {
         novice {

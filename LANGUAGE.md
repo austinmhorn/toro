@@ -79,10 +79,13 @@ diamond graph is loaded and compiled once. Unknown modules, self-imports, and
 cycles are errors. Imports are compile-time dependency declarations, not textual
 inclusion.
 
-In the current frontend-to-C compilation unit, nominal type declaration names
-must remain unique across the loaded module graph. Conflicts are diagnosed
-rather than silently merged; fully separate module symbol identities belong to
-the next multi-file compilation milestone.
+Declarations retain their logical module identity throughout checking and native
+lowering. Independent modules may therefore use the same source-level function,
+struct, class, interface, enum, or generic declaration names without colliding.
+Within a module, local declarations take precedence over imported declarations.
+If two directly imported modules export the same unqualified name and no local
+declaration resolves it, using that name is ambiguous and is rejected. Toro does
+not yet provide aliases or module-qualified source access to disambiguate it.
 
 ### Logical Operators
 

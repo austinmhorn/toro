@@ -1,4 +1,5 @@
 #include "toro/CGenerator.hpp"
+#include "toro/ModuleIdentity.hpp"
 
 #include <algorithm>
 #include <optional>
@@ -12,6 +13,12 @@
 
 namespace toro {
 namespace {
+
+template <typename Declaration>
+[[nodiscard]] std::string nominal_identity(const Declaration& declaration)
+{
+    return declaration_identity(declaration.module_name, declaration.name);
+}
 
 enum class CValueKind {
     Int,
@@ -609,11 +616,12 @@ public:
                 + " " + class_name(key) + ";\n";
         }
         for (const auto& interface_declaration : interface_order_) {
-            output += "typedef struct " + interface_name(interface_declaration->name)
-                + " " + interface_name(interface_declaration->name) + ";\n";
+            const std::string identity = nominal_identity(*interface_declaration);
+            output += "typedef struct " + interface_name(identity)
+                + " " + interface_name(identity) + ";\n";
             output += "typedef struct "
-                + interface_vtable_name(interface_declaration->name) + " "
-                + interface_vtable_name(interface_declaration->name) + ";\n";
+                + interface_vtable_name(identity) + " "
+                + interface_vtable_name(identity) + ";\n";
         }
         for (const auto& key : class_order_) {
             if (classes_.at(key).base_name
@@ -624,8 +632,9 @@ public:
                 + " " + vtable_name(key) + ";\n";
         }
         for (const auto& enum_declaration : enum_order_) {
-            output += "typedef struct " + enum_name(enum_declaration->name)
-                + " " + enum_name(enum_declaration->name) + ";\n";
+            const std::string identity = nominal_identity(*enum_declaration);
+            output += "typedef struct " + enum_name(identity)
+                + " " + enum_name(identity) + ";\n";
         }
         for (const auto& result : result_order_) {
             output += "typedef struct " + result_name(result.type) + " "
@@ -735,10 +744,16 @@ public:
         for (const auto& key : struct_order_) {
             const auto& info = structs_.at(key);
             for (const auto& implemented : info.declaration->interfaces) {
+                if (!implemented.resolved_type) {
+                    throw_backend_error(implemented.location,
+                        "missing resolved interface type");
+                }
+                const std::string& interface_identity =
+                    implemented.resolved_type->name;
                 output += emit_interface_thunks(
-                    implemented.name, key, CValueKind::Struct);
+                    interface_identity, key, CValueKind::Struct);
                 output += emit_interface_vtable_instance(
-                    implemented.name, key, CValueKind::Struct);
+                    interface_identity, key, CValueKind::Struct);
             }
         }
         for (const auto& key : class_order_) {
@@ -897,8 +912,14 @@ private:
             result = effective_class_interfaces(*info.base_name);
         }
         for (const auto& interface_reference : info.declaration->interfaces) {
-            if (std::ranges::find(result, interface_reference.name) == result.end()) {
-                result.push_back(interface_reference.name);
+            if (!interface_reference.resolved_type) {
+                throw_backend_error(interface_reference.location,
+                    "missing resolved interface type");
+            }
+            const std::string& interface_identity =
+                interface_reference.resolved_type->name;
+            if (std::ranges::find(result, interface_identity) == result.end()) {
+                result.push_back(interface_identity);
             }
         }
         return result;
@@ -914,7 +935,8 @@ private:
             return std::ranges::any_of(
                 declarations,
                 [&](const TypeReference& candidate) {
-                    return candidate.name == interface;
+                    return candidate.resolved_type
+                        && candidate.resolved_type->name == interface;
                 });
         }
         if (type.kind == CValueKind::Class) {
@@ -1339,7 +1361,8 @@ private:
         const StructDeclarationStmt& declaration,
         const std::vector<CValueType>& arguments)
     {
-        const std::string key = specialization_key(declaration.name, arguments);
+        const std::string key = specialization_key(
+            nominal_identity(declaration), arguments);
         if (const auto existing = structs_.find(key); existing != structs_.end()) {
             if (existing->second.declaration != &declaration) {
                 throw_backend_error(
@@ -1421,7 +1444,8 @@ private:
         const ClassDeclarationStmt& declaration,
         const std::vector<CValueType>& arguments)
     {
-        const std::string key = specialization_key(declaration.name, arguments);
+        const std::string key = specialization_key(
+            nominal_identity(declaration), arguments);
         if (const auto existing = classes_.find(key); existing != classes_.end()) {
             if (existing->second.declaration != &declaration) {
                 throw_backend_error(
@@ -1563,11 +1587,11 @@ private:
             if (statement->kind == StmtKind::StructDeclaration) {
                 const auto& declaration =
                     static_cast<const StructDeclarationStmt&>(*statement);
-                struct_templates_.emplace(declaration.name, &declaration);
+                struct_templates_.emplace(nominal_identity(declaration), &declaration);
             } else if (statement->kind == StmtKind::ClassDeclaration) {
                 const auto& declaration =
                     static_cast<const ClassDeclarationStmt&>(*statement);
-                class_templates_.emplace(declaration.name, &declaration);
+                class_templates_.emplace(nominal_identity(declaration), &declaration);
             }
         }
         for (const auto& statement : program.statements) {
@@ -1582,7 +1606,7 @@ private:
                     "generic interfaces are not supported by the C backend");
             }
             interfaces_.emplace(
-                declaration.name, InterfaceInfo{&declaration, {}, {}});
+                nominal_identity(declaration), InterfaceInfo{&declaration, {}, {}});
             interface_order_.push_back(&declaration);
         }
 
@@ -1596,10 +1620,11 @@ private:
             } else if (statement->kind == StmtKind::EnumDeclaration) {
                 const auto& declaration =
                     static_cast<const EnumDeclarationStmt&>(*statement);
-                enums_.emplace(declaration.name, EnumInfo{&declaration, {}, {}});
+                const std::string identity = nominal_identity(declaration);
+                enums_.emplace(identity, EnumInfo{&declaration, {}, {}});
                 enum_order_.push_back(&declaration);
                 nominal_order_.push_back(
-                    CValueType{CValueKind::Enum, declaration.name});
+                    CValueType{CValueKind::Enum, identity});
             } else if (statement->kind == StmtKind::ClassDeclaration) {
                 const auto& declaration =
                     static_cast<const ClassDeclarationStmt&>(*statement);
@@ -1610,7 +1635,7 @@ private:
         }
 
         for (const auto* declaration : interface_order_) {
-            auto& info = interfaces_.at(declaration->name);
+            auto& info = interfaces_.at(nominal_identity(*declaration));
             for (std::size_t method_index = 0;
                  method_index < declaration->methods.size(); ++method_index) {
                 const auto& method = declaration->methods[method_index];
@@ -1649,7 +1674,7 @@ private:
         }
 
         for (const auto* declaration : enum_order_) {
-            auto& info = enums_.at(declaration->name);
+            auto& info = enums_.at(nominal_identity(*declaration));
             for (const auto& variant : declaration->variants) {
                 std::optional<CValueType> payload_type;
                 if (variant.payload_type) {
@@ -1838,6 +1863,12 @@ private:
                 }
                 return result;
             }
+        }
+        if (type.resolved_type
+            && type.resolved_type->kind == TypeKind::Unknown
+            && type.name != "Result" && type.name != "Array"
+            && type.name != "List" && type.name != "Map") {
+            return lower_type(*type.resolved_type);
         }
         if (type.nullable) {
             if (const auto found = class_templates_.find(type.name);
@@ -2643,9 +2674,10 @@ private:
     std::string emit_interface_definition(
         const InterfaceDeclarationStmt& declaration) const
     {
-        const auto& info = interfaces_.at(declaration.name);
-        const std::string value_type = interface_name(declaration.name);
-        const std::string table_type = interface_vtable_name(declaration.name);
+        const std::string identity = nominal_identity(declaration);
+        const auto& info = interfaces_.at(identity);
+        const std::string value_type = interface_name(identity);
+        const std::string table_type = interface_vtable_name(identity);
         std::string output = "struct " + value_type + "\n{\n";
         output += "    const " + table_type + "* toro_vtable;\n";
         output += "    void* toro_object;\n";
@@ -2658,7 +2690,8 @@ private:
             const bool implements = std::ranges::any_of(
                 implementer.declaration->interfaces,
                 [&](const TypeReference& candidate) {
-                    return candidate.name == declaration.name;
+                    return candidate.resolved_type
+                        && candidate.resolved_type->name == identity;
                 });
             if (!implements) {
                 continue;
@@ -2679,7 +2712,7 @@ private:
         }
         for (const auto& method : info.methods) {
             output += "    " + c_type_name(method.return_type) + " (*"
-                + interface_slot_name(declaration.name, method.key)
+                + interface_slot_name(identity, method.key)
                 + ")(" + value_type + "* toro_interface_self";
             for (std::size_t index = 0;
                  index < method.parameter_types.size(); ++index) {
@@ -3983,8 +4016,13 @@ private:
         if (call.callee->kind == ExprKind::TypeAccess) {
             const auto& access =
                 static_cast<const TypeAccessExpr&>(*call.callee);
+            if (!access.resolved_type) {
+                throw_backend_error(current_location_,
+                    "missing resolved enum type for '" + access.type_name + "'");
+            }
             return emit_enum_variant_construction(
-                access.type_name, access.member, call);
+                lower_type(*access.resolved_type).nominal_name,
+                access.member, call);
         }
         if (call.callee->kind == ExprKind::MemberAccess) {
             const auto& member =
@@ -4008,21 +4046,14 @@ private:
             return emit_collection_construction(
                 lower_type(*call.resolved_type), call);
         }
-        if (struct_templates_.contains(callee.name)) {
-            if (!call.resolved_type) {
-                throw_backend_error(
-                    current_location_, "missing resolved generic construction type");
-            }
+        if (!call.resolved_function && call.resolved_type) {
             const auto type = lower_type(*call.resolved_type);
-            return emit_struct_construction(type.nominal_name, call);
-        }
-        if (class_templates_.contains(callee.name)) {
-            if (!call.resolved_type) {
-                throw_backend_error(
-                    current_location_, "missing resolved generic construction type");
+            if (type.kind == CValueKind::Struct) {
+                return emit_struct_construction(type.nominal_name, call);
             }
-            const auto type = lower_type(*call.resolved_type);
-            return emit_class_construction(type.nominal_name, call);
+            if (type.kind == CValueKind::Class) {
+                return emit_class_construction(type.nominal_name, call);
+            }
         }
         if (!call.resolved_function) {
             throw_backend_error(current_location_,
@@ -4902,7 +4933,13 @@ private:
 
     GeneratedExpression emit_enum_variant_access(const TypeAccessExpr& access)
     {
-        const auto found_enum = enums_.find(access.type_name);
+        if (!access.resolved_type) {
+            throw_backend_error(current_location_,
+                "missing resolved enum type for '" + access.type_name + "'");
+        }
+        const CValueType enum_type = lower_type(*access.resolved_type);
+        const std::string& identity = enum_type.nominal_name;
+        const auto found_enum = enums_.find(identity);
         if (found_enum == enums_.end()) {
             throw_backend_error(
                 current_location_,
@@ -4924,9 +4961,9 @@ private:
                     + "' requires a payload");
         }
         return {
-            "(" + enum_name(access.type_name) + "){.toro_tag = "
-                + enum_tag_name(access.type_name, access.member) + "}",
-            CValueType{CValueKind::Enum, access.type_name},
+            "(" + enum_name(identity) + "){.toro_tag = "
+                + enum_tag_name(identity, access.member) + "}",
+            enum_type,
         };
     }
 

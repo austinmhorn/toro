@@ -73,6 +73,8 @@ private:
     enum class NominalKind { Struct, Class, Interface, Enum };
 
     struct NominalTypeInfo {
+        std::string source_name;
+        std::string identity;
         NominalKind kind;
         bool is_abstract{false};
         std::optional<std::string> base;
@@ -187,12 +189,16 @@ private:
     void push_scope();
     void pop_scope();
     void push_generic_parameters(const std::vector<GenericParameter>& parameters);
+    void resolve_generic_constraints(
+        const std::vector<GenericParameter>& parameters) const;
     void pop_generic_parameters();
     void declare_value(const std::string& name, Type type);
     [[nodiscard]] std::optional<Type> find_value(const std::string& name) const;
     [[nodiscard]] std::vector<const FunctionSignature*> find_functions(
         const std::string& name) const;
     [[nodiscard]] const NominalTypeInfo* find_nominal_type(const std::string& name) const;
+    [[nodiscard]] const NominalTypeInfo* find_visible_nominal_type(
+        const std::string& source_name) const;
     [[nodiscard]] const FieldInfo* find_field(
         const std::string& type_name,
         const std::string& field_name) const;

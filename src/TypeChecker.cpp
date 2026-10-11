@@ -1,4 +1,5 @@
 #include "toro/TypeChecker.hpp"
+#include "toro/ModuleIdentity.hpp"
 
 #include <algorithm>
 #include <functional>
@@ -155,6 +156,7 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
         if (statement->kind == StmtKind::FunctionDeclaration) {
             const auto& function = static_cast<const FunctionDeclarationStmt&>(*statement);
             push_generic_parameters(function.generic_parameters);
+            resolve_generic_constraints(function.generic_parameters);
             FunctionSignature signature{
                 {},
                 function.return_type ? resolve_type(*function.return_type) : void_type,
@@ -196,17 +198,22 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
         switch (statement->kind) {
         case StmtKind::StructDeclaration: {
             const auto& declaration = static_cast<const StructDeclarationStmt&>(*statement);
+            const std::string identity = declaration_identity(
+                current_module_, declaration.name);
             declare_value(declaration.name,
-                Type{TypeKind::Unknown, false, false, declaration.name});
+                Type{TypeKind::Unknown, false, false, identity});
             push_generic_parameters(declaration.generic_parameters);
+            resolve_generic_constraints(declaration.generic_parameters);
             NominalTypeInfo type_info;
+            type_info.source_name = declaration.name;
+            type_info.identity = identity;
             type_info.kind = NominalKind::Struct;
             type_info.location = declaration.location;
             type_info.module_name = current_module_;
             type_info.is_public = statement->is_public;
             type_info.generic_parameters = declaration.generic_parameters;
             for (const auto& interface_name : declaration.interfaces) {
-                type_info.interfaces.push_back(interface_name.name);
+                type_info.interfaces.push_back(resolve_type(interface_name).name);
             }
             for (const auto& field : declaration.fields) {
                 const Type field_type = resolve_type(field.type);
@@ -216,7 +223,7 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                     Visibility::Public,
                     field.default_value == nullptr && !has_zero_value(field_type),
                     field.default_value != nullptr,
-                    declaration.name,
+                    identity,
                     field.type,
                 });
             }
@@ -224,6 +231,7 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                 const auto& method_declaration =
                     static_cast<const MethodDeclaration&>(*method);
                 push_generic_parameters(method_declaration.generic_parameters);
+                resolve_generic_constraints(method_declaration.generic_parameters);
                 FunctionSignature signature{
                     {},
                     method_declaration.return_type
@@ -254,7 +262,7 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                             + "." + method_declaration.name + "'");
                 }
                 overloads.push_back(MethodInfo{
-                    std::move(signature), Visibility::Public, declaration.name,
+                    std::move(signature), Visibility::Public, identity,
                     false, false, false});
             }
             for (const auto& conversion : declaration.conversions) {
@@ -264,7 +272,7 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                 });
             }
             if (!scopes_.back().nominal_types.emplace(
-                    declaration.name, std::move(type_info)).second) {
+                    identity, std::move(type_info)).second) {
                 throw_type_error(declaration.location,
                     "conflicting loaded type declaration '" + declaration.name + "'");
             }
@@ -273,10 +281,15 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
         }
         case StmtKind::ClassDeclaration: {
             const auto& declaration = static_cast<const ClassDeclarationStmt&>(*statement);
+            const std::string identity = declaration_identity(
+                current_module_, declaration.name);
             declare_value(declaration.name,
-                Type{TypeKind::Unknown, false, false, declaration.name});
+                Type{TypeKind::Unknown, false, false, identity});
             push_generic_parameters(declaration.generic_parameters);
+            resolve_generic_constraints(declaration.generic_parameters);
             NominalTypeInfo type_info;
+            type_info.source_name = declaration.name;
+            type_info.identity = identity;
             type_info.kind = NominalKind::Class;
             type_info.is_abstract = declaration.is_abstract;
             type_info.location = declaration.location;
@@ -284,10 +297,10 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
             type_info.is_public = statement->is_public;
             type_info.generic_parameters = declaration.generic_parameters;
             if (declaration.base_type) {
-                type_info.base = declaration.base_type->name;
+                type_info.base = resolve_type(*declaration.base_type).name;
             }
             for (const auto& interface_name : declaration.interfaces) {
-                type_info.interfaces.push_back(interface_name.name);
+                type_info.interfaces.push_back(resolve_type(interface_name).name);
             }
             for (const auto& member : declaration.members) {
                 if (member->kind == ClassMemberKind::Field) {
@@ -299,12 +312,13 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                         field.visibility,
                         field.default_value == nullptr && !has_zero_value(field_type),
                         field.default_value != nullptr,
-                        declaration.name,
+                        identity,
                         field.type,
                     });
                 } else if (member->kind == ClassMemberKind::Method) {
                     const auto& method = static_cast<const MethodDeclaration&>(*member);
                     push_generic_parameters(method.generic_parameters);
+                    resolve_generic_constraints(method.generic_parameters);
                     FunctionSignature signature{
                         {},
                         method.return_type ? resolve_type(*method.return_type) : void_type,
@@ -338,7 +352,7 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                                 + "." + method.name + "'");
                     }
                     overloads.push_back(MethodInfo{
-                        std::move(signature), method.visibility, declaration.name,
+                        std::move(signature), method.visibility, identity,
                         method.is_virtual || method.is_override,
                         method.body == nullptr, method.is_override});
                 } else {
@@ -350,7 +364,7 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                 }
             }
             if (!scopes_.back().nominal_types.emplace(
-                    declaration.name, std::move(type_info)).second) {
+                    identity, std::move(type_info)).second) {
                 throw_type_error(declaration.location,
                     "conflicting loaded type declaration '" + declaration.name + "'");
             }
@@ -359,10 +373,15 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
         }
         case StmtKind::InterfaceDeclaration: {
             const auto& declaration = static_cast<const InterfaceDeclarationStmt&>(*statement);
+            const std::string identity = declaration_identity(
+                current_module_, declaration.name);
             declare_value(declaration.name,
-                Type{TypeKind::Unknown, false, false, declaration.name});
+                Type{TypeKind::Unknown, false, false, identity});
             push_generic_parameters(declaration.generic_parameters);
+            resolve_generic_constraints(declaration.generic_parameters);
             NominalTypeInfo type_info;
+            type_info.source_name = declaration.name;
+            type_info.identity = identity;
             type_info.kind = NominalKind::Interface;
             type_info.is_abstract = true;
             type_info.location = declaration.location;
@@ -371,6 +390,7 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
             type_info.generic_parameters = declaration.generic_parameters;
             for (const auto& method : declaration.methods) {
                 push_generic_parameters(method.generic_parameters);
+                resolve_generic_constraints(method.generic_parameters);
                 FunctionSignature signature{
                     {},
                     method.return_type ? resolve_type(*method.return_type) : void_type,
@@ -400,11 +420,11 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                             + declaration.name + "." + method.name + "'");
                 }
                 overloads.push_back(MethodInfo{
-                    std::move(signature), Visibility::Public, declaration.name,
+                    std::move(signature), Visibility::Public, identity,
                     false, true, false});
             }
             if (!scopes_.back().nominal_types.emplace(
-                    declaration.name, std::move(type_info)).second) {
+                    identity, std::move(type_info)).second) {
                 throw_type_error(declaration.location,
                     "conflicting loaded type declaration '" + declaration.name + "'");
             }
@@ -413,9 +433,13 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
         }
         case StmtKind::EnumDeclaration: {
             const auto& declaration = static_cast<const EnumDeclarationStmt&>(*statement);
+            const std::string identity = declaration_identity(
+                current_module_, declaration.name);
             declare_value(declaration.name,
-                Type{TypeKind::Unknown, false, false, declaration.name});
+                Type{TypeKind::Unknown, false, false, identity});
             NominalTypeInfo type_info;
+            type_info.source_name = declaration.name;
+            type_info.identity = identity;
             type_info.kind = NominalKind::Enum;
             type_info.location = declaration.location;
             type_info.module_name = current_module_;
@@ -438,7 +462,7 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
                 type_info.variant_order.push_back(variant.name);
             }
             if (!scopes_.back().nominal_types.emplace(
-                    declaration.name, std::move(type_info)).second) {
+                    identity, std::move(type_info)).second) {
                 throw_type_error(declaration.location,
                     "conflicting loaded type declaration '" + declaration.name + "'");
             }
@@ -458,7 +482,8 @@ void TypeChecker::validate_nominal_types()
             const auto* base = find_nominal_type(*type_info.base);
             if (!base || base->kind != NominalKind::Class) {
                 throw_type_error(type_info.location,
-                    "base type '" + *type_info.base + "' of class '" + name
+                    "base type '" + std::string(declaration_source_name(*type_info.base))
+                        + "' of class '" + type_info.source_name
                         + "' must name an existing class");
             }
         }
@@ -466,7 +491,9 @@ void TypeChecker::validate_nominal_types()
             const auto* interface_type = find_nominal_type(interface_name);
             if (!interface_type || interface_type->kind != NominalKind::Interface) {
                 throw_type_error(type_info.location,
-                    "implemented type '" + interface_name + "' on '" + name
+                    "implemented type '"
+                        + std::string(declaration_source_name(interface_name))
+                        + "' on '" + type_info.source_name
                         + "' must name an existing interface");
             }
         }
@@ -493,7 +520,10 @@ void TypeChecker::validate_inheritance_cycles() const
         if (state[name] == 1) {
             const auto* type_info = find_nominal_type(name);
             throw_type_error(type_info ? type_info->location : SourceLocation{1, 1},
-                "inheritance cycle involving class '" + name + "'");
+                "inheritance cycle involving class '"
+                    + (type_info ? type_info->source_name
+                                 : std::string(declaration_source_name(name)))
+                    + "'");
         }
         state[name] = 1;
         const auto* type_info = find_nominal_type(name);
@@ -514,6 +544,7 @@ void TypeChecker::validate_class(
     const std::string& name,
     const NominalTypeInfo& type_info) const
 {
+    const std::string& display_name = type_info.source_name;
     for (const auto& [method_name, overloads] : type_info.methods) {
         const auto inherited = type_info.base
             ? find_methods(*type_info.base, method_name)
@@ -526,29 +557,29 @@ void TypeChecker::validate_class(
                 });
             if (method.is_override && inherited.empty()) {
                 throw_type_error(type_info.location,
-                    "method '" + name + "." + method_name
+                    "method '" + display_name + "." + method_name
                         + "' is marked override but no inherited method exists");
             }
             if (method.is_override && matching == inherited.end()) {
                 throw_type_error(type_info.location,
-                    "override '" + name + "." + method_name
+                    "override '" + display_name + "." + method_name
                         + "' does not match the inherited signature");
             }
             if (method.is_override && !(*matching)->is_virtual) {
                 throw_type_error(type_info.location,
-                    "method '" + name + "." + method_name
+                    "method '" + display_name + "." + method_name
                         + "' cannot override non-virtual method");
             }
             if (method.is_override
                 && !signatures_match(method.signature, (*matching)->signature)) {
                 throw_type_error(type_info.location,
-                    "override '" + name + "." + method_name
+                    "override '" + display_name + "." + method_name
                         + "' does not match the inherited signature");
             }
             if (!method.is_override && matching != inherited.end()
                 && (*matching)->is_virtual) {
                 throw_type_error(type_info.location,
-                    "method '" + name + "." + method_name
+                    "method '" + display_name + "." + method_name
                         + "' must use override for an inherited virtual method");
             }
         }
@@ -568,7 +599,7 @@ void TypeChecker::validate_class(
             for (const auto* method : find_methods(name, method_name)) {
                 if (method->is_abstract) {
                     throw_type_error(type_info.location,
-                        "concrete class '" + name
+                        "concrete class '" + display_name
                             + "' does not implement abstract method '"
                             + method_name + "'");
                 }
@@ -581,6 +612,7 @@ void TypeChecker::validate_interfaces(
     const std::string& name,
     const NominalTypeInfo& type_info) const
 {
+    const std::string& display_name = type_info.source_name;
     for (const auto& interface_name : type_info.interfaces) {
         const auto* interface_type = find_nominal_type(interface_name);
         if (!interface_type) {
@@ -598,15 +630,17 @@ void TypeChecker::validate_interfaces(
                 if (implementation == implementations.end()
                     || (*implementation)->visibility != Visibility::Public) {
                     throw_type_error(type_info.location,
-                        "type '" + name
+                        "type '" + display_name
                             + "' does not provide public interface method '"
-                            + interface_name + "." + method_name + "'");
+                            + std::string(declaration_source_name(interface_name))
+                            + "." + method_name + "'");
                 }
                 if (!signatures_match(
                         (*implementation)->signature, requirement.signature)) {
                     throw_type_error(type_info.location,
-                        "method '" + name + "." + method_name
-                            + "' does not match interface '" + interface_name + "'");
+                        "method '" + display_name + "." + method_name
+                            + "' does not match interface '"
+                            + std::string(declaration_source_name(interface_name)) + "'");
                 }
             }
         }
@@ -839,7 +873,8 @@ void TypeChecker::check_statement(const Stmt& statement)
                 require_assignable(declared, actual, field.location);
             }
         }
-        const Type source_type{TypeKind::Unknown, false, false, declaration.name};
+        const Type source_type{TypeKind::Unknown, false, false,
+            declaration_identity(statement.module_name, declaration.name)};
         for (const auto& method : declaration.methods) {
             check_method(static_cast<const MethodDeclaration&>(*method), source_type);
         }
@@ -884,16 +919,18 @@ void TypeChecker::check_statement(const Stmt& statement)
                 }
                 check_method(
                     method,
-                    Type{TypeKind::Unknown, false, false, declaration.name});
+                    Type{TypeKind::Unknown, false, false,
+                        declaration_identity(statement.module_name, declaration.name)});
             } else {
                 check_conversion(
                     static_cast<const ConversionOverload&>(*member),
-                    Type{TypeKind::Unknown, false, false, declaration.name});
+                    Type{TypeKind::Unknown, false, false,
+                        declaration_identity(statement.module_name, declaration.name)});
             }
         }
         if (initializer) {
             auto base_name = declaration.base_type
-                ? std::optional<std::string>{declaration.base_type->name}
+                ? std::optional<std::string>{resolve_type(*declaration.base_type).name}
                 : std::nullopt;
             while (base_name) {
                 const auto* base = find_nominal_type(*base_name);
@@ -1205,6 +1242,8 @@ Type TypeChecker::check_call(
                 current_location_,
                 "'::' type-scoped access currently supports enum variants only");
         }
+        access.resolved_type = Type{
+            TypeKind::Unknown, false, false, type_info->identity};
         return check_enum_variant_call(
             access.type_name, access.member, call, arguments, *type_info);
     }
@@ -1360,7 +1399,7 @@ Type TypeChecker::check_construction(
                     "generic class initialization requires explicit generic arguments");
             }
             return Type{
-                TypeKind::Unknown, false, false, name,
+                TypeKind::Unknown, false, false, type_info.identity,
                 std::move(type_arguments)};
         }
     }
@@ -1425,7 +1464,7 @@ Type TypeChecker::check_construction(
                     + field_name + "' is private");
         }
         std::string failure_reason;
-        const bool own_generic_field = field->second->owner == name
+        const bool own_generic_field = field->second->owner == type_info.identity
             && !type_info.generic_parameters.empty();
         if (own_generic_field
             && !infer_type_arguments(
@@ -1464,7 +1503,7 @@ Type TypeChecker::check_construction(
 
     for (const auto& field_name : field_order) {
         const auto* field = fields.at(field_name);
-        const Type field_type = field->owner == name
+        const Type field_type = field->owner == type_info.identity
                 && !type_info.generic_parameters.empty()
             ? substitute_type(field->type_reference, substitutions)
             : field->type;
@@ -1486,7 +1525,8 @@ Type TypeChecker::check_construction(
     call.resolved_substitutions.assign(
         substitutions.begin(), substitutions.end());
     return Type{
-        TypeKind::Unknown, false, false, name, std::move(type_arguments)};
+        TypeKind::Unknown, false, false, type_info.identity,
+        std::move(type_arguments)};
 }
 
 Type TypeChecker::check_enum_variant_call(
@@ -1519,7 +1559,7 @@ Type TypeChecker::check_enum_variant_call(
         require_assignable(
             *variant->second.payload_type, arguments.front(), current_location_);
     }
-    return Type{TypeKind::Unknown, false, false, enum_name};
+    return Type{TypeKind::Unknown, false, false, type_info.identity};
 }
 
 Type TypeChecker::check_method_call(
@@ -1928,7 +1968,7 @@ Type TypeChecker::check_type_access(const TypeAccessExpr& access) const
             current_location_, "enum variant '" + access.type_name + "::"
                 + access.member + "' requires 1 payload argument");
     }
-    return Type{TypeKind::Unknown, false, false, access.type_name};
+    return Type{TypeKind::Unknown, false, false, type_info->identity};
 }
 
 Type TypeChecker::check_binary(const BinaryExpr& binary)
@@ -2257,19 +2297,7 @@ Type TypeChecker::resolve_type(const TypeReference& reference) const
             reference.name,
         };
     }
-    for (auto scope = scopes_.rbegin(); scope != scopes_.rend(); ++scope) {
-        if (const auto declared = scope->nominal_types.find(reference.name);
-            declared != scope->nominal_types.end()) {
-            if (!is_module_accessible(
-                    declared->second.module_name, declared->second.is_public)) {
-                throw_type_error(
-                    reference.location,
-                    "type '" + reference.name + "' is private to module '"
-                        + declared->second.module_name + "'");
-            }
-            break;
-        }
-    }
+    const NominalTypeInfo* nominal = find_visible_nominal_type(reference.name);
     if (!reference.arguments.empty()) {
         std::vector<Type> arguments;
         arguments.reserve(reference.arguments.size());
@@ -2278,30 +2306,51 @@ Type TypeChecker::resolve_type(const TypeReference& reference) const
             arguments.push_back(resolve_type(argument));
             deferred = deferred || arguments.back().deferred;
         }
-        return Type{
+        Type result{
             TypeKind::Unknown,
             reference.nullable,
             deferred,
-            reference.name,
+            nominal ? nominal->identity : reference.name,
             std::move(arguments),
         };
+        reference.resolved_type = result;
+        return result;
     }
     if (reference.name == "int") {
-        return Type{TypeKind::Int, reference.nullable};
+        const Type result{TypeKind::Int, reference.nullable};
+        reference.resolved_type = result;
+        return result;
     }
     if (reference.name == "dec") {
-        return Type{TypeKind::Dec, reference.nullable};
+        const Type result{TypeKind::Dec, reference.nullable};
+        reference.resolved_type = result;
+        return result;
     }
     if (reference.name == "string") {
-        return Type{TypeKind::String, reference.nullable};
+        const Type result{TypeKind::String, reference.nullable};
+        reference.resolved_type = result;
+        return result;
     }
     if (reference.name == "bool") {
-        return Type{TypeKind::Bool, reference.nullable};
+        const Type result{TypeKind::Bool, reference.nullable};
+        reference.resolved_type = result;
+        return result;
     }
     if (reference.name == "null") {
+        reference.resolved_type = null_type;
         return null_type;
     }
-    return Type{TypeKind::Unknown, reference.nullable, false, reference.name};
+    if (reference.name == "Result" || reference.name == "Array"
+        || reference.name == "List" || reference.name == "Map") {
+        Type result{TypeKind::Unknown, reference.nullable, false, reference.name};
+        reference.resolved_type = result;
+        return result;
+    }
+    Type result{TypeKind::Unknown, reference.nullable, false,
+        nominal ? nominal->identity
+                : declaration_identity(current_module_, reference.name)};
+    reference.resolved_type = result;
+    return result;
 }
 
 Type TypeChecker::substitute_type(
@@ -2327,11 +2376,16 @@ Type TypeChecker::substitute_type(
         arguments.push_back(substitute_type(argument, substitutions));
         deferred = deferred || arguments.back().deferred;
     }
+    const Type base = reference.resolved_type
+        ? Type{TypeKind::Unknown, false, reference.resolved_type->deferred,
+              reference.resolved_type->name}
+        : resolve_type(TypeReference{
+              reference.name, {}, reference.location, false, std::nullopt});
     return Type{
         TypeKind::Unknown,
         reference.nullable,
         deferred,
-        reference.name,
+        base.name,
         std::move(arguments),
     };
 }
@@ -2384,7 +2438,12 @@ bool TypeChecker::infer_type_arguments(
     }
 
     if (!pattern.arguments.empty()) {
-        if (!is_unknown(actual) || actual.name != pattern.name
+        const Type pattern_base = pattern.resolved_type
+            ? Type{TypeKind::Unknown, false, pattern.resolved_type->deferred,
+                  pattern.resolved_type->name}
+            : resolve_type(TypeReference{
+                  pattern.name, {}, pattern.location, false, std::nullopt});
+        if (!is_unknown(actual) || actual.name != pattern_base.name
             || actual.arguments.size() != pattern.arguments.size()
             || (actual.nullable && !pattern.nullable)) {
             failure_reason = "type '" + type_name(actual)
@@ -2618,6 +2677,16 @@ void TypeChecker::push_generic_parameters(
     }
 }
 
+void TypeChecker::resolve_generic_constraints(
+    const std::vector<GenericParameter>& parameters) const
+{
+    for (const auto& parameter : parameters) {
+        for (const auto& constraint : parameter.constraints) {
+            static_cast<void>(resolve_type(constraint));
+        }
+    }
+}
+
 void TypeChecker::pop_generic_parameters()
 {
     generic_parameter_scopes_.pop_back();
@@ -2658,6 +2727,26 @@ std::vector<const TypeChecker::FunctionSignature*> TypeChecker::find_functions(
                     result.push_back(&signature);
                 }
             }
+            const bool has_local = std::ranges::any_of(
+                result, [&](const FunctionSignature* signature) {
+                    return signature->module_name == current_module_
+                        || signature->module_name.empty();
+                });
+            if (has_local) {
+                std::erase_if(result, [&](const FunctionSignature* signature) {
+                    return signature->module_name != current_module_
+                        && !signature->module_name.empty();
+                });
+            } else {
+                std::unordered_set<std::string> imported_modules;
+                for (const auto* signature : result) {
+                    imported_modules.insert(signature->module_name);
+                }
+                if (imported_modules.size() > 1) {
+                    throw_type_error(current_location_,
+                        "ambiguous imported function '" + name + "'");
+                }
+            }
             return result;
         }
     }
@@ -2670,13 +2759,61 @@ const TypeChecker::NominalTypeInfo* TypeChecker::find_nominal_type(
     for (auto scope = scopes_.rbegin(); scope != scopes_.rend(); ++scope) {
         if (const auto type = scope->nominal_types.find(name);
             type != scope->nominal_types.end()) {
-            return is_module_accessible(
-                       type->second.module_name, type->second.is_public)
-                ? &type->second
-                : nullptr;
+            return &type->second;
         }
-        if (scope->values.contains(name)) {
-            return nullptr;
+    }
+    return find_visible_nominal_type(name);
+}
+
+const TypeChecker::NominalTypeInfo* TypeChecker::find_visible_nominal_type(
+    const std::string& source_name) const
+{
+    for (auto scope = scopes_.rbegin(); scope != scopes_.rend(); ++scope) {
+        std::vector<const NominalTypeInfo*> accessible;
+        bool has_private_import = false;
+        for (const auto& [unused_identity, type] : scope->nominal_types) {
+            static_cast<void>(unused_identity);
+            if (type.source_name != source_name) {
+                continue;
+            }
+            if (is_module_accessible(type.module_name, type.is_public)) {
+                accessible.push_back(&type);
+            } else if (module_imports_.contains(current_module_)
+                && module_imports_.at(current_module_).contains(type.module_name)) {
+                has_private_import = true;
+            }
+        }
+        const auto local = std::ranges::find_if(
+            accessible, [&](const NominalTypeInfo* type) {
+                return type->module_name == current_module_
+                    || type->module_name.empty();
+            });
+        if (local != accessible.end()) {
+            return *local;
+        }
+        std::unordered_set<std::string> imported_modules;
+        for (const auto* type : accessible) {
+            imported_modules.insert(type->module_name);
+        }
+        if (imported_modules.size() > 1) {
+            throw_type_error(current_location_,
+                "ambiguous imported type '" + source_name + "'");
+        }
+        if (!accessible.empty()) {
+            return accessible.front();
+        }
+        if (has_private_import) {
+            std::string owner;
+            for (const auto& [unused_identity, type] : scope->nominal_types) {
+                static_cast<void>(unused_identity);
+                if (type.source_name == source_name
+                    && module_imports_.at(current_module_).contains(type.module_name)) {
+                    owner = type.module_name;
+                    break;
+                }
+            }
+            throw_type_error(current_location_,
+                "type '" + source_name + "' is private to module '" + owner + "'");
         }
     }
     return nullptr;

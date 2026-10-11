@@ -380,9 +380,27 @@ bool SemanticAnalyzer::resolve(const std::string& name) const
 {
     for (auto scope = scopes_.rbegin(); scope != scopes_.rend(); ++scope) {
         if (const auto symbols = scope->find(name); symbols != scope->end()) {
-            return std::ranges::any_of(
-                symbols->second,
-                [&](const Symbol& symbol) { return is_accessible(symbol); });
+            const bool has_local = std::ranges::any_of(
+                symbols->second, [&](const Symbol& symbol) {
+                    return is_accessible(symbol)
+                        && (symbol.kind == SymbolKind::Builtin
+                            || symbol.module_name.empty()
+                            || symbol.module_name == current_module_);
+                });
+            if (has_local) {
+                return true;
+            }
+            std::unordered_set<std::string> imported_modules;
+            for (const auto& symbol : symbols->second) {
+                if (is_accessible(symbol)) {
+                    imported_modules.insert(symbol.module_name);
+                }
+            }
+            if (imported_modules.size() > 1) {
+                throw_semantic_error(current_location_,
+                    "ambiguous imported name '" + name + "'");
+            }
+            return !imported_modules.empty();
         }
     }
     return false;

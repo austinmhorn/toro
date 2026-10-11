@@ -225,6 +225,138 @@ void test_unknown_self_and_cycle_diagnostics()
     }
 }
 
+void test_module_qualified_declaration_identity()
+{
+    TestTree tree;
+    tree.write("alpha.toro",
+        "public interface Named { function label() -> string }\n"
+        "public enum State {\n    ready\n    done\n}\n"
+        "public struct Box<T> { value: T }\n"
+        "public class Item implements Named {\n"
+        "    public value: int\n"
+        "    public function label() -> string { return \"alpha\" }\n"
+        "}\n"
+        "public function helper(value: int) -> int { return value + 1 }\n"
+        "function boxed() -> Result<Box<int>, string> {\n"
+        "    return ok(Box<int>(value: helper(10)))\n"
+        "}\n"
+        "public function alpha_value() -> int {\n"
+        "    boxes := List<Box<int>>(Box<int>(value: helper(10)))\n"
+        "    box := boxes[0]\n"
+        "    item := Item(value: box.value)\n"
+        "    state := State::ready\n"
+        "    handle state {\n"
+        "        ready { print(item.label()) }\n"
+        "        done {}\n"
+        "    }\n"
+        "    result := boxed()\n"
+        "    handle result {\n"
+        "        ok(value) { return value.value }\n"
+        "        error(problem) { return 0 }\n"
+        "    }\n"
+        "}\n");
+    tree.write("beta.toro",
+        "public interface Named { function label() -> string }\n"
+        "public enum State {\n    ready\n    done\n}\n"
+        "public struct Box<T> { value: T }\n"
+        "public class Item implements Named {\n"
+        "    public value: int\n"
+        "    public function label() -> string { return \"beta\" }\n"
+        "}\n"
+        "public function helper(value: int) -> int { return value + 2 }\n"
+        "public function beta_value() -> int {\n"
+        "    box := Box<int>(value: helper(20))\n"
+        "    item := Item(value: box.value)\n"
+        "    state := State::done\n"
+        "    handle state {\n"
+        "        ready {}\n"
+        "        done { print(item.label()) }\n"
+        "    }\n"
+        "    return item.value\n"
+        "}\n");
+    tree.write("main.toro",
+        "import alpha\n"
+        "import beta\n"
+        "function main() -> int {\n"
+        "    if alpha_value() == 11 and beta_value() == 22 { return 0 }\n"
+        "    return 1\n"
+        "}\n");
+
+    auto program = load_and_check(tree.path("main.toro"));
+    const std::string generated = toro::CGenerator().generate(program);
+    expect(generated.find("module__5_alpha__3_Box") != std::string::npos,
+        "alpha generic nominal identity was not module-qualified");
+    expect(generated.find("module__4_beta__3_Box") != std::string::npos,
+        "beta generic nominal identity was not module-qualified");
+    expect(generated.find("module__5_alpha__helper") != std::string::npos,
+        "alpha free function identity was not module-qualified");
+    expect(generated.find("module__4_beta__helper") != std::string::npos,
+        "beta free function identity was not module-qualified");
+    expect(generated.find(tree.path("").string()) == std::string::npos,
+        "generated symbols leaked an absolute source-root path");
+    auto repeated_program = load_and_check(tree.path("main.toro"));
+    expect(generated == toro::CGenerator().generate(repeated_program),
+        "module-qualified output changed between identical compilations");
+    expect(toro::NativeCompiler().run(generated) == 0,
+        "same-named module declarations collided at runtime");
+}
+
+void test_cross_module_inheritance_and_interfaces()
+{
+    TestTree tree;
+    tree.write("api.toro",
+        "public interface Named { function label() -> string }\n");
+    tree.write("model/base.toro",
+        "public class Base {\n"
+        "    public name: string\n"
+        "    public virtual function label() -> string { return self.name }\n"
+        "}\n");
+    tree.write("model/derived.toro",
+        "import api\n"
+        "import model.base\n"
+        "public class Derived : Base implements Named {\n"
+        "    public override function label() -> string { return \"derived\" }\n"
+        "}\n"
+        "public function exercise() -> string {\n"
+        "    value := Derived(name: \"Toro\")\n"
+        "    named: Named = value\n"
+        "    base: Base = value\n"
+        "    return named.label()\n"
+        "}\n");
+    tree.write("main.toro",
+        "import model.derived\n"
+        "function main() -> int {\n"
+        "    if exercise() == \"derived\" { return 0 }\n"
+        "    return 1\n"
+        "}\n");
+
+    auto program = load_and_check(tree.path("main.toro"));
+    const std::string generated = toro::CGenerator().generate(program);
+    expect(toro::NativeCompiler().run(generated) == 0,
+        "cross-module inheritance/interface dispatch failed");
+}
+
+void test_ambiguous_direct_imports()
+{
+    TestTree tree;
+    tree.write("left.toro",
+        "public struct State { value: int }\n"
+        "public function choose(value: int) -> int { return value }\n");
+    tree.write("right.toro",
+        "public struct State { value: int }\n"
+        "public function choose(value: int) -> int { return value + 1 }\n");
+    tree.write("main.toro",
+        "import left\nimport right\n"
+        "function consume(value: State) {}\n"
+        "function main() {}\n");
+    expect_failure(tree.path("main.toro"), "ambiguous imported type 'State'");
+
+    tree.write("main.toro",
+        "import left\nimport right\n"
+        "function main() { print(choose(1)) }\n");
+    expect_failure(tree.path("main.toro"), "ambiguous imported name 'choose'");
+}
+
 } // namespace
 
 int main()
@@ -234,6 +366,9 @@ int main()
         test_loading_visibility_diamond_and_runtime();
         test_private_visibility();
         test_unknown_self_and_cycle_diagnostics();
+        test_module_qualified_declaration_identity();
+        test_cross_module_inheritance_and_interfaces();
+        test_ambiguous_direct_imports();
     } catch (const std::exception& error) {
         std::cerr << "module test failure: " << error.what() << '\n';
         return 1;

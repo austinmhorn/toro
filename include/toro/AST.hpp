@@ -22,6 +22,7 @@ struct TypeReference {
     std::vector<TypeReference> arguments;
     SourceLocation location;
     bool nullable{false};
+    mutable std::optional<Type> resolved_type;
 };
 
 struct GenericParameter {
@@ -727,6 +728,8 @@ struct Program {
         std::string name;
         std::string path;
         std::vector<std::string> imports;
+        std::size_t statement_begin{0};
+        std::size_t statement_end{0};
     };
     std::vector<ModuleInfo> modules;
     std::string entry_module;

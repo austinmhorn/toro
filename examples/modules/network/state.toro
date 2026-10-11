@@ -1,0 +1,8 @@
+public struct State {
+    code: int
+}
+
+public function network_state_code() -> int {
+    state := State(code: 200)
+    return state.code
+}

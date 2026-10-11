@@ -1,5 +1,7 @@
 #pragma once
 
+#include "toro/ModuleIdentity.hpp"
+
 #include <string>
 #include <string_view>
 #include <utility>
@@ -69,7 +71,7 @@ struct Type {
 [[nodiscard]] inline std::string type_name(const Type& type)
 {
     std::string result = is_unknown(type) && !type.name.empty()
-        ? type.name
+        ? std::string(declaration_source_name(type.name))
         : std::string(base_type_name(type));
     if (!type.arguments.empty()) {
         result += '<';

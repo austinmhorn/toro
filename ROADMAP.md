@@ -192,17 +192,28 @@ Completed behavior:
 The project manifest, additional source roots, package resolution, aliases, and
 wildcard imports remain deferred.
 
-## 7.2 Multi-file compilation
+## 7.2 Module-aware multi-file compilation — completed
 
-Expand the initial entry-root module graph into project-aware compilation units
-and build planning.
+Expand the initial entry-root module graph into module-aware compilation units
+that feed one native program.
 
-Requirements:
+Completed behavior:
 
-- deterministic dependency resolution;
-- duplicate/cycle diagnostics;
-- module-level visibility;
-- separate frontend units feeding one program build.
+- stable logical-module identities for nominal types, functions, overloads,
+  generics, and concrete specializations;
+- retained module boundaries and declaration ownership in the combined checked
+  program;
+- private-by-default per-module lookup with direct public imports and no
+  accidental re-export;
+- clear ambiguity diagnostics for colliding unqualified imports;
+- collision-free deterministic native names without absolute filesystem paths;
+- cross-module generics, inheritance, interfaces, enums, collections, Result,
+  ARC, and lifecycle behavior;
+- focused same-name, diamond, deterministic-emission, and native integration
+  coverage.
+
+Project manifests, configured source roots, aliases, qualified module access,
+packages, and separate object-file compilation remain deferred.
 
 ## 7.3 Project manifest
 
