@@ -49,9 +49,10 @@ import net.http
 import game.player
 ```
 
-For the current single-entry source-root model, the directory containing the
-entry file is the module root. A dotted identity maps deterministically to a
-source path beneath that root: `game.player` resolves to
+For a direct-file invocation, the directory containing the entry file is the
+module root. A project manifest may instead configure an explicit source root
+and entry beneath it. A dotted identity maps deterministically to a source path
+beneath the active root: `game.player` resolves to
 `game/player.toro`. Import paths contain identifiers separated by `.`, not file
 extensions, string paths, `../` traversal, aliases, or wildcards.
 

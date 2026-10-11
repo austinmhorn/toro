@@ -19,6 +19,7 @@ add_library(toro_core
     src/ModuleLoader.cpp
     src/NativeCompiler.cpp
     src/Parser.cpp
+    src/ProjectConfig.cpp
     src/SemanticAnalyzer.cpp
     src/SourceFile.cpp
     src/TypeChecker.cpp
@@ -84,4 +85,23 @@ if(BUILD_TESTING)
     target_link_libraries(toro_module_tests PRIVATE toro_core)
     toro_enable_warnings(toro_module_tests)
     add_test(NAME modules COMMAND toro_module_tests)
+
+    add_executable(toro_project_config_tests tests/ProjectConfigTests.cpp)
+    target_link_libraries(toro_project_config_tests PRIVATE toro_core)
+    toro_enable_warnings(toro_project_config_tests)
+    add_test(NAME project_config COMMAND toro_project_config_tests)
+
+    add_test(NAME project_cli_check COMMAND toro check)
+    set_tests_properties(project_cli_check PROPERTIES
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/project)
+    add_test(NAME project_cli_emit_c COMMAND toro emit-c)
+    set_tests_properties(project_cli_emit_c PROPERTIES
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/project)
+    add_test(NAME project_cli_build
+        COMMAND toro build -o ${PROJECT_BINARY_DIR}/toro-project-example-test)
+    set_tests_properties(project_cli_build PROPERTIES
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/project)
+    add_test(NAME project_cli_run COMMAND toro run)
+    set_tests_properties(project_cli_run PROPERTIES
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/project)
 endif()

@@ -1,0 +1,6 @@
+import game.player
+
+function main() {
+    player := Player(name: "Toro project")
+    print(player.name)
+}

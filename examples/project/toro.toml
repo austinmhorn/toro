@@ -1,0 +1,6 @@
+[project]
+name = "toro-project-example"
+
+[source]
+root = "src"
+entry = "app/main.toro"

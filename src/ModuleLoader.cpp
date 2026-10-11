@@ -55,6 +55,33 @@ std::filesystem::path module_path(
     return result;
 }
 
+std::string entry_module_name(
+    const std::filesystem::path& entry_path,
+    const std::filesystem::path& source_root)
+{
+    const auto relative = std::filesystem::relative(entry_path, source_root);
+    if (relative.empty() || relative.is_absolute()
+        || *relative.begin() == "..") {
+        throw std::invalid_argument(
+            "project entry source must be inside the configured source root");
+    }
+    if (relative.extension() != ".toro") {
+        throw std::invalid_argument("toro source files must use the .toro extension");
+    }
+    std::string identity;
+    for (auto component = relative.begin(); component != relative.end(); ++component) {
+        std::string segment = component->string();
+        if (std::next(component) == relative.end()) {
+            segment = component->stem().string();
+        }
+        if (!identity.empty()) {
+            identity += '.';
+        }
+        identity += segment;
+    }
+    return identity;
+}
+
 class LoadSession {
 public:
     explicit LoadSession(std::filesystem::path source_root)
@@ -212,10 +239,19 @@ Program ModuleLoader::load(const std::filesystem::path& entry_path) const
     if (entry_path.extension() != ".toro") {
         throw std::invalid_argument("toro source files must use the .toro extension");
     }
-    const std::filesystem::path absolute_entry = std::filesystem::absolute(entry_path);
-    const std::filesystem::path source_root = absolute_entry.parent_path();
-    const std::string entry_name = absolute_entry.stem().string();
-    return LoadSession(source_root).load(absolute_entry, entry_name);
+    const std::filesystem::path absolute_entry =
+        std::filesystem::absolute(entry_path).lexically_normal();
+    return load(absolute_entry, absolute_entry.parent_path());
+}
+
+Program ModuleLoader::load(
+    const std::filesystem::path& entry_path,
+    const std::filesystem::path& source_root) const
+{
+    const auto absolute_entry = std::filesystem::absolute(entry_path).lexically_normal();
+    const auto absolute_root = std::filesystem::absolute(source_root).lexically_normal();
+    const std::string entry_name = entry_module_name(absolute_entry, absolute_root);
+    return LoadSession(absolute_root).load(absolute_entry, entry_name);
 }
 
 } // namespace toro

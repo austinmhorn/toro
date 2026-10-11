@@ -189,8 +189,9 @@ Completed behavior:
 - `check`, `emit-c`, `build`, and `run` support for imported module graphs;
 - native multi-file example and focused frontend/runtime regression coverage.
 
-The project manifest, additional source roots, package resolution, aliases, and
-wildcard imports remain deferred.
+The completed manifest milestone now supplies one configured source root.
+Additional source roots, package resolution, aliases, and wildcard imports
+remain deferred.
 
 ## 7.2 Module-aware multi-file compilation — completed
 
@@ -212,25 +213,28 @@ Completed behavior:
 - focused same-name, diamond, deterministic-emission, and native integration
   coverage.
 
-Project manifests, configured source roots, aliases, qualified module access,
-packages, and separate object-file compilation remain deferred.
+Aliases, qualified module access, packages, and separate object-file compilation
+remain deferred.
 
-## 7.3 Project manifest
+## 7.3 Project manifest — completed
 
-Introduce a minimal Toro project manifest.
+Introduce a minimal Toro project manifest without package-manager behavior.
 
-Exact format remains to be chosen.
+Completed behavior:
 
-It should eventually drive:
+- `toro.toml` with required project name, source root, and entry source;
+- exact-current-directory discovery with no surprising parent traversal;
+- validated project/source/entry boundaries and focused configuration
+  diagnostics;
+- project-root `check`, `emit-c`, `build`, and `run` commands without a source
+  argument;
+- configured source-root integration with deterministic logical module
+  identities;
+- preserved explicit-file workflows;
+- deterministic strict-C11 output and a native project example.
 
-```text
-toro build
-toro run
-toro test
-toro fmt
-```
-
-without requiring direct CMake usage.
+Dependencies, lockfiles, registries, workspaces, aliases, additional source
+roots, `toro test`, and `toro fmt` remain deferred.
 
 ## 7.4 Standard library foundation
 

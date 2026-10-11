@@ -151,6 +151,35 @@ Run the full semantic-analysis and type-checking pipeline on a source file:
 ./build/toro check examples/modules/main.toro
 ```
 
+Project commands may omit the source file when the current directory contains
+`toro.toml`:
+
+```bash
+cd examples/project
+../../build/toro check
+../../build/toro emit-c
+../../build/toro build
+../../build/toro run
+```
+
+The minimal manifest schema is:
+
+```toml
+[project]
+name = "hello"
+
+[source]
+root = "src"
+entry = "main.toro"
+```
+
+Discovery checks exactly `./toro.toml`; it does not search parent directories.
+`source.root` is relative to the manifest directory, and `source.entry` is
+relative to that source root. Both must remain within the project, and the entry
+must name an existing `.toro` file. In project mode, imports resolve from the
+configured source root. Direct-file invocations continue to use the entry
+file's directory as their source root.
+
 Generate C after parsing and checking a source file:
 
 ```bash
@@ -174,8 +203,9 @@ Build a native executable with the host C compiler:
 ```
 
 Without `-o`, the executable is written to the current directory using the
-source filename stem, such as `./hello`. The native toolchain prefers `clang`
-and falls back to `cc`, compiling the generated source as C11.
+source filename stem, such as `./hello`. In project mode it uses the manifest's
+project name. The native toolchain prefers `clang` and falls back to `cc`,
+compiling the generated source as C11.
 
 Build and run through temporary artifacts:
 
@@ -204,12 +234,14 @@ import game.player
 import util.math
 ```
 
-The entry file's directory is currently the source root, so `game.player` maps
-to `game/player.toro`. Imported top-level declarations must be marked `public`;
-unmarked declarations remain private to their module. Duplicate and diamond
+For direct-file commands, the entry file's directory is the source root. For
+project commands, the manifest's `[source].root` selects it. In either mode,
+`game.player` maps to `game/player.toro` beneath that root. Imported top-level
+declarations must be marked `public`; unmarked declarations remain private to
+their module. Duplicate and diamond
 imports are deduplicated, while missing modules, self-imports, and cycles are
-diagnosed. Project manifests, aliases, wildcards, external packages, and
-additional configured source roots remain deferred.
+diagnosed. Aliases, wildcards, external packages, dependencies, and additional
+configured source roots remain deferred.
 Same-named declarations in separate modules remain distinct. An unqualified use
 is diagnosed as ambiguous when two directly imported modules export that name;
 aliases and module-qualified source access remain deferred.

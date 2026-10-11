@@ -7,6 +7,8 @@ Toro currently uses a direct frontend-to-C architecture:
 ```text
 entry .toro source
     ↓
+ProjectConfigLoader (project mode)
+    ↓
 ModuleLoader / source-root resolver
     ↓
 ordered module graph
@@ -54,8 +56,14 @@ toro run
 
 Source files use `.toro`.
 
-`ModuleLoader` owns filesystem-backed module discovery. The entry file's
-directory is currently the source root, and a dotted identity such as
+`ProjectConfigLoader` owns `toro.toml` discovery and validation. Discovery checks
+the current directory only. It resolves the project name, project root,
+configured source root, and entry source before compilation; manifest parsing
+does not leak into the CLI pipeline, module resolver, or frontend.
+
+`ModuleLoader` owns filesystem-backed module discovery after receiving an entry
+and source root. Direct-file compilation supplies the entry file's directory;
+project compilation supplies `[source].root`. A dotted identity such as
 `game.player` maps to `game/player.toro` beneath that root. The loader performs a
 deterministic depth-first traversal, reports missing/self/cyclic imports,
 deduplicates repeated and diamond dependencies, and produces dependency-first
@@ -345,8 +353,8 @@ Important unsupported or deferred runtime features include:
 - Map iteration and non-string Map keys;
 - nested Array elements and interface-valued collection elements;
 - collection-valued struct/class fields;
-- project manifests, multiple configured source roots, and project-wide build
-  planning beyond the current entry-root module graph;
+- multiple configured source roots, workspaces, and project-wide build planning
+  beyond one `toro.toml` application;
 - import aliases, wildcard imports, and package dependencies;
 - source-level module qualification for disambiguating colliding public imports;
 - separate object-file compilation and linking per module;
