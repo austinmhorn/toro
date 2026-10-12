@@ -1,0 +1,6 @@
+[project]
+name = "testing-example"
+
+[source]
+root = "src"
+entry = "main.toro"

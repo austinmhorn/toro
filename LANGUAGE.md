@@ -152,6 +152,27 @@ Input streams, argument-vector access, monotonic clocks/durations, directory
 operations, networking, regular expressions, structured serialization, and a
 public FFI remain deferred.
 
+### Project tests
+
+Toro currently uses ordinary functions for project tests rather than a separate
+test declaration syntax. `toro test` discovers `.toro` files recursively beneath
+the configured `<source.root>/tests` directory. A test is a non-generic function
+whose name begins with `test_`, takes no parameters, and explicitly returns
+`bool`:
+
+```toro
+function test_total() -> bool {
+    return total(20, 22) == 42
+}
+```
+
+Returning `true` passes; returning `false` fails. This is the initial assertion
+contract. Tests remain normal modules, so project imports, standard-library
+imports, visibility, semantic analysis, type checking, and native execution all
+follow the ordinary language rules. Test files and functions run independently
+in deterministic relative-path/name order. Exceptions, test attributes, setup
+hooks, and a larger assertion framework are not defined.
+
 ### Logical Operators
 
 Toro uses the keywords `and` and `or` rather than symbolic logical operators.

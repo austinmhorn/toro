@@ -1,0 +1,10 @@
+import math
+import strings
+
+function test_double() -> bool {
+    return double(21) == 42
+}
+
+function test_strings() -> bool {
+    return length("Toro") == 4 and contains("Toro", "or")
+}

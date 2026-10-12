@@ -48,7 +48,25 @@ toro check
 toro emit-c
 toro build
 toro run
+toro fmt
+toro test
 ```
+
+`Formatter` is a frontend-only AST printer. It lexes and parses complete source
+files, then emits deterministic canonical syntax without depending on semantic
+analysis, type checking, or the C backend. Direct mode formats one file; project
+mode discovers `.toro` files beneath the configured source root in stable path
+order. A batch is fully parsed before any replacement, and check mode performs
+no writes. Comments are intentionally rejected while the lexer/AST cannot retain
+them safely.
+
+`TestRunner` discovers ordinary `test_*() -> bool` functions beneath the
+project source root's `tests` directory in stable path/name order. Each test is
+loaded as its own entry module, receives a synthetic internal native entry point,
+and otherwise travels through the normal module loader, semantic analyzer, type
+checker, C generator, and native compiler. Separate native execution isolates a
+false return or process failure to its test. The convention adds no test-only
+syntax and does not couple testing to backend internals.
 
 ## Frontend
 

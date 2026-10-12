@@ -233,8 +233,8 @@ Completed behavior:
 - preserved explicit-file workflows;
 - deterministic strict-C11 output and a native project example.
 
-Dependencies, lockfiles, registries, workspaces, aliases, additional source
-roots, `toro test`, and `toro fmt` remain deferred.
+Dependencies, lockfiles, registries, workspaces, aliases, and additional source
+roots remain deferred.
 
 ## 7.4 Standard library foundation — completed
 
@@ -260,13 +260,29 @@ Console input, argument vectors, monotonic duration APIs, directory operations,
 networking, regular expressions, structured serialization, richer owned-string
 runtime semantics, and a public FFI remain deferred.
 
-## 7.5 Testing and formatting
+## 7.5 Testing and formatting — completed
 
-Build:
+Completed behavior:
 
-- first-class `toro test`;
-- official deterministic formatter;
-- stable compiler diagnostics suitable for editor tooling.
+- `toro fmt <source.toro>` and manifest-aware project formatting with
+  deterministic, idempotent AST-based output;
+- non-mutating `toro fmt --check` for direct files and projects;
+- parse-before-write protection so syntax failures never partially format a
+  project;
+- first-class `toro test` with deterministic discovery beneath
+  `<source.root>/tests`;
+- a minimal ordinary-function convention: non-generic, zero-argument
+  `test_*() -> bool` functions pass by returning `true`;
+- isolated normal-pipeline compilation and native execution for each test,
+  including project and standard-library imports;
+- concise diagnostics and nonzero status for invalid signatures, compile
+  failures, false results, runtime failures, and missing tests;
+- focused formatter/test-runner coverage and a project example.
+
+Comment formatting remains deferred until comments are represented by the
+lexer/AST; current formatting rejects such input without modifying it. Dedicated
+assertion APIs, test attributes, setup/teardown hooks, coverage, and editor/LSP
+diagnostic protocols also remain deferred.
 
 ## 7.6 C FFI
 

@@ -15,6 +15,7 @@ include(CTest)
 
 add_library(toro_core
     src/CGenerator.cpp
+    src/Formatter.cpp
     src/Lexer.cpp
     src/ModuleLoader.cpp
     src/NativeCompiler.cpp
@@ -23,6 +24,7 @@ add_library(toro_core
     src/SemanticAnalyzer.cpp
     src/SourceFile.cpp
     src/StandardLibrary.cpp
+    src/TestRunner.cpp
     src/TypeChecker.cpp
 )
 
@@ -97,6 +99,16 @@ if(BUILD_TESTING)
     toro_enable_warnings(toro_standard_library_tests)
     add_test(NAME standard_library COMMAND toro_standard_library_tests)
 
+    add_executable(toro_formatter_tests tests/FormatterTests.cpp)
+    target_link_libraries(toro_formatter_tests PRIVATE toro_core)
+    toro_enable_warnings(toro_formatter_tests)
+    add_test(NAME formatter COMMAND toro_formatter_tests)
+
+    add_executable(toro_test_runner_tests tests/TestRunnerTests.cpp)
+    target_link_libraries(toro_test_runner_tests PRIVATE toro_core)
+    toro_enable_warnings(toro_test_runner_tests)
+    add_test(NAME test_runner COMMAND toro_test_runner_tests)
+
     add_test(NAME project_cli_check COMMAND toro check)
     set_tests_properties(project_cli_check PROPERTIES
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/project)
@@ -117,4 +129,11 @@ if(BUILD_TESTING)
     add_test(NAME stdlib_cli_run COMMAND toro run)
     set_tests_properties(stdlib_cli_run PROPERTIES
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/stdlib)
+
+    add_test(NAME testing_cli_fmt_check COMMAND toro fmt --check)
+    set_tests_properties(testing_cli_fmt_check PROPERTIES
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/testing)
+    add_test(NAME testing_cli_test COMMAND toro test)
+    set_tests_properties(testing_cli_test PROPERTIES
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/testing)
 endif()

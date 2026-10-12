@@ -14,26 +14,27 @@ function main() {
                         write_line(concat(contents, "!"))
                         print(length(contents))
                     }
+
                     error(problem) {
                         write_line(problem)
                     }
                 }
             }
         }
+
         error(problem) {
             write_line(problem)
         }
     }
-
     print(exists(path))
     print(has("PATH"))
     start := wall_millis()
     print(elapsed_millis(start) >= 0)
-
     handle remove_file(path) {
         ok(removed) {
             print(removed)
         }
+
         error(problem) {
             write_line(problem)
         }

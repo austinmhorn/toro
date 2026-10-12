@@ -166,6 +166,49 @@ cd examples/project
 ../../build/toro run
 ```
 
+Format one source file in place, or every `.toro` file under a project's
+configured source root:
+
+```bash
+./build/toro fmt examples/hello.toro
+cd examples/testing
+../../build/toro fmt
+```
+
+Formatting is deterministic and writes files by default. `--check` performs the
+same parse-and-format pass without writing and exits nonzero when any file would
+change:
+
+```bash
+./build/toro fmt --check examples/hello.toro
+cd examples/testing
+../../build/toro fmt --check
+```
+
+The formatter parses the complete file before replacing it. In project mode it
+parses every discovered source before writing any source, so malformed syntax
+cannot cause a partially formatted project. Toro comments are not yet part of
+the lexer/AST; a file containing comment syntax is rejected and left unchanged
+rather than having comment text discarded.
+
+Run all project tests with:
+
+```bash
+cd examples/testing
+../../build/toro test
+```
+
+Tests live beneath `<source.root>/tests` and are ordinary, non-generic Toro
+functions named `test_*` that take no parameters and explicitly return `bool`.
+Returning `true` passes and returning `false` fails. Files and functions are
+discovered in deterministic relative-path/name order; each test is compiled
+through the normal module, semantic, type-checking, C11, and native pipeline and
+then executed independently. Project and standard-library imports work normally.
+An invalid test signature, compile failure, false result, runtime failure, or a
+project with no discovered tests makes `toro test` return nonzero. This boolean
+return is the initial minimal assertion convention; dedicated assertion APIs and
+source-level test declarations remain deferred.
+
 The minimal manifest schema is:
 
 ```toml

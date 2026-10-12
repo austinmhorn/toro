@@ -1,4 +1,5 @@
 #include "toro/CGenerator.hpp"
+#include "toro/Formatter.hpp"
 #include "toro/Lexer.hpp"
 #include "toro/ModuleLoader.hpp"
 #include "toro/NativeCompiler.hpp"
@@ -8,14 +9,18 @@
 #include "toro/SourceFile.hpp"
 #include "toro/Token.hpp"
 #include "toro/TypeChecker.hpp"
+#include "toro/TestRunner.hpp"
 
+#include <algorithm>
 #include <exception>
 #include <filesystem>
 #include <iostream>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -29,6 +34,8 @@ void print_usage(std::ostream& output)
               "       toro emit-c [source.toro]\n"
               "       toro build [source.toro] [-o <output>]\n"
               "       toro run [source.toro]\n"
+              "       toro fmt [--check] [source.toro]\n"
+              "       toro test\n"
               "       toro --version\n";
 }
 
@@ -134,6 +141,85 @@ int run_native(const CompilationInput& input)
     return toro::NativeCompiler().run(generate_c(input));
 }
 
+std::vector<std::filesystem::path> project_source_files(
+    const std::filesystem::path& source_root)
+{
+    std::vector<std::filesystem::path> paths;
+    for (const auto& entry :
+         std::filesystem::recursive_directory_iterator(source_root)) {
+        if (entry.is_regular_file() && entry.path().extension() == ".toro") {
+            paths.push_back(entry.path());
+        }
+    }
+    std::ranges::sort(paths, [&](const auto& left, const auto& right) {
+        return std::filesystem::relative(left, source_root).generic_string()
+            < std::filesystem::relative(right, source_root).generic_string();
+    });
+    return paths;
+}
+
+int format_sources(int argc, char* argv[])
+{
+    bool check_only = false;
+    std::optional<std::filesystem::path> direct_path;
+    if (argc == 3) {
+        if (std::string_view(argv[2]) == "--check") {
+            check_only = true;
+        } else {
+            direct_path = argv[2];
+        }
+    } else if (argc == 4 && std::string_view(argv[2]) == "--check") {
+        check_only = true;
+        direct_path = argv[3];
+    } else if (argc != 2) {
+        throw std::invalid_argument(
+            "usage: toro fmt [--check] [source.toro]");
+    }
+
+    std::vector<std::filesystem::path> paths;
+    std::optional<std::filesystem::path> display_root;
+    if (direct_path) {
+        paths.push_back(*direct_path);
+    } else {
+        const auto project = toro::ProjectConfigLoader().discover();
+        display_root = project.source_root;
+        paths = project_source_files(project.source_root);
+    }
+    const auto changed = toro::Formatter().format_files(paths, check_only);
+    if (check_only) {
+        if (changed.empty()) {
+            std::cout << "format check passed\n";
+            return 0;
+        }
+        for (const auto& path : changed) {
+            std::cout << "would reformat ";
+            if (display_root) {
+                std::cout << std::filesystem::relative(path, *display_root)
+                                 .generic_string();
+            } else {
+                std::cout << path.string();
+            }
+            std::cout << '\n';
+        }
+        return 1;
+    }
+    if (changed.empty()) {
+        std::cout << "already formatted\n";
+    } else {
+        for (const auto& path : changed) {
+            std::cout << "formatted ";
+            if (display_root) {
+                std::cout << std::filesystem::relative(path, *display_root)
+                                 .generic_string();
+            } else {
+                std::cout << path.string();
+            }
+            std::cout << '\n';
+        }
+    }
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char* argv[])
@@ -141,6 +227,24 @@ int main(int argc, char* argv[])
     if (argc == 2 && std::string_view(argv[1]) == "--version") {
         std::cout << "toro compiler v0.1.0\n";
         return 0;
+    }
+
+    if (argc >= 2 && std::string_view(argv[1]) == "fmt") {
+        try {
+            return format_sources(argc, argv);
+        } catch (const std::exception& error) {
+            std::cerr << "error: " << error.what() << '\n';
+            return 1;
+        }
+    }
+    if (argc == 2 && std::string_view(argv[1]) == "test") {
+        try {
+            const auto project = toro::ProjectConfigLoader().discover();
+            return toro::TestRunner().run(project, std::cout);
+        } catch (const std::exception& error) {
+            std::cerr << "error: " << error.what() << '\n';
+            return 1;
+        }
     }
 
     if (argc == 2 && is_source_command(argv[1])

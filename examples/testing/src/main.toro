@@ -1,0 +1,5 @@
+import math
+
+function main() {
+    print(double(21))
+}
