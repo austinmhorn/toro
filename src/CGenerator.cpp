@@ -27,6 +27,11 @@ enum class CValueKind {
     Dec,
     Bool,
     String,
+    CInt,
+    CInt64,
+    CDouble,
+    CBool,
+    CString,
     Struct,
     Class,
     Interface,
@@ -63,6 +68,11 @@ const CValueType int_type{CValueKind::Int, {}};
 const CValueType dec_type{CValueKind::Dec, {}};
 const CValueType bool_type{CValueKind::Bool, {}};
 const CValueType string_type{CValueKind::String, {}};
+const CValueType c_int_type{CValueKind::CInt, {}};
+const CValueType c_int64_type{CValueKind::CInt64, {}};
+const CValueType c_double_type{CValueKind::CDouble, {}};
+const CValueType c_bool_type{CValueKind::CBool, {}};
+const CValueType c_string_type{CValueKind::CString, {}};
 const CValueType void_type{CValueKind::Void, {}};
 
 struct ValueInfo {
@@ -393,6 +403,11 @@ std::string type_mangle(const CValueType& type)
     case CValueKind::Dec: result = "d"; break;
     case CValueKind::Bool: result = "b"; break;
     case CValueKind::String: result = "s"; break;
+    case CValueKind::CInt: result = "ci"; break;
+    case CValueKind::CInt64: result = "ci64"; break;
+    case CValueKind::CDouble: result = "cd"; break;
+    case CValueKind::CBool: result = "cb"; break;
+    case CValueKind::CString: result = "cs"; break;
     case CValueKind::Struct:
         result = "s" + std::to_string(type.nominal_name.size()) + "_"
             + type.nominal_name;
@@ -526,6 +541,11 @@ std::string c_type_name(CValueType type)
     case CValueKind::Dec: return "double";
     case CValueKind::Bool: return "bool";
     case CValueKind::String: return "const char*";
+    case CValueKind::CInt: return "int";
+    case CValueKind::CInt64: return "int64_t";
+    case CValueKind::CDouble: return "double";
+    case CValueKind::CBool: return "bool";
+    case CValueKind::CString: return "const char*";
     case CValueKind::Struct: return struct_name(type.nominal_name);
     case CValueKind::Class: return class_name(type.nominal_name) + "*";
     case CValueKind::Interface: return interface_name(type.nominal_name);
@@ -787,6 +807,9 @@ public:
         }
 
         for (const auto& key : function_order_) {
+            if (functions_.at(key).declaration->is_external) {
+                continue;
+            }
             output += emit_function(key);
             output += '\n';
         }
@@ -1932,6 +1955,11 @@ private:
         if (type.name == "string") {
             return string_type;
         }
+        if (type.name == "c_int") return c_int_type;
+        if (type.name == "c_int64") return c_int64_type;
+        if (type.name == "c_double") return c_double_type;
+        if (type.name == "c_bool") return c_bool_type;
+        if (type.name == "c_string") return c_string_type;
         if (const auto found = struct_templates_.find(type.name);
             found != struct_templates_.end()) {
             std::vector<CValueType> arguments;
@@ -1988,6 +2016,11 @@ private:
         case TypeKind::Dec: return dec_type;
         case TypeKind::String: return string_type;
         case TypeKind::Bool: return bool_type;
+        case TypeKind::CInt: return c_int_type;
+        case TypeKind::CInt64: return c_int64_type;
+        case TypeKind::CDouble: return c_double_type;
+        case TypeKind::CBool: return c_bool_type;
+        case TypeKind::CString: return c_string_type;
         case TypeKind::Void: return void_type;
         case TypeKind::Null:
             throw_backend_error(current_location_, "cannot lower an untyped null value");
@@ -3125,8 +3158,9 @@ private:
     {
         const auto& info = functions_.at(key);
         const auto& function = *info.declaration;
-        std::string output = "static ";
-        output += c_type_name(info.return_type) + " " + function_name(key) + "(";
+        std::string output = function.is_external ? "extern " : "static ";
+        output += c_type_name(info.return_type) + " "
+            + (function.is_external ? function.name : function_name(key)) + "(";
         if (function.parameters.empty()) {
             output += "void";
         } else {
@@ -3140,6 +3174,52 @@ private:
         }
         output += ")";
         return output;
+    }
+
+    GeneratedExpression emit_external_call(
+        const CallExpr& call,
+        const FunctionInfo& function)
+    {
+        const auto& declaration = *function.declaration;
+        std::vector<std::string> arguments(declaration.parameters.size());
+        std::string prelude;
+        std::size_t positional = 0;
+        for (const auto& argument : call.arguments) {
+            std::size_t parameter_index = positional;
+            if (argument.name) {
+                const auto parameter = std::ranges::find_if(
+                    declaration.parameters,
+                    [&](const Parameter& candidate) {
+                        return candidate.name == *argument.name;
+                    });
+                if (parameter == declaration.parameters.end()) {
+                    throw_backend_error(current_location_,
+                        "unknown named argument '" + *argument.name
+                            + "' for external C function '" + declaration.name + "'");
+                }
+                parameter_index = static_cast<std::size_t>(
+                    parameter - declaration.parameters.begin());
+            } else {
+                ++positional;
+            }
+            auto value = emit_expression(
+                *argument.value, function.parameter_types[parameter_index]);
+            prelude += value.prelude;
+            const std::string temporary =
+                "toro_ffi_argument_" + std::to_string(temporary_index_++);
+            prelude += c_type_name(function.parameter_types[parameter_index])
+                + " " + temporary + " = " + value.code + ";\n";
+            arguments[parameter_index] = temporary;
+        }
+        std::string code = declaration.name + "(";
+        for (std::size_t index = 0; index < arguments.size(); ++index) {
+            if (index != 0) code += ", ";
+            code += arguments[index];
+        }
+        code += ")";
+        return GeneratedExpression{
+            std::move(code), function.return_type, false, false,
+            std::move(prelude)};
     }
 
     std::string emit_function(const std::string& key)
@@ -3917,6 +3997,31 @@ private:
                 source.type = target;
                 return source;
             }
+            const bool ffi_cast =
+                (source.type.kind == CValueKind::Int
+                    && (target.kind == CValueKind::CInt
+                        || target.kind == CValueKind::CInt64))
+                || (target.kind == CValueKind::Int
+                    && (source.type.kind == CValueKind::CInt
+                        || source.type.kind == CValueKind::CInt64))
+                || (source.type.kind == CValueKind::Dec
+                    && target.kind == CValueKind::CDouble)
+                || (source.type.kind == CValueKind::CDouble
+                    && target.kind == CValueKind::Dec)
+                || (source.type.kind == CValueKind::Bool
+                    && target.kind == CValueKind::CBool)
+                || (source.type.kind == CValueKind::CBool
+                    && target.kind == CValueKind::Bool);
+            if (ffi_cast) {
+                source.code = "((" + c_type_name(target) + ")(" + source.code + "))";
+                source.type = target;
+                return source;
+            }
+            if (source.type.kind == CValueKind::String
+                && target.kind == CValueKind::CString) {
+                source.type = target;
+                return source;
+            }
             throw_backend_error(current_location_,
                 "explicit conversion is not supported by the C backend");
         }
@@ -4098,6 +4203,10 @@ private:
 
         const auto ordered = order_arguments(
             call, function->second.declaration->parameters);
+
+        if (function->second.declaration->is_external) {
+            return emit_external_call(call, function->second);
+        }
 
         std::string code = function_name(function_key) + "(";
         std::string prelude;
@@ -4578,6 +4687,13 @@ private:
         case CValueKind::Dec: return "0.0";
         case CValueKind::Bool: return "false";
         case CValueKind::String: return "\"\"";
+        case CValueKind::CInt:
+        case CValueKind::CInt64:
+        case CValueKind::CDouble:
+        case CValueKind::CBool:
+        case CValueKind::CString:
+            throw_backend_error(
+                location, "C FFI fields require an explicit initializer");
         case CValueKind::Class:
             if (type.nullable) {
                 return "NULL";
@@ -5268,6 +5384,14 @@ private:
                 false,
                 value.prelude,
             };
+        case CValueKind::CInt:
+        case CValueKind::CInt64:
+        case CValueKind::CDouble:
+        case CValueKind::CBool:
+        case CValueKind::CString:
+            throw_backend_error(
+                current_location_,
+                "C FFI values must be explicitly cast to a Toro type before printing");
         case CValueKind::Struct:
             throw_backend_error(
                 current_location_, "printing struct values is not supported by the C backend");

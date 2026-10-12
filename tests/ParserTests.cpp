@@ -1726,6 +1726,30 @@ void test_conversion_failures()
         "conversion overload syntax is exactly 'overload as Type'");
 }
 
+void test_external_c_declarations()
+{
+    const auto program = parse_program(
+        "public extern \"C\" function puts(text: c_string) -> c_int\n");
+    expect(program.statements.size() == 1, "expected one external declaration");
+    const auto& function = static_cast<const toro::FunctionDeclarationStmt&>(
+        *program.statements.front());
+    expect(function.is_external, "external marker was not retained");
+    expect(function.calling_convention == "C", "C calling convention was not retained");
+    expect(function.parameters.size() == 1
+            && function.parameters.front().type.name == "c_string",
+        "external parameter was not retained");
+    expect(function.return_type && function.return_type->name == "c_int",
+        "external return type was not retained");
+    expect(program.statements.front()->is_public,
+        "external declaration visibility was not retained");
+    expect_program_error(
+        "extern \"system\" function bad(value: c_int)\n",
+        "unsupported external calling convention");
+    expect_program_error(
+        "extern \"C\" function bad(value: c_int) {}\n",
+        "cannot have a body");
+}
+
 } // namespace
 
 int main()
@@ -1810,6 +1834,7 @@ int main()
         test_inheritance_and_interface_failures();
         test_generic_failures();
         test_conversion_failures();
+        test_external_c_declarations();
     } catch (const std::exception& error) {
         std::cerr << "parser test failure: " << error.what() << '\n';
         return 1;

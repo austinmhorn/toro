@@ -205,7 +205,13 @@ void append_statement_dump(const Stmt& statement, std::size_t depth, std::string
     }
     case StmtKind::FunctionDeclaration: {
         const auto& function = static_cast<const FunctionDeclarationStmt&>(statement);
-        output += indentation + "FunctionDeclaration(" + function.name + ")\n";
+        output += indentation
+            + (function.is_external ? "ExternalFunctionDeclaration(" : "FunctionDeclaration(")
+            + function.name + ")\n";
+        if (function.is_external) {
+            output += std::string((depth + 1) * 2, ' ')
+                + "calling convention: " + function.calling_convention + "\n";
+        }
         append_generic_parameters(function.generic_parameters, depth + 1, output);
         output += std::string((depth + 1) * 2, ' ') + "Parameters\n";
         for (const auto& parameter : function.parameters) {
@@ -216,7 +222,9 @@ void append_statement_dump(const Stmt& statement, std::size_t depth, std::string
             output += std::string((depth + 1) * 2, ' ')
                 + "return type: " + format_type(*function.return_type) + "\n";
         }
-        append_statement_dump(*function.body, depth + 1, output);
+        if (!function.is_external) {
+            append_statement_dump(*function.body, depth + 1, output);
+        }
         return;
     }
     case StmtKind::Return: {
@@ -464,6 +472,8 @@ Program Parser::parse_program()
         statement_line_ = peek().line;
         if (check(TokenType::Import)) {
             program.statements.push_back(parse_import_declaration());
+        } else if (check(TokenType::Extern)) {
+            program.statements.push_back(parse_external_function_declaration());
         } else if (match({TokenType::Public})) {
             program.statements.push_back(parse_top_level_declaration(true));
         } else if (match({TokenType::Private})) {
@@ -493,13 +503,16 @@ std::unique_ptr<Stmt> Parser::parse_import_declaration()
 
 std::unique_ptr<Stmt> Parser::parse_top_level_declaration(bool is_public)
 {
-    if (!check(TokenType::Function) && !check(TokenType::Enum)
+    if (!check(TokenType::Function) && !check(TokenType::Extern)
+        && !check(TokenType::Enum)
         && !check(TokenType::Struct) && !check(TokenType::Class)
         && !check(TokenType::Abstract) && !check(TokenType::Interface)) {
         throw_parse_error(
             peek(), "top-level visibility applies only to declarations");
     }
-    auto declaration = parse_statement();
+    auto declaration = check(TokenType::Extern)
+        ? parse_external_function_declaration()
+        : parse_statement();
     declaration->is_public = is_public;
     return declaration;
 }
@@ -508,6 +521,9 @@ std::unique_ptr<Stmt> Parser::parse_statement()
 {
     if (check(TokenType::Import)) {
         throw_parse_error(peek(), "imports are only valid at module scope");
+    }
+    if (check(TokenType::Extern)) {
+        throw_parse_error(peek(), "external declarations are only valid at module scope");
     }
     if (check(TokenType::Public) || check(TokenType::Private)) {
         throw_parse_error(peek(), "visibility modifiers are only valid on module or class declarations");
@@ -666,6 +682,56 @@ std::unique_ptr<Stmt> Parser::parse_function_declaration()
         std::move(parameters),
         std::move(return_type),
         std::move(body));
+}
+
+std::unique_ptr<Stmt> Parser::parse_external_function_declaration()
+{
+    const Token external = consume(TokenType::Extern, "expected 'extern'");
+    const Token& convention = consume(
+        TokenType::String, "expected calling convention string after 'extern'");
+    if (convention.lexeme != "C") {
+        throw_parse_error(
+            convention, "unsupported external calling convention; expected \"C\"");
+    }
+    consume(TokenType::Function, "expected 'function' after calling convention");
+    const Token& name = consume(TokenType::Identifier, "expected external function name");
+    if (check(TokenType::Less)) {
+        throw_parse_error(peek(), "external functions cannot be generic");
+    }
+    consume(TokenType::LeftParen, "expected '(' after external function name");
+    std::vector<Parameter> parameters;
+    if (!check(TokenType::RightParen)) {
+        do {
+            const Token& parameter_name = consume(
+                TokenType::Identifier, "expected external parameter name");
+            consume(TokenType::Colon, "expected ':' after external parameter name");
+            parameters.push_back(Parameter{
+                parameter_name.lexeme,
+                parse_type_reference("expected external parameter type after ':'"),
+                SourceLocation{parameter_name.line, parameter_name.column},
+            });
+        } while (match({TokenType::Comma}));
+    }
+    consume(TokenType::RightParen, "expected ')' after external parameters");
+    std::optional<TypeReference> return_type;
+    if (match({TokenType::Arrow})) {
+        return_type = parse_type_reference("expected external return type after '->'");
+    }
+    if (check(TokenType::LeftBrace)) {
+        throw_parse_error(peek(), "external function declarations cannot have a body");
+    }
+    require_statement_end();
+    return std::make_unique<FunctionDeclarationStmt>(
+        SourceLocation{external.line, external.column},
+        name.lexeme,
+        std::vector<GenericParameter>{},
+        std::move(parameters),
+        std::move(return_type),
+        std::make_unique<BlockStmt>(
+            SourceLocation{external.line, external.column},
+            std::vector<std::unique_ptr<Stmt>>{}),
+        true,
+        convention.lexeme);
 }
 
 std::unique_ptr<Stmt> Parser::parse_return_statement()

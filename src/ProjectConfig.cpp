@@ -1,5 +1,6 @@
 #include "toro/ProjectConfig.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <fstream>
 #include <optional>
@@ -8,6 +9,8 @@
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 
 namespace toro {
 namespace {
@@ -70,6 +73,57 @@ std::string parse_string(
             "string escapes and embedded quotes are not supported");
     }
     return std::string(value);
+}
+
+std::vector<std::string> parse_string_array(
+    const std::filesystem::path& path,
+    std::size_t line,
+    std::string_view value)
+{
+    value = trim(value);
+    if (value.size() < 2 || value.front() != '[' || value.back() != ']') {
+        throw_manifest_error(path, line,
+            "ffi.libraries must be an array of double-quoted library names");
+    }
+    value.remove_prefix(1);
+    value.remove_suffix(1);
+    std::vector<std::string> result;
+    while (!trim(value).empty()) {
+        value = trim(value);
+        if (value.front() != '"') {
+            throw_manifest_error(path, line,
+                "ffi.libraries entries must be double-quoted strings");
+        }
+        const std::size_t closing = value.find('"', 1);
+        if (closing == std::string_view::npos) {
+            throw_manifest_error(path, line,
+                "unterminated string in ffi.libraries");
+        }
+        result.push_back(parse_string(path, line, value.substr(0, closing + 1)));
+        value.remove_prefix(closing + 1);
+        value = trim(value);
+        if (value.empty()) break;
+        if (value.front() != ',') {
+            throw_manifest_error(path, line,
+                "expected ',' between ffi.libraries entries");
+        }
+        value.remove_prefix(1);
+        if (trim(value).empty()) {
+            throw_manifest_error(path, line,
+                "ffi.libraries cannot end with a trailing comma");
+        }
+    }
+    return result;
+}
+
+bool valid_library_name(std::string_view name)
+{
+    if (name.empty() || name.front() == '-') return false;
+    return std::ranges::all_of(name, [](char character) {
+        return std::isalnum(static_cast<unsigned char>(character))
+            || character == '_' || character == '+'
+            || character == '.' || character == '-';
+    });
 }
 
 bool valid_project_name(std::string_view name)
@@ -137,6 +191,8 @@ ProjectConfig ProjectConfigLoader::load(
     std::string section;
     std::unordered_set<std::string> sections;
     std::unordered_map<std::string, std::string> values;
+    std::vector<std::string> c_libraries;
+    bool saw_c_libraries = false;
     std::string line_text;
     std::size_t line_number = 0;
     while (std::getline(input, line_text)) {
@@ -151,7 +207,7 @@ ProjectConfig ProjectConfigLoader::load(
                     absolute_manifest, line_number, "malformed section header");
             }
             section = std::string(trim(line.substr(1, line.size() - 2)));
-            if (section != "project" && section != "source") {
+            if (section != "project" && section != "source" && section != "ffi") {
                 throw_manifest_error(absolute_manifest, line_number,
                     "unknown section '[" + section + "]'");
             }
@@ -172,6 +228,16 @@ ProjectConfig ProjectConfigLoader::load(
         }
         const std::string key(trim(line.substr(0, equals)));
         const std::string qualified = section + "." + key;
+        if (qualified == "ffi.libraries") {
+            if (saw_c_libraries) {
+                throw_manifest_error(absolute_manifest, line_number,
+                    "duplicate configuration key 'ffi.libraries'");
+            }
+            c_libraries = parse_string_array(
+                absolute_manifest, line_number, line.substr(equals + 1));
+            saw_c_libraries = true;
+            continue;
+        }
         if (qualified != "project.name" && qualified != "source.root"
             && qualified != "source.entry") {
             throw_manifest_error(absolute_manifest, line_number,
@@ -195,6 +261,18 @@ ProjectConfig ProjectConfigLoader::load(
     if (!valid_project_name(values.at("project.name"))) {
         throw_manifest_error(absolute_manifest, 0,
             "project.name must begin with an ASCII letter or digit and contain only letters, digits, '-' or '_'");
+    }
+    std::unordered_set<std::string> unique_libraries;
+    for (const auto& library : c_libraries) {
+        if (!valid_library_name(library)) {
+            throw_manifest_error(absolute_manifest, 0,
+                "ffi.libraries contains invalid library name '" + library
+                    + "'; use linker library names without '-l', paths, or flags");
+        }
+        if (!unique_libraries.insert(library).second) {
+            throw_manifest_error(absolute_manifest, 0,
+                "ffi.libraries contains duplicate library '" + library + "'");
+        }
     }
 
     const auto project_root = absolute_manifest.parent_path();
@@ -235,6 +313,7 @@ ProjectConfig ProjectConfigLoader::load(
         project_root,
         source_root,
         entry_path,
+        std::move(c_libraries),
     };
 }
 

@@ -51,7 +51,8 @@ public:
             root_ / "toro.toml",
             root_,
             root_ / "src",
-            root_ / "src/main.toro"};
+            root_ / "src/main.toro",
+            {}};
     }
 
 private:

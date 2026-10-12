@@ -1,0 +1,9 @@
+[project]
+name = "ffi-example"
+
+[source]
+root = "src"
+entry = "main.toro"
+
+[ffi]
+libraries = ["m"]

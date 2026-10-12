@@ -13,6 +13,7 @@ enum class TokenType {
     String,
 
     Import,
+    Extern,
     Function,
     Return,
     If,
@@ -88,6 +89,7 @@ struct Token {
     case TokenType::Decimal: return "Decimal";
     case TokenType::String: return "String";
     case TokenType::Import: return "Import";
+    case TokenType::Extern: return "Extern";
     case TokenType::Function: return "Function";
     case TokenType::Return: return "Return";
     case TokenType::If: return "If";

@@ -305,6 +305,9 @@ void SemanticAnalyzer::analyze_expression(const Expr& expression)
 
 void SemanticAnalyzer::analyze_function(const FunctionDeclarationStmt& function)
 {
+    if (function.is_external) {
+        return;
+    }
     const bool enclosing_class_method = inside_class_method_;
     inside_class_method_ = false;
     push_scope();

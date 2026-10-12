@@ -14,6 +14,11 @@ enum class TypeKind {
     Dec,
     String,
     Bool,
+    CInt,
+    CInt64,
+    CDouble,
+    CBool,
+    CString,
     Null,
     Void,
     Unknown,
@@ -61,6 +66,11 @@ struct Type {
     case TypeKind::Dec: return "dec";
     case TypeKind::String: return "string";
     case TypeKind::Bool: return "bool";
+    case TypeKind::CInt: return "c_int";
+    case TypeKind::CInt64: return "c_int64";
+    case TypeKind::CDouble: return "c_double";
+    case TypeKind::CBool: return "c_bool";
+    case TypeKind::CString: return "c_string";
     case TypeKind::Null: return "null";
     case TypeKind::Void: return "no value";
     case TypeKind::Unknown: return "unknown";

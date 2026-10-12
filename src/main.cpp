@@ -49,11 +49,12 @@ struct CompilationInput {
     std::filesystem::path entry_path;
     std::optional<std::filesystem::path> source_root;
     std::optional<std::string> project_name;
+    std::vector<std::string> c_libraries;
 };
 
 CompilationInput direct_input(const std::filesystem::path& path)
 {
-    return CompilationInput{path, std::nullopt, std::nullopt};
+    return CompilationInput{path, std::nullopt, std::nullopt, {}};
 }
 
 CompilationInput project_input()
@@ -63,6 +64,7 @@ CompilationInput project_input()
         project.entry_path,
         project.source_root,
         project.name,
+        project.c_libraries,
     };
 }
 
@@ -132,13 +134,14 @@ void build_native(
     const CompilationInput& input,
     const std::filesystem::path& output_path)
 {
-    toro::NativeCompiler().build(generate_c(input), output_path);
+    toro::NativeCompiler().build(
+        generate_c(input), output_path, input.c_libraries);
     std::cout << "built " << std::filesystem::absolute(output_path).string() << '\n';
 }
 
 int run_native(const CompilationInput& input)
 {
-    return toro::NativeCompiler().run(generate_c(input));
+    return toro::NativeCompiler().run(generate_c(input), input.c_libraries);
 }
 
 std::vector<std::filesystem::path> project_source_files(

@@ -258,7 +258,8 @@ Completed behavior:
 
 Console input, argument vectors, monotonic duration APIs, directory operations,
 networking, regular expressions, structured serialization, richer owned-string
-runtime semantics, and a public FFI remain deferred.
+runtime semantics remain deferred. Public C interoperability is provided by the
+narrow Phase 7.6 ABI boundary below.
 
 ## 7.5 Testing and formatting — completed
 
@@ -284,17 +285,26 @@ lexer/AST; current formatting rejects such input without modifying it. Dedicated
 assertion APIs, test attributes, setup/teardown hooks, coverage, and editor/LSP
 diagnostic protocols also remain deferred.
 
-## 7.6 C FFI
+## 7.6 C FFI — completed
 
-Add practical C interoperability.
+Completed behavior:
 
-Goals:
+- explicit bodyless `extern "C" function` declarations integrated with normal
+  modules, visibility, name resolution, overload selection, and type checking;
+- distinct `c_int`, `c_int64`, `c_double`, `c_bool`, and borrowed non-null
+  `c_string` ABI types;
+- explicit Toro/ABI scalar conversions and one-way `string as c_string` views;
+- deterministic unmangled external prototypes and declaration-identity-driven
+  calls;
+- exact-once, left-to-right argument evaluation before entering C;
+- structured `[ffi].libraries` manifest configuration translated to safe
+  `-l<name>` process arguments for `build`, `run`, and project tests;
+- module, direct-file, deterministic-emission, strict-C11, native libc/libm,
+  diagnostics, and project-linking coverage.
 
-- call C functions;
-- pass compatible primitive/value data;
-- explicit ABI boundaries;
-- predictable ownership rules;
-- generated bindings/tooling later if justified.
+Raw pointers, C aggregates, mutable/owned C strings, nullable C pointers,
+callbacks, function pointers, variadics, automatic header parsing/bindgen,
+dynamic loading, and non-C ABIs remain deferred.
 
 ## 7.7 Mixed native build integration
 

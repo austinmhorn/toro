@@ -1602,6 +1602,40 @@ void test_core_collection_types()
         "cannot assign value of type 'int' to type 'string'");
 }
 
+void test_external_c_function_types()
+{
+    expect_valid(
+        "extern \"C\" function abs(value: c_int) -> c_int\n"
+        "extern \"C\" function scale(value: c_double) -> c_double\n"
+        "extern \"C\" function flag(value: c_bool) -> c_bool\n"
+        "extern \"C\" function write(text: c_string)\n"
+        "function main() {\n"
+        "    integer := abs((-4) as c_int) as int\n"
+        "    decimal := scale(2.5 as c_double) as dec\n"
+        "    boolean := flag(true as c_bool) as bool\n"
+        "    write(\"Toro\" as c_string)\n"
+        "}\n");
+    expect_error(
+        "extern \"C\" function invalid(value: string)\n",
+        "unsupported C FFI parameter type 'string'");
+    expect_error(
+        "extern \"C\" function invalid() -> Player\nclass Player {}\n",
+        "unsupported C FFI return type 'Player'");
+    expect_error(
+        "extern \"C\" function invalid() -> int\n",
+        "unsupported C FFI return type 'int'");
+    expect_error(
+        "extern \"C\" function invalid(value: c_string?)\n",
+        "cannot be nullable");
+    expect_error(
+        "extern \"C\" function duplicate(value: c_int)\n"
+        "extern \"C\" function duplicate(value: c_double)\n",
+        "duplicate external C symbol declaration");
+    expect_error(
+        "function main() { value := \"Toro\" as c_int }\n",
+        "no conversion from 'string' to 'c_int'");
+}
+
 } // namespace
 
 int main()
@@ -1650,6 +1684,7 @@ int main()
         test_result_construction();
         test_result_propagation();
         test_core_collection_types();
+        test_external_c_function_types();
         test_existing_language_features_remain_checkable();
     } catch (const std::exception& error) {
         std::cerr << "type checker test failure: " << error.what() << '\n';

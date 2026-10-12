@@ -149,8 +149,8 @@ standard-library boundary are immutable and kept valid until process shutdown.
 This is an isolated correctness-first representation pending a unified
 owned-string runtime.
 Input streams, argument-vector access, monotonic clocks/durations, directory
-operations, networking, regular expressions, structured serialization, and a
-public FFI remain deferred.
+operations, networking, regular expressions, and structured serialization
+remain deferred. Public C interoperability is defined separately below.
 
 ### Project tests
 
@@ -172,6 +172,75 @@ imports, visibility, semantic analysis, type checking, and native execution all
 follow the ordinary language rules. Test files and functions run independently
 in deterministic relative-path/name order. Exceptions, test attributes, setup
 hooks, and a larger assertion framework are not defined.
+
+### C interoperability
+
+Toro declares C ABI functions explicitly at module scope:
+
+```toro
+public extern "C" function puts(text: c_string) -> c_int
+extern "C" function pow(base: c_double, exponent: c_double) -> c_double
+```
+
+An external declaration has no body and may be exported with `public` like an
+ordinary module declaration. Only the exact `"C"` calling convention is
+supported. External functions cannot be generic or variadic, and each linked C
+symbol is declared once in the loaded module graph. Ordinary Toro functions are
+not implicitly C ABI functions. The declaration must exactly match the linked C
+symbol's real ABI signature; Toro validates the declared boundary types but does
+not inspect C headers.
+
+The initial ABI types are deliberately distinct from Toro primitives:
+
+```text
+c_int       C int
+c_int64     C int64_t
+c_double    C double
+c_bool      C11 bool / _Bool
+c_string    const char* pointing to immutable NUL-terminated bytes
+```
+
+Calls require exact ABI types. Boundary conversions are explicit:
+
+```toro
+native := value as c_int
+value := native_call(native) as int
+ratio := native_ratio(2.0 as c_double) as dec
+native_flag := active as c_bool
+puts(message as c_string)
+```
+
+`int` converts explicitly to and from `c_int`/`c_int64`, `dec` converts to and
+from `c_double`, and `bool` converts to and from `c_bool`. A Toro `string` may be
+viewed as `c_string`; the reverse conversion is intentionally unavailable
+because the compiler cannot infer ownership or lifetime for a pointer returned
+by arbitrary C code.
+
+`c_string` is a borrowed, immutable, non-owning view. C code must not mutate or
+free it. The view remains valid only as long as its source Toro string; the
+current immutable-string backend keeps produced strings alive for process
+lifetime, so no temporary dangling pointer crosses this boundary. A C function
+declared as returning `c_string` promises a non-null pointer whose lifetime is
+managed by the C API. Toro does not free it. FFI ABI types are not nullable in
+this milestone, and a declaration using `c_string?` is rejected.
+
+Project builds may request ordinary linker libraries with a structured manifest
+entry:
+
+```toml
+[ffi]
+libraries = ["m"]
+```
+
+Each entry is a library name without `-l`, a path, or arbitrary linker flags.
+The native compiler appends the corresponding `-l<name>` arguments without
+invoking a shell. Direct-file FFI works for symbols supplied by the host C
+runtime without extra libraries.
+
+Raw pointers, C structs/unions/enums, callbacks, function pointers, variadic
+functions, header parsing, macros, mutable/owned C strings, dynamic loading,
+C++, and arbitrary linker flags remain unsupported. In particular, no pointer
+type aliases Toro managed class references.
 
 ### Logical Operators
 

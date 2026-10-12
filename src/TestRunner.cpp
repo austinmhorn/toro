@@ -161,7 +161,8 @@ int TestRunner::run(
             add_test_main(program, test.name);
             SemanticAnalyzer().analyze(program);
             TypeChecker().check(program);
-            const int status = NativeCompiler().run(CGenerator().generate(program));
+            const int status = NativeCompiler().run(
+                CGenerator().generate(program), project.c_libraries);
             if (status == 0) {
                 output << "PASS " << test.relative_path << "::" << test.name << '\n';
                 ++passed;

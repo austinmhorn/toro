@@ -406,13 +406,17 @@ struct FunctionDeclarationStmt final : Stmt {
         std::vector<GenericParameter> generic_parameters,
         std::vector<Parameter> parameters,
         std::optional<TypeReference> return_type,
-        std::unique_ptr<BlockStmt> body)
+        std::unique_ptr<BlockStmt> body,
+        bool is_external = false,
+        std::string calling_convention = {})
         : Stmt(StmtKind::FunctionDeclaration, location)
         , name(std::move(name))
         , generic_parameters(std::move(generic_parameters))
         , parameters(std::move(parameters))
         , return_type(std::move(return_type))
         , body(std::move(body))
+        , is_external(is_external)
+        , calling_convention(std::move(calling_convention))
     {
     }
 
@@ -421,6 +425,8 @@ struct FunctionDeclarationStmt final : Stmt {
     std::vector<Parameter> parameters;
     std::optional<TypeReference> return_type;
     std::unique_ptr<BlockStmt> body;
+    bool is_external;
+    std::string calling_convention;
 };
 
 struct ReturnStmt final : Stmt {

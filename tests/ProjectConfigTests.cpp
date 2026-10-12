@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #if !defined(_WIN32)
 #include <unistd.h>
@@ -80,7 +81,8 @@ void test_valid_project_pipeline()
     ProjectTree tree;
     tree.write("toro.toml",
         "[project]\nname = \"sample-app\"\n"
-        "[source]\nroot = \"source\"\nentry = \"app/main.toro\"\n");
+        "[source]\nroot = \"source\"\nentry = \"app/main.toro\"\n"
+        "[ffi]\nlibraries = [\"m\"]\n");
     tree.write("source/game/player.toro",
         "public struct Player { name: string }\n");
     tree.write("source/app/main.toro",
@@ -97,6 +99,8 @@ void test_valid_project_pipeline()
         "configured source root was not retained");
     expect(project.entry_path == tree.root() / "source/app/main.toro",
         "configured entry was not retained");
+    expect(project.c_libraries == std::vector<std::string>({"m"}),
+        "configured C libraries were not retained in order");
 
     auto program = toro::ModuleLoader().load(
         project.entry_path, project.source_root);
@@ -114,7 +118,7 @@ void test_valid_project_pipeline()
     expect(first == second, "project C generation was not deterministic");
     expect(first.find(tree.root().string()) == std::string::npos,
         "generated project C contained an absolute project path");
-    expect(toro::NativeCompiler().run(first) == 0,
+    expect(toro::NativeCompiler().run(first, project.c_libraries) == 0,
         "configured project did not run successfully");
 }
 
@@ -166,6 +170,24 @@ void test_manifest_diagnostics()
             "[project]\nname = \"duplicate\"\nname = \"again\"\n"
             "[source]\nroot = \"src\"\nentry = \"main.toro\"\n");
         expect_error(tree.root() / "toro.toml", "duplicate configuration key");
+    }
+    {
+        ProjectTree tree;
+        tree.write("toro.toml",
+            "[project]\nname = \"bad-ffi\"\n"
+            "[source]\nroot = \"src\"\nentry = \"main.toro\"\n"
+            "[ffi]\nlibraries = [\"-Wl,unsafe\"]\n");
+        tree.write("src/main.toro", "function main() {}\n");
+        expect_error(tree.root() / "toro.toml", "invalid library name");
+    }
+    {
+        ProjectTree tree;
+        tree.write("toro.toml",
+            "[project]\nname = \"bad-ffi\"\n"
+            "[source]\nroot = \"src\"\nentry = \"main.toro\"\n"
+            "[ffi]\nlibraries = [\"m\", \"m\"]\n");
+        tree.write("src/main.toro", "function main() {}\n");
+        expect_error(tree.root() / "toro.toml", "duplicate library");
     }
 }
 

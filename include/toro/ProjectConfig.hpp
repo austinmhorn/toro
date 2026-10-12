@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace toro {
 
@@ -11,6 +12,7 @@ struct ProjectConfig {
     std::filesystem::path project_root;
     std::filesystem::path source_root;
     std::filesystem::path entry_path;
+    std::vector<std::string> c_libraries;
 };
 
 class ProjectConfigLoader {

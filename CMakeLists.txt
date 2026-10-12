@@ -109,6 +109,11 @@ if(BUILD_TESTING)
     toro_enable_warnings(toro_test_runner_tests)
     add_test(NAME test_runner COMMAND toro_test_runner_tests)
 
+    add_executable(toro_ffi_tests tests/FFITests.cpp)
+    target_link_libraries(toro_ffi_tests PRIVATE toro_core)
+    toro_enable_warnings(toro_ffi_tests)
+    add_test(NAME ffi COMMAND toro_ffi_tests)
+
     add_test(NAME project_cli_check COMMAND toro check)
     set_tests_properties(project_cli_check PROPERTIES
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/project)
@@ -136,4 +141,15 @@ if(BUILD_TESTING)
     add_test(NAME testing_cli_test COMMAND toro test)
     set_tests_properties(testing_cli_test PROPERTIES
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/testing)
+
+    add_test(NAME ffi_cli_check COMMAND toro check)
+    set_tests_properties(ffi_cli_check PROPERTIES
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/ffi)
+    add_test(NAME ffi_cli_run COMMAND toro run)
+    set_tests_properties(ffi_cli_run PROPERTIES
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/ffi)
+    add_test(NAME ffi_cli_build
+        COMMAND toro build -o ${PROJECT_BINARY_DIR}/toro-ffi-example-test)
+    set_tests_properties(ffi_cli_build PROPERTIES
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/ffi)
 endif()

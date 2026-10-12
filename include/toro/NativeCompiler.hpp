@@ -1,7 +1,9 @@
 #pragma once
 
 #include <filesystem>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace toro {
 
@@ -11,9 +13,12 @@ public:
 
     void build(
         std::string_view c_source,
-        const std::filesystem::path& output_path) const;
+        const std::filesystem::path& output_path,
+        const std::vector<std::string>& c_libraries = {}) const;
 
-    [[nodiscard]] int run(std::string_view c_source) const;
+    [[nodiscard]] int run(
+        std::string_view c_source,
+        const std::vector<std::string>& c_libraries = {}) const;
 
     [[nodiscard]] const std::filesystem::path& compiler_path() const;
 

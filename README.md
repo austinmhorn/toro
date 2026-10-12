@@ -57,6 +57,9 @@ text-file basics, environment access, process exit, wall-clock time, and
 foundational string operations through normal Toro imports. Host interaction
 remains isolated behind a private intrinsic boundary; application code sees
 ordinary typed Toro APIs.
+An explicit, narrow C FFI additionally supports bodyless `extern "C" function`
+declarations using dedicated ABI scalar and borrowed-string types. This public
+FFI remains separate from compiler-private standard-library intrinsics.
 
 ## Build
 
@@ -220,6 +223,34 @@ root = "src"
 entry = "main.toro"
 ```
 
+Projects that call symbols from system C libraries may add a structured linker
+library list:
+
+```toml
+[ffi]
+libraries = ["m"]
+```
+
+Entries are plain library names and become `-l<name>` arguments; paths, raw
+flags, and shell commands are rejected.
+
+The initial C FFI syntax and explicit ABI types are:
+
+```toro
+extern "C" function puts(text: c_string) -> c_int
+extern "C" function pow(base: c_double, exponent: c_double) -> c_double
+
+puts("Hello from C" as c_string)
+result := pow(2.0 as c_double, 3.0 as c_double) as dec
+```
+
+Supported types are `c_int`, `c_int64`, `c_double`, `c_bool`, and non-null
+borrowed `c_string`. Toro primitives cross the boundary only through explicit
+`as` casts. C strings are immutable and non-owning; C must not mutate or free a
+Toro-derived pointer. Raw pointers, nullable C pointers/strings, variadics,
+callbacks, C aggregates, automatic header parsing, and C++ ABI calls remain
+unsupported. See `LANGUAGE.md` for the complete lifetime rules.
+
 Discovery checks exactly `./toro.toml`; it does not search parent directories.
 `source.root` is relative to the manifest directory, and `source.entry` is
 relative to that source root. Both must remain within the project, and the entry
@@ -280,6 +311,16 @@ Run the standard-library project example:
 cd examples/stdlib
 ../../build/toro check
 ../../build/toro emit-c
+../../build/toro run
+```
+
+Run the C FFI project example:
+
+```bash
+cd examples/ffi
+../../build/toro check
+../../build/toro emit-c
+../../build/toro build
 ../../build/toro run
 ```
 

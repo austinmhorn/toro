@@ -115,6 +115,11 @@ void test_current_language_constructs()
         "Result propagation was not formatted");
     expect(expressions.find("return value as dec") != std::string::npos,
         "explicit cast was not formatted");
+    const std::string external = formatter.format(
+        "public extern \"C\" function puts(text:c_string)->c_int\n");
+    expect(external
+            == "public extern \"C\" function puts(text: c_string) -> c_int\n",
+        "external C declaration was not formatted canonically");
     expect(formatter.format(formatted) == formatted,
         "full-language formatting was not idempotent");
 }

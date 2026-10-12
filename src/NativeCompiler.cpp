@@ -225,15 +225,20 @@ void write_c_source(
 void compile_c(
     const std::filesystem::path& compiler,
     const std::filesystem::path& c_path,
-    const std::filesystem::path& output_path)
+    const std::filesystem::path& output_path,
+    const std::vector<std::string>& c_libraries)
 {
-    const auto result = run_process({
+    std::vector<std::string> arguments{
         compiler.string(),
         "-std=c11",
         c_path.string(),
         "-o",
         output_path.string(),
-    });
+    };
+    for (const auto& library : c_libraries) {
+        arguments.push_back("-l" + library);
+    }
+    const auto result = run_process(arguments);
     if (result.exec_error) {
         throw std::runtime_error(
             "C compiler process failure: could not execute '" + compiler.string()
@@ -267,21 +272,24 @@ NativeCompiler::NativeCompiler()
 
 void NativeCompiler::build(
     std::string_view c_source,
-    const std::filesystem::path& output_path) const
+    const std::filesystem::path& output_path,
+    const std::vector<std::string>& c_libraries) const
 {
     TemporaryDirectory temporary;
     const auto c_path = temporary.path() / "program.c";
     write_c_source(c_path, c_source);
-    compile_c(compiler_path_, c_path, std::filesystem::absolute(output_path));
+    compile_c(compiler_path_, c_path, std::filesystem::absolute(output_path), c_libraries);
 }
 
-int NativeCompiler::run(std::string_view c_source) const
+int NativeCompiler::run(
+    std::string_view c_source,
+    const std::vector<std::string>& c_libraries) const
 {
     TemporaryDirectory temporary;
     const auto c_path = temporary.path() / "program.c";
     const auto executable_path = temporary.path() / "program";
     write_c_source(c_path, c_source);
-    compile_c(compiler_path_, c_path, executable_path);
+    compile_c(compiler_path_, c_path, executable_path, c_libraries);
 
     const auto result = run_process({executable_path.string()});
     if (result.exec_error) {

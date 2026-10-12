@@ -328,9 +328,13 @@ private:
             const auto& function = static_cast<const FunctionDeclarationStmt&>(statement);
             indent(depth);
             if (statement.is_public) output_ << "public ";
+            if (function.is_external) {
+                output_ << "extern \"" << function.calling_convention << "\" ";
+            }
             write_function_signature(
                 "function ", function.name, function.generic_parameters,
                 function.parameters, function.return_type);
+            if (function.is_external) return;
             output_ << ' ';
             write_block(*function.body, depth);
             return;

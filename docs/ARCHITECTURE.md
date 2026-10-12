@@ -102,6 +102,29 @@ source cannot invoke them directly. This boundary avoids teaching the parser or
 general overload resolver about host services and provides one replacement
 point for a future Toro IR/runtime ABI.
 
+### Public C FFI boundary
+
+Public interoperability is represented by ordinary function declarations with
+explicit external metadata: the C symbol name, `"C"` calling convention, and
+ABI-only parameter/return types. Semantic analysis registers these declarations
+normally; type checking validates the ABI surface and records the selected
+declaration on calls. The C backend emits deterministic `extern` prototypes and
+calls the unmangled C symbol, but emits no function body.
+
+Foreign-call lowering is isolated from ordinary call lowering. Every argument
+is evaluated once into an ABI-typed temporary in Toro source order before the C
+call, including when named arguments reorder parameter positions. Managed ARC
+values, structs, collections, enums, Results, interfaces, and ordinary Toro
+strings cannot cross implicitly. `string as c_string` creates the one supported
+borrowed immutable view.
+
+`ProjectConfigLoader` accepts only structured `[ffi].libraries` names.
+`NativeCompiler` translates them directly to `-l<name>` process arguments; it
+does not construct a shell command or accept arbitrary flags. Compiler-private
+standard-library intrinsics remain a separate registry and are not rewritten in
+terms of the public FFI. This separation gives a future Toro IR a clear foreign
+call/effect boundary.
+
 The lexer tracks one-based line/column locations and recognizes canonical Toro
 syntax, including `::` for type-scoped enum variants.
 
@@ -118,6 +141,7 @@ The AST represents, among other features:
 - type-scoped enum access;
 - statements/blocks/control flow;
 - functions;
+- external C function declarations and ABI type metadata;
 - structs/classes/interfaces/enums;
 - inheritance/modifiers;
 - generics;
@@ -401,7 +425,8 @@ Important unsupported or deferred runtime features include:
 - import aliases, wildcard imports, and package dependencies;
 - source-level module qualification for disambiguating colliding public imports;
 - separate object-file compilation and linking per module;
-- C/C++ FFI;
+- raw pointers, C aggregates, callbacks, variadics, header parsing, dynamic
+  loading, and C++/Objective-C/Rust ABI interoperability;
 - ownership/escape/borrow optimization;
 - `performance function` enforcement.
 

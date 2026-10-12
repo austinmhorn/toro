@@ -1,0 +1,5 @@
+public extern "C" function puts(text: c_string) -> c_int
+
+public extern "C" function abs(value: c_int) -> c_int
+
+public extern "C" function pow(base: c_double, exponent: c_double) -> c_double

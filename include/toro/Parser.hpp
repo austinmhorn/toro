@@ -24,6 +24,7 @@ private:
     [[nodiscard]] std::unique_ptr<Stmt> parse_statement();
     [[nodiscard]] std::unique_ptr<Stmt> parse_variable_declaration();
     [[nodiscard]] std::unique_ptr<Stmt> parse_function_declaration();
+    [[nodiscard]] std::unique_ptr<Stmt> parse_external_function_declaration();
     [[nodiscard]] std::unique_ptr<Stmt> parse_return_statement();
     [[nodiscard]] std::unique_ptr<Stmt> parse_if_statement();
     [[nodiscard]] std::unique_ptr<Stmt> parse_while_statement();

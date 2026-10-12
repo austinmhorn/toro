@@ -19,9 +19,38 @@ const Type int_type{TypeKind::Int};
 const Type dec_type{TypeKind::Dec};
 const Type string_type{TypeKind::String};
 const Type bool_type{TypeKind::Bool};
+const Type c_int_type{TypeKind::CInt};
+const Type c_int64_type{TypeKind::CInt64};
+const Type c_double_type{TypeKind::CDouble};
+const Type c_bool_type{TypeKind::CBool};
+const Type c_string_type{TypeKind::CString};
 const Type null_type{TypeKind::Null};
 const Type void_type{TypeKind::Void};
 const Type unknown_type{TypeKind::Unknown, false, true};
+
+bool is_ffi_abi_type(const Type& type)
+{
+    if (type.nullable) return false;
+    return type.kind == TypeKind::CInt
+        || type.kind == TypeKind::CInt64
+        || type.kind == TypeKind::CDouble
+        || type.kind == TypeKind::CBool
+        || type.kind == TypeKind::CString;
+}
+
+bool is_reserved_c_identifier(std::string_view name)
+{
+    static const std::unordered_set<std::string_view> reserved{
+        "auto", "break", "case", "char", "const", "continue", "default",
+        "do", "double", "else", "enum", "extern", "float", "for", "goto",
+        "if", "inline", "int", "long", "register", "restrict", "return",
+        "short", "signed", "sizeof", "static", "struct", "switch", "typedef",
+        "union", "unsigned", "void", "volatile", "while", "_Alignas",
+        "_Alignof", "_Atomic", "_Bool", "_Complex", "_Generic", "_Imaginary",
+        "_Noreturn", "_Static_assert", "_Thread_local",
+    };
+    return reserved.contains(name);
+}
 
 [[noreturn]] void throw_type_error(SourceLocation location, const std::string& message)
 {
@@ -86,6 +115,11 @@ bool has_zero_value(const Type& type)
     case TypeKind::String:
     case TypeKind::Bool:
         return true;
+    case TypeKind::CInt:
+    case TypeKind::CInt64:
+    case TypeKind::CDouble:
+    case TypeKind::CBool:
+    case TypeKind::CString:
     case TypeKind::Null:
     case TypeKind::Void:
     case TypeKind::Unknown:
@@ -184,6 +218,16 @@ void TypeChecker::predeclare(const std::vector<std::unique_ptr<Stmt>>& statement
             }
             pop_generic_parameters();
             auto& overloads = scopes_.back().functions[function.name];
+            if (function.is_external
+                && std::ranges::any_of(overloads,
+                    [](const FunctionSignature& candidate) {
+                        return candidate.function_declaration
+                            && candidate.function_declaration->is_external;
+                    })) {
+                throw_type_error(function.location,
+                    "duplicate external C symbol declaration for '"
+                        + function.name + "'");
+            }
             if (std::any_of(overloads.begin(), overloads.end(),
                     [&](const FunctionSignature& candidate) {
                         return candidate.module_name == signature.module_name
@@ -2207,6 +2251,19 @@ Type TypeChecker::check_cast(const CastExpr& cast)
     if (source_is_numeric && target_is_numeric) {
         return target;
     }
+    const bool ffi_scalar_cast =
+        ((source.kind == TypeKind::Int)
+            && (target.kind == TypeKind::CInt || target.kind == TypeKind::CInt64))
+        || ((target.kind == TypeKind::Int)
+            && (source.kind == TypeKind::CInt || source.kind == TypeKind::CInt64))
+        || (source.kind == TypeKind::Dec && target.kind == TypeKind::CDouble)
+        || (source.kind == TypeKind::CDouble && target.kind == TypeKind::Dec)
+        || (source.kind == TypeKind::Bool && target.kind == TypeKind::CBool)
+        || (source.kind == TypeKind::CBool && target.kind == TypeKind::Bool)
+        || (source.kind == TypeKind::String && target.kind == TypeKind::CString);
+    if (ffi_scalar_cast) {
+        return target;
+    }
     if (source.deferred || target.deferred) {
         return target;
     }
@@ -2222,6 +2279,48 @@ Type TypeChecker::check_cast(const CastExpr& cast)
 
 void TypeChecker::check_function(const FunctionDeclarationStmt& function)
 {
+    if (function.is_external) {
+        if (function.calling_convention != "C") {
+            throw_type_error(function.location,
+                "unsupported external calling convention '"
+                    + function.calling_convention + "'");
+        }
+        if (!function.generic_parameters.empty()) {
+            throw_type_error(function.location,
+                "external C functions cannot be generic");
+        }
+        if (function.name == "main") {
+            throw_type_error(function.location,
+                "the Toro entry function cannot be an external declaration");
+        }
+        if (is_reserved_c_identifier(function.name)) {
+            throw_type_error(function.location,
+                "external C symbol '" + function.name
+                    + "' is a reserved C identifier");
+        }
+        if (function.name.starts_with("toro_")) {
+            throw_type_error(function.location,
+                "external C symbol '" + function.name
+                    + "' uses the compiler-reserved 'toro_' prefix");
+        }
+        for (const auto& parameter : function.parameters) {
+            const Type type = resolve_type(parameter.type);
+            if (!is_ffi_abi_type(type)) {
+                throw_type_error(parameter.type.location,
+                    "unsupported C FFI parameter type '" + type_name(type)
+                        + "' for external function '" + function.name + "'");
+            }
+        }
+        if (function.return_type) {
+            const Type type = resolve_type(*function.return_type);
+            if (!is_ffi_abi_type(type)) {
+                throw_type_error(function.return_type->location,
+                    "unsupported C FFI return type '" + type_name(type)
+                        + "' for external function '" + function.name + "'");
+            }
+        }
+        return;
+    }
     const auto enclosing_return_type = current_return_type_;
     push_generic_parameters(function.generic_parameters);
     current_return_type_ = function.return_type
@@ -2375,6 +2474,13 @@ bool TypeChecker::statement_guarantees_return(const Stmt& statement) const
 
 Type TypeChecker::resolve_type(const TypeReference& reference) const
 {
+    if (reference.nullable && (reference.name == "c_int"
+            || reference.name == "c_int64" || reference.name == "c_double"
+            || reference.name == "c_bool" || reference.name == "c_string")) {
+        throw_type_error(reference.location,
+            "C FFI type '" + reference.name
+                + "' cannot be nullable; nullable C pointers are not supported");
+    }
     if (is_generic_parameter(reference.name) && reference.arguments.empty()) {
         return Type{
             TypeKind::Unknown,
@@ -2419,6 +2525,31 @@ Type TypeChecker::resolve_type(const TypeReference& reference) const
     }
     if (reference.name == "bool") {
         const Type result{TypeKind::Bool, reference.nullable};
+        reference.resolved_type = result;
+        return result;
+    }
+    if (reference.name == "c_int") {
+        const Type result{TypeKind::CInt, reference.nullable};
+        reference.resolved_type = result;
+        return result;
+    }
+    if (reference.name == "c_int64") {
+        const Type result{TypeKind::CInt64, reference.nullable};
+        reference.resolved_type = result;
+        return result;
+    }
+    if (reference.name == "c_double") {
+        const Type result{TypeKind::CDouble, reference.nullable};
+        reference.resolved_type = result;
+        return result;
+    }
+    if (reference.name == "c_bool") {
+        const Type result{TypeKind::CBool, reference.nullable};
+        reference.resolved_type = result;
+        return result;
+    }
+    if (reference.name == "c_string") {
+        const Type result{TypeKind::CString, reference.nullable};
         reference.resolved_type = result;
         return result;
     }
