@@ -22,6 +22,7 @@ add_library(toro_core
     src/ProjectConfig.cpp
     src/SemanticAnalyzer.cpp
     src/SourceFile.cpp
+    src/StandardLibrary.cpp
     src/TypeChecker.cpp
 )
 
@@ -91,6 +92,11 @@ if(BUILD_TESTING)
     toro_enable_warnings(toro_project_config_tests)
     add_test(NAME project_config COMMAND toro_project_config_tests)
 
+    add_executable(toro_standard_library_tests tests/StandardLibraryTests.cpp)
+    target_link_libraries(toro_standard_library_tests PRIVATE toro_core)
+    toro_enable_warnings(toro_standard_library_tests)
+    add_test(NAME standard_library COMMAND toro_standard_library_tests)
+
     add_test(NAME project_cli_check COMMAND toro check)
     set_tests_properties(project_cli_check PROPERTIES
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/project)
@@ -104,4 +110,11 @@ if(BUILD_TESTING)
     add_test(NAME project_cli_run COMMAND toro run)
     set_tests_properties(project_cli_run PROPERTIES
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/project)
+
+    add_test(NAME stdlib_cli_check COMMAND toro check)
+    set_tests_properties(stdlib_cli_check PROPERTIES
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/stdlib)
+    add_test(NAME stdlib_cli_run COMMAND toro run)
+    set_tests_properties(stdlib_cli_run PROPERTIES
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/stdlib)
 endif()

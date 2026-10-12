@@ -61,8 +61,10 @@ the current directory only. It resolves the project name, project root,
 configured source root, and entry source before compilation; manifest parsing
 does not leak into the CLI pipeline, module resolver, or frontend.
 
-`ModuleLoader` owns filesystem-backed module discovery after receiving an entry
-and source root. Direct-file compilation supplies the entry file's directory;
+`ModuleLoader` owns module discovery after receiving an entry and source root.
+Reserved standard-library identities resolve first from compiler-provided Toro
+source, while application modules remain filesystem-backed. Direct-file
+compilation supplies the entry file's directory;
 project compilation supplies `[source].root`. A dotted identity such as
 `game.player` maps to `game/player.toro` beneath that root. The loader performs a
 deterministic depth-first traversal, reports missing/self/cyclic imports,
@@ -72,6 +74,15 @@ statement range, imports, stable logical identity, and declaration ownership, so
 the combined storage does not erase compilation-unit boundaries. Filesystem
 resolution does not live in the parser, semantic analyzer, type checker, or C
 backend.
+
+The `StandardLibrary` registry owns stable module source and the small set of
+private runtime-intrinsic identities used by those modules. Standard-library
+wrappers still pass through normal parsing, public-import visibility, type
+checking, declaration identity, and backend emission. Runtime intrinsics are
+visible only while checking compiler-provided standard modules; application
+source cannot invoke them directly. This boundary avoids teaching the parser or
+general overload resolver about host services and provides one replacement
+point for a future Toro IR/runtime ABI.
 
 The lexer tracks one-based line/column locations and recognizes canonical Toro
 syntax, including `::` for type-scoped enum variants.
@@ -154,6 +165,20 @@ string  -> const char*
 ```
 
 The backend lowers supported expressions, variables, functions, calls, control flow, and primitive printing.
+
+### Standard-library runtime boundary
+
+Generated C helpers implement the current filesystem, environment, time, and
+string services only when their associated intrinsic is reachable. Concrete
+`Result<string, string>` and `Result<bool, string>` values reuse the existing
+tagged-union lowering. Native-produced immutable strings are registered in a
+small process-lifetime allocation list and released with `atexit`, preventing
+dangling pointers while keeping ownership mechanics out of general string
+expressions. This representation is intentionally isolated and may be replaced
+when Toro gains a unified owned-string runtime.
+
+Standard-library module identities and helper names are deterministic; no
+absolute compiler, standard-library, or project path enters generated symbols.
 
 ### Structs
 

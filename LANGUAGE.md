@@ -88,6 +88,70 @@ If two directly imported modules export the same unqualified name and no local
 declaration resolves it, using that name is ambiguous and is rejected. Toro does
 not yet provide aliases or module-qualified source access to disambiguate it.
 
+### Standard library
+
+The initial standard library is imported through the same module-root syntax as
+application code:
+
+```toro
+import fs
+import io
+import strings
+```
+
+The module names `io`, `fs`, `env`, `process`, `time`, and `strings` are reserved
+standard-library identities. They resolve to compiler-provided modules before
+the project source root is considered, so a project file cannot accidentally
+shadow them. Their identities and generated symbols do not depend on compiler
+installation or project paths. Standard-library declarations are ordinary
+public Toro functions; a small private runtime-intrinsic boundary implements
+host services and is not callable by application source.
+
+The current APIs, grouped by their import module, are:
+
+```text
+io:
+    write_line(value: string)
+
+fs:
+    exists(path: string) -> bool
+    read_text(path: string) -> Result<string, string>
+    write_text(path: string, contents: string) -> Result<bool, string>
+    remove_file(path: string) -> Result<bool, string>
+
+env:
+    has(name: string) -> bool
+    get(name: string) -> Result<string, string>
+
+process:
+    exit(code: int)
+
+time:
+    wall_millis() -> int
+    elapsed_millis(start: int) -> int
+
+strings:
+    length(value: string) -> int
+    concat(left: string, right: string) -> string
+    contains(value: string, fragment: string) -> bool
+    starts_with(value: string, prefix: string) -> bool
+    ends_with(value: string, suffix: string) -> bool
+    substring(value: string, start: int, count: int) -> Result<string, string>
+```
+
+Filesystem and environment operations use `Result` when failure needs a
+diagnostic. `exists` reports whether a file can be opened; directory traversal
+and directory-specific queries are not part of this first surface.
+`wall_millis` is Unix-epoch wall-clock time in milliseconds;
+`elapsed_millis(start)` subtracts that reading for basic elapsed measurement.
+Neither is a monotonic-duration source. Strings returned by the native
+standard-library boundary are immutable and kept valid until process shutdown.
+This is an isolated correctness-first representation pending a unified
+owned-string runtime.
+Input streams, argument-vector access, monotonic clocks/durations, directory
+operations, networking, regular expressions, structured serialization, and a
+public FFI remain deferred.
+
 ### Logical Operators
 
 Toro uses the keywords `and` and `or` rather than symbolic logical operators.

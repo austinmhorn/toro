@@ -1,5 +1,6 @@
 #include "toro/TypeChecker.hpp"
 #include "toro/ModuleIdentity.hpp"
+#include "toro/StandardLibrary.hpp"
 
 #include <algorithm>
 #include <functional>
@@ -1167,6 +1168,91 @@ Type TypeChecker::check_call(
 
     if (call.callee->kind == ExprKind::Identifier) {
         const auto& callee = static_cast<const IdentifierExpr&>(*call.callee);
+        if (const auto intrinsic = runtime_intrinsic(callee.name)) {
+            if (!is_standard_library_module(current_module_)) {
+                throw_type_error(current_location_,
+                    "unknown function '" + callee.name + "'");
+            }
+            if (!call.generic_arguments.empty()) {
+                throw_type_error(current_location_,
+                    "runtime intrinsic '" + callee.name
+                        + "' does not accept generic arguments");
+            }
+            if (std::ranges::any_of(call.arguments,
+                    [](const CallArgument& argument) {
+                        return argument.name.has_value();
+                    })) {
+                throw_type_error(current_location_,
+                    "runtime intrinsic '" + callee.name
+                        + "' does not accept named arguments");
+            }
+            std::vector<Type> parameters;
+            Type result = void_type;
+            const Type string_result{
+                TypeKind::Unknown, false, false, "Result",
+                {string_type, string_type}};
+            const Type bool_result{
+                TypeKind::Unknown, false, false, "Result",
+                {bool_type, string_type}};
+            switch (*intrinsic) {
+            case RuntimeIntrinsic::IoWriteLine:
+                parameters = {string_type};
+                break;
+            case RuntimeIntrinsic::FsExists:
+            case RuntimeIntrinsic::EnvHas:
+            case RuntimeIntrinsic::StringContains:
+            case RuntimeIntrinsic::StringStartsWith:
+            case RuntimeIntrinsic::StringEndsWith:
+                parameters = *intrinsic == RuntimeIntrinsic::StringContains
+                        || *intrinsic == RuntimeIntrinsic::StringStartsWith
+                        || *intrinsic == RuntimeIntrinsic::StringEndsWith
+                    ? std::vector<Type>{string_type, string_type}
+                    : std::vector<Type>{string_type};
+                result = bool_type;
+                break;
+            case RuntimeIntrinsic::FsReadText:
+            case RuntimeIntrinsic::EnvGet:
+                parameters = {string_type};
+                result = string_result;
+                break;
+            case RuntimeIntrinsic::FsWriteText:
+                parameters = {string_type, string_type};
+                result = bool_result;
+                break;
+            case RuntimeIntrinsic::FsRemoveFile:
+                parameters = {string_type};
+                result = bool_result;
+                break;
+            case RuntimeIntrinsic::ProcessExit:
+                parameters = {int_type};
+                break;
+            case RuntimeIntrinsic::TimeWallMillis:
+                result = int_type;
+                break;
+            case RuntimeIntrinsic::StringLength:
+                parameters = {string_type};
+                result = int_type;
+                break;
+            case RuntimeIntrinsic::StringConcat:
+                parameters = {string_type, string_type};
+                result = string_type;
+                break;
+            case RuntimeIntrinsic::StringSubstring:
+                parameters = {string_type, int_type, int_type};
+                result = string_result;
+                break;
+            }
+            if (arguments.size() != parameters.size()) {
+                throw_type_error(current_location_,
+                    "runtime intrinsic '" + callee.name + "' expects "
+                        + std::to_string(parameters.size()) + " arguments, got "
+                        + std::to_string(arguments.size()));
+            }
+            for (std::size_t index = 0; index < parameters.size(); ++index) {
+                require_assignable(parameters[index], arguments[index], current_location_);
+            }
+            return result;
+        }
         if (callee.name == "print") {
             if (arguments.size() != 1) {
                 throw_type_error(

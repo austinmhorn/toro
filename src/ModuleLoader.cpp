@@ -3,6 +3,7 @@
 #include "toro/Lexer.hpp"
 #include "toro/Parser.hpp"
 #include "toro/SourceFile.hpp"
+#include "toro/StandardLibrary.hpp"
 
 #include <algorithm>
 #include <map>
@@ -93,6 +94,11 @@ public:
         const std::filesystem::path& entry_path,
         const std::string& entry_name)
     {
+        if (is_standard_library_module(entry_name)) {
+            throw std::runtime_error(
+                "module name '" + entry_name
+                + "' is reserved by the Toro standard library");
+        }
         load_module(entry_name, entry_path, std::nullopt);
         visit(entry_name);
 
@@ -138,7 +144,8 @@ private:
         if (modules_.contains(name)) {
             return;
         }
-        if (!std::filesystem::exists(path)) {
+        const auto standard_source = standard_library_source(name);
+        if (!standard_source && !std::filesystem::exists(path)) {
             if (importer) {
                 throw_module_error(
                     *importer->first,
@@ -148,7 +155,11 @@ private:
             throw std::runtime_error("source file does not exist: " + path.string());
         }
 
-        const SourceFile source = load_source_file(path);
+        const SourceFile source = standard_source
+            ? SourceFile{
+                std::filesystem::path("<toro-stdlib>") / (name + ".toro"),
+                std::string(*standard_source)}
+            : load_source_file(path);
         Program parsed;
         try {
             parsed = Parser(Lexer(source.contents).tokenize()).parse_program();
@@ -158,7 +169,11 @@ private:
                 + error.what());
         }
 
-        ParsedModule module{name, std::filesystem::absolute(path), std::move(parsed), {}};
+        ParsedModule module{
+            name,
+            standard_source ? source.path : std::filesystem::absolute(path),
+            std::move(parsed),
+            {}};
         std::unordered_set<std::string> seen_imports;
         for (const auto& statement : module.program.statements) {
             if (statement->kind != StmtKind::ImportDeclaration) {

@@ -52,7 +52,11 @@ Module-root imports now allow one entry file to load a deterministic graph of
 `.toro` modules. Top-level declarations are private by default and use `public`
 for explicit export. Module-aware declaration identities allow independent
 modules to reuse source-level names while preserving distinct types and native
-symbols.
+symbols. Compiler-provided standard modules now supply console output,
+text-file basics, environment access, process exit, wall-clock time, and
+foundational string operations through normal Toro imports. Host interaction
+remains isolated behind a private intrinsic boundary; application code sees
+ordinary typed Toro APIs.
 
 ## Build
 
@@ -227,6 +231,15 @@ Build and run through temporary artifacts:
 ./build/toro run examples/modules/main.toro
 ```
 
+Run the standard-library project example:
+
+```bash
+cd examples/stdlib
+../../build/toro check
+../../build/toro emit-c
+../../build/toro run
+```
+
 Imports use dotted module identities:
 
 ```toro
@@ -245,6 +258,15 @@ configured source roots remain deferred.
 Same-named declarations in separate modules remain distinct. An unqualified use
 is diagnosed as ambiguous when two directly imported modules export that name;
 aliases and module-qualified source access remain deferred.
+
+The reserved standard-library modules `io`, `fs`, `env`, `process`, `time`, and
+`strings` resolve before project modules of the same name. They use stable
+compiler-provided identities, so generated output is independent of installation
+and project paths. The initial surface includes `write_line`, text-file
+`exists`/`read_text`/`write_text`/`remove_file`, environment `has`/`get`,
+process `exit`, wall/elapsed millisecond time, and string length,
+concatenation, search, prefix/suffix, and checked substring operations. See
+`LANGUAGE.md` for complete signatures and failure behavior.
 
 `run` forwards program output and returns its exit status. Its temporary C source
 and executable are removed after the program finishes or compilation fails.

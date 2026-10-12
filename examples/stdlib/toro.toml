@@ -1,0 +1,6 @@
+[project]
+name = "stdlib-example"
+
+[source]
+root = "src"
+entry = "main.toro"

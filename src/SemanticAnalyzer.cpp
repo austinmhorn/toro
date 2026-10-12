@@ -1,4 +1,5 @@
 #include "toro/SemanticAnalyzer.hpp"
+#include "toro/StandardLibrary.hpp"
 
 #include <algorithm>
 #include <stdexcept>
@@ -33,6 +34,9 @@ void SemanticAnalyzer::analyze(const Program& program)
     declare("Array", SymbolKind::Builtin, SourceLocation{0, 0}, {}, true);
     declare("List", SymbolKind::Builtin, SourceLocation{0, 0}, {}, true);
     declare("Map", SymbolKind::Builtin, SourceLocation{0, 0}, {}, true);
+    for (const std::string_view name : runtime_intrinsic_names()) {
+        declare(std::string(name), SymbolKind::Builtin, SourceLocation{0, 0}, {}, true);
+    }
     predeclare(program.statements);
     for (const auto& statement : program.statements) {
         current_module_ = statement->module_name;
@@ -235,6 +239,11 @@ void SemanticAnalyzer::analyze_expression(const Expr& expression)
         return;
     case ExprKind::Identifier: {
         const auto& identifier = static_cast<const IdentifierExpr&>(expression);
+        if (runtime_intrinsic(identifier.name)
+            && !is_standard_library_module(current_module_)) {
+            throw_semantic_error(
+                current_location_, "unknown identifier '" + identifier.name + "'");
+        }
         if (identifier.name == "self") {
             if (!inside_class_method_) {
                 throw_semantic_error(

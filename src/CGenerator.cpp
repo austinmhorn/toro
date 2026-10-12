@@ -1,8 +1,10 @@
 #include "toro/CGenerator.hpp"
 #include "toro/ModuleIdentity.hpp"
+#include "toro/StandardLibrary.hpp"
 
 #include <algorithm>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -566,11 +568,13 @@ public:
         collect_local_types(program);
 
         std::string output =
+            "#include <errno.h>\n"
             "#include <stdbool.h>\n"
             "#include <stdint.h>\n"
             "#include <stdio.h>\n"
             "#include <stdlib.h>\n"
-            "#include <string.h>\n\n";
+            "#include <string.h>\n"
+            "#include <time.h>\n\n";
 
         if (!class_order_.empty()) {
             output +=
@@ -680,6 +684,7 @@ public:
         for (const auto& collection : collection_order_) {
             output += emit_collection_definition(collection);
         }
+        output += emit_standard_library_helpers();
 
         for (const auto& key : class_order_) {
             if (classes_.at(key).base_name) {
@@ -2071,6 +2076,9 @@ private:
             if (call.callee->kind == ExprKind::Identifier) {
                 const auto& callee =
                     static_cast<const IdentifierExpr&>(*call.callee);
+                if (const auto intrinsic = runtime_intrinsic(callee.name)) {
+                    used_intrinsics_.insert(*intrinsic);
+                }
                 if (call.resolved_function
                     && !call.resolved_function->generic_parameters.empty()) {
                     std::vector<CValueType> arguments;
@@ -4034,6 +4042,9 @@ private:
             throw_backend_error(current_location_, "unsupported call target");
         }
         const auto& callee = static_cast<const IdentifierExpr&>(*call.callee);
+        if (runtime_intrinsic(callee.name)) {
+            return emit_runtime_intrinsic_call(call, callee.name);
+        }
         if (callee.name == "print") {
             return emit_print(call);
         }
@@ -5284,6 +5295,295 @@ private:
         throw_backend_error(current_location_, "unsupported print value");
     }
 
+    std::string emit_standard_library_helpers() const
+    {
+        if (used_intrinsics_.empty()) {
+            return {};
+        }
+        const auto uses = [&](RuntimeIntrinsic intrinsic) {
+            return used_intrinsics_.contains(intrinsic);
+        };
+        const bool needs_owned_strings =
+            uses(RuntimeIntrinsic::FsReadText)
+            || uses(RuntimeIntrinsic::FsWriteText)
+            || uses(RuntimeIntrinsic::FsRemoveFile)
+            || uses(RuntimeIntrinsic::EnvGet)
+            || uses(RuntimeIntrinsic::StringConcat)
+            || uses(RuntimeIntrinsic::StringSubstring);
+        const CValueType string_result{
+            CValueKind::Result, {}, {string_type, string_type}};
+        const CValueType bool_result{
+            CValueKind::Result, {}, {bool_type, string_type}};
+        const std::string string_result_name = result_name(string_result);
+        const std::string bool_result_name = result_name(bool_result);
+
+        std::string output;
+        if (needs_owned_strings) {
+            output +=
+                "typedef struct toro_std_owned_string\n"
+                "{\n"
+                "    char* toro_value;\n"
+                "    struct toro_std_owned_string* toro_next;\n"
+                "} toro_std_owned_string;\n\n"
+                "static toro_std_owned_string* toro_std_owned_strings = NULL;\n\n"
+                "static void toro_std_cleanup_strings(void)\n"
+                "{\n"
+                "    while (toro_std_owned_strings != NULL)\n"
+                "    {\n"
+                "        toro_std_owned_string* toro_next = toro_std_owned_strings->toro_next;\n"
+                "        free(toro_std_owned_strings->toro_value);\n"
+                "        free(toro_std_owned_strings);\n"
+                "        toro_std_owned_strings = toro_next;\n"
+                "    }\n"
+                "}\n\n"
+                "static const char* toro_std_adopt_string(char* toro_value)\n"
+                "{\n"
+                "    static bool toro_registered = false;\n"
+                "    if (!toro_registered)\n"
+                "    {\n"
+                "        if (atexit(toro_std_cleanup_strings) != 0) { abort(); }\n"
+                "        toro_registered = true;\n"
+                "    }\n"
+                "    toro_std_owned_string* toro_node = malloc(sizeof(*toro_node));\n"
+                "    if (toro_node == NULL) { free(toro_value); abort(); }\n"
+                "    toro_node->toro_value = toro_value;\n"
+                "    toro_node->toro_next = toro_std_owned_strings;\n"
+                "    toro_std_owned_strings = toro_node;\n"
+                "    return toro_value;\n"
+                "}\n\n"
+                "static const char* toro_std_copy_string(const char* toro_value)\n"
+                "{\n"
+                "    size_t toro_size = strlen(toro_value) + 1;\n"
+                "    char* toro_copy = malloc(toro_size);\n"
+                "    if (toro_copy == NULL) { abort(); }\n"
+                "    memcpy(toro_copy, toro_value, toro_size);\n"
+                "    return toro_std_adopt_string(toro_copy);\n"
+                "}\n\n";
+        }
+        if (uses(RuntimeIntrinsic::FsExists)) {
+            output +=
+                "static bool toro_std_fs_exists(const char* toro_path)\n"
+                "{\n"
+                "    FILE* toro_file = fopen(toro_path, \"rb\");\n"
+                "    if (toro_file == NULL) { return false; }\n"
+                "    fclose(toro_file);\n"
+                "    return true;\n"
+                "}\n\n";
+        }
+        if (uses(RuntimeIntrinsic::FsReadText)) {
+            output += "static " + string_result_name
+                + " toro_std_fs_read_text(const char* toro_path)\n{\n"
+                  "    FILE* toro_file = fopen(toro_path, \"rb\");\n"
+                  "    if (toro_file == NULL)\n    {\n"
+                  "        return (" + string_result_name + "){.toro_tag = "
+                + string_result_name
+                + "_tag_error, .toro_payload.toro_error = toro_std_copy_string(strerror(errno))};\n"
+                  "    }\n"
+                  "    if (fseek(toro_file, 0, SEEK_END) != 0) { fclose(toro_file); return ("
+                + string_result_name + "){.toro_tag = " + string_result_name
+                + "_tag_error, .toro_payload.toro_error = toro_std_copy_string(\"could not seek file\")}; }\n"
+                  "    long toro_length = ftell(toro_file);\n"
+                  "    if (toro_length < 0 || fseek(toro_file, 0, SEEK_SET) != 0) { fclose(toro_file); return ("
+                + string_result_name + "){.toro_tag = " + string_result_name
+                + "_tag_error, .toro_payload.toro_error = toro_std_copy_string(\"could not measure file\")}; }\n"
+                  "    char* toro_contents = malloc((size_t)toro_length + 1);\n"
+                  "    if (toro_contents == NULL) { fclose(toro_file); abort(); }\n"
+                  "    size_t toro_read = fread(toro_contents, 1, (size_t)toro_length, toro_file);\n"
+                  "    if (toro_read != (size_t)toro_length || fclose(toro_file) != 0) { free(toro_contents); return ("
+                + string_result_name + "){.toro_tag = " + string_result_name
+                + "_tag_error, .toro_payload.toro_error = toro_std_copy_string(\"could not read file\")}; }\n"
+                  "    toro_contents[toro_read] = '\\0';\n"
+                  "    return (" + string_result_name + "){.toro_tag = "
+                + string_result_name
+                + "_tag_ok, .toro_payload.toro_ok = toro_std_adopt_string(toro_contents)};\n"
+                  "}\n\n";
+        }
+        if (uses(RuntimeIntrinsic::FsWriteText)) {
+            output += "static " + bool_result_name
+                + " toro_std_fs_write_text(const char* toro_path, const char* toro_contents)\n{\n"
+                  "    FILE* toro_file = fopen(toro_path, \"wb\");\n"
+                  "    if (toro_file == NULL) { return (" + bool_result_name
+                + "){.toro_tag = " + bool_result_name
+                + "_tag_error, .toro_payload.toro_error = toro_std_copy_string(strerror(errno))}; }\n"
+                  "    size_t toro_length = strlen(toro_contents);\n"
+                  "    bool toro_ok = fwrite(toro_contents, 1, toro_length, toro_file) == toro_length;\n"
+                  "    if (fclose(toro_file) != 0) { toro_ok = false; }\n"
+                  "    if (!toro_ok) { return (" + bool_result_name
+                + "){.toro_tag = " + bool_result_name
+                + "_tag_error, .toro_payload.toro_error = toro_std_copy_string(\"could not write file\")}; }\n"
+                  "    return (" + bool_result_name + "){.toro_tag = "
+                + bool_result_name + "_tag_ok, .toro_payload.toro_ok = true};\n"
+                  "}\n\n";
+        }
+        if (uses(RuntimeIntrinsic::FsRemoveFile)) {
+            output += "static " + bool_result_name
+                + " toro_std_fs_remove_file(const char* toro_path)\n{\n"
+                  "    if (remove(toro_path) != 0) { return (" + bool_result_name
+                + "){.toro_tag = " + bool_result_name
+                + "_tag_error, .toro_payload.toro_error = toro_std_copy_string(strerror(errno))}; }\n"
+                  "    return (" + bool_result_name + "){.toro_tag = "
+                + bool_result_name + "_tag_ok, .toro_payload.toro_ok = true};\n"
+                  "}\n\n";
+        }
+        if (uses(RuntimeIntrinsic::EnvGet)) {
+            output += "static " + string_result_name
+                + " toro_std_env_get(const char* toro_name)\n{\n"
+                  "    const char* toro_value = getenv(toro_name);\n"
+                  "    if (toro_value == NULL) { return (" + string_result_name
+                + "){.toro_tag = " + string_result_name
+                + "_tag_error, .toro_payload.toro_error = \"environment variable is not set\"}; }\n"
+                  "    return (" + string_result_name + "){.toro_tag = "
+                + string_result_name
+                + "_tag_ok, .toro_payload.toro_ok = toro_std_copy_string(toro_value)};\n"
+                  "}\n\n";
+        }
+        if (uses(RuntimeIntrinsic::TimeWallMillis)) {
+            output +=
+                "static int64_t toro_std_time_wall_millis(void)\n"
+                "{\n"
+                "    struct timespec toro_now;\n"
+                "    if (timespec_get(&toro_now, TIME_UTC) != TIME_UTC) { abort(); }\n"
+                "    return (int64_t)toro_now.tv_sec * 1000 + (int64_t)toro_now.tv_nsec / 1000000;\n"
+                "}\n\n";
+        }
+        if (uses(RuntimeIntrinsic::StringConcat)) {
+            output +=
+                "static const char* toro_std_string_concat(const char* toro_left, const char* toro_right)\n"
+                "{\n"
+                "    size_t toro_left_size = strlen(toro_left);\n"
+                "    size_t toro_right_size = strlen(toro_right);\n"
+                "    char* toro_result = malloc(toro_left_size + toro_right_size + 1);\n"
+                "    if (toro_result == NULL) { abort(); }\n"
+                "    memcpy(toro_result, toro_left, toro_left_size);\n"
+                "    memcpy(toro_result + toro_left_size, toro_right, toro_right_size + 1);\n"
+                "    return toro_std_adopt_string(toro_result);\n"
+                "}\n\n";
+        }
+        if (uses(RuntimeIntrinsic::StringStartsWith)) {
+            output +=
+                "static bool toro_std_string_starts_with(const char* toro_value, const char* toro_prefix)\n"
+                "{\n"
+                "    size_t toro_size = strlen(toro_prefix);\n"
+                "    return strncmp(toro_value, toro_prefix, toro_size) == 0;\n"
+                "}\n\n";
+        }
+        if (uses(RuntimeIntrinsic::StringEndsWith)) {
+            output +=
+                "static bool toro_std_string_ends_with(const char* toro_value, const char* toro_suffix)\n"
+                "{\n"
+                "    size_t toro_value_size = strlen(toro_value);\n"
+                "    size_t toro_suffix_size = strlen(toro_suffix);\n"
+                "    return toro_suffix_size <= toro_value_size\n"
+                "        && strcmp(toro_value + toro_value_size - toro_suffix_size, toro_suffix) == 0;\n"
+                "}\n\n";
+        }
+        if (uses(RuntimeIntrinsic::StringSubstring)) {
+            output += "static " + string_result_name
+                + " toro_std_string_substring(const char* toro_value, int64_t toro_start, int64_t toro_count)\n{\n"
+                  "    size_t toro_size = strlen(toro_value);\n"
+                  "    if (toro_start < 0 || toro_count < 0 || (uint64_t)toro_start > toro_size || (uint64_t)toro_count > toro_size - (size_t)toro_start)\n"
+                  "    { return (" + string_result_name + "){.toro_tag = "
+                + string_result_name
+                + "_tag_error, .toro_payload.toro_error = \"substring range is out of bounds\"}; }\n"
+                  "    char* toro_result = malloc((size_t)toro_count + 1);\n"
+                  "    if (toro_result == NULL) { abort(); }\n"
+                  "    memcpy(toro_result, toro_value + toro_start, (size_t)toro_count);\n"
+                  "    toro_result[toro_count] = '\\0';\n"
+                  "    return (" + string_result_name + "){.toro_tag = "
+                + string_result_name
+                + "_tag_ok, .toro_payload.toro_ok = toro_std_adopt_string(toro_result)};\n"
+                  "}\n\n";
+        }
+        return output;
+    }
+
+    GeneratedExpression emit_runtime_intrinsic_call(
+        const CallExpr& call,
+        const std::string& name)
+    {
+        const auto intrinsic = runtime_intrinsic(name);
+        if (!intrinsic) {
+            throw_backend_error(current_location_,
+                "unknown Toro runtime intrinsic '" + name + "'");
+        }
+        std::vector<GeneratedExpression> arguments;
+        arguments.reserve(call.arguments.size());
+        std::string prelude;
+        for (const auto& argument : call.arguments) {
+            arguments.push_back(emit_expression(*argument.value));
+            auto& emitted = arguments.back();
+            prelude += emitted.prelude;
+            const std::string temporary =
+                "toro_std_argument_" + std::to_string(temporary_index_++);
+            prelude += c_type_name(emitted.type) + " " + temporary
+                + " = " + emitted.code + ";\n";
+            emitted.code = temporary;
+            emitted.prelude.clear();
+        }
+        const auto argument = [&](std::size_t index) -> const std::string& {
+            return arguments.at(index).code;
+        };
+        CValueType result = call.resolved_type
+            ? lower_type(*call.resolved_type) : void_type;
+        std::string code;
+        switch (*intrinsic) {
+        case RuntimeIntrinsic::IoWriteLine:
+            code = "printf(\"%s\\n\", " + argument(0) + ")";
+            result = void_type;
+            break;
+        case RuntimeIntrinsic::FsExists:
+            code = "toro_std_fs_exists(" + argument(0) + ")";
+            break;
+        case RuntimeIntrinsic::FsReadText:
+            code = "toro_std_fs_read_text(" + argument(0) + ")";
+            break;
+        case RuntimeIntrinsic::FsWriteText:
+            code = "toro_std_fs_write_text(" + argument(0) + ", "
+                + argument(1) + ")";
+            break;
+        case RuntimeIntrinsic::FsRemoveFile:
+            code = "toro_std_fs_remove_file(" + argument(0) + ")";
+            break;
+        case RuntimeIntrinsic::EnvHas:
+            code = "(getenv(" + argument(0) + ") != NULL)";
+            break;
+        case RuntimeIntrinsic::EnvGet:
+            code = "toro_std_env_get(" + argument(0) + ")";
+            break;
+        case RuntimeIntrinsic::ProcessExit:
+            code = "exit((int)(" + argument(0) + "))";
+            result = void_type;
+            break;
+        case RuntimeIntrinsic::TimeWallMillis:
+            code = "toro_std_time_wall_millis()";
+            break;
+        case RuntimeIntrinsic::StringLength:
+            code = "((int64_t)strlen(" + argument(0) + "))";
+            break;
+        case RuntimeIntrinsic::StringConcat:
+            code = "toro_std_string_concat(" + argument(0) + ", "
+                + argument(1) + ")";
+            break;
+        case RuntimeIntrinsic::StringContains:
+            code = "(strstr(" + argument(0) + ", " + argument(1)
+                + ") != NULL)";
+            break;
+        case RuntimeIntrinsic::StringStartsWith:
+            code = "toro_std_string_starts_with(" + argument(0) + ", "
+                + argument(1) + ")";
+            break;
+        case RuntimeIntrinsic::StringEndsWith:
+            code = "toro_std_string_ends_with(" + argument(0) + ", "
+                + argument(1) + ")";
+            break;
+        case RuntimeIntrinsic::StringSubstring:
+            code = "toro_std_string_substring(" + argument(0) + ", "
+                + argument(1) + ", " + argument(2) + ")";
+            break;
+        }
+        return {std::move(code), result, false, false, std::move(prelude)};
+    }
+
     void push_scope()
     {
         scopes_.emplace_back();
@@ -5392,6 +5692,7 @@ private:
     std::optional<CValueType> current_return_type_;
     std::unordered_map<std::string, CValueType> current_substitutions_;
     std::unordered_set<std::string> instantiating_types_;
+    std::set<RuntimeIntrinsic> used_intrinsics_;
     std::vector<std::size_t> loop_scope_indices_;
     SourceLocation current_location_{1, 1};
 };

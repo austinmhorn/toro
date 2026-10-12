@@ -1,0 +1,41 @@
+import env
+import fs
+import io
+import strings
+import time
+
+function main() {
+    path := "toro-stdlib-example.txt"
+    handle write_text(path, "Hello from Toro") {
+        ok(written) {
+            if written {
+                handle read_text(path) {
+                    ok(contents) {
+                        write_line(concat(contents, "!"))
+                        print(length(contents))
+                    }
+                    error(problem) {
+                        write_line(problem)
+                    }
+                }
+            }
+        }
+        error(problem) {
+            write_line(problem)
+        }
+    }
+
+    print(exists(path))
+    print(has("PATH"))
+    start := wall_millis()
+    print(elapsed_millis(start) >= 0)
+
+    handle remove_file(path) {
+        ok(removed) {
+            print(removed)
+        }
+        error(problem) {
+            write_line(problem)
+        }
+    }
+}

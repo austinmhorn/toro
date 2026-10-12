@@ -236,17 +236,29 @@ Completed behavior:
 Dependencies, lockfiles, registries, workspaces, aliases, additional source
 roots, `toro test`, and `toro fmt` remain deferred.
 
-## 7.4 Standard library foundation
+## 7.4 Standard library foundation — completed
 
-Prioritize application-development basics:
+Establish an importable application-development baseline without exposing a
+general native ABI.
 
-- console I/O;
-- filesystem;
-- environment/process access;
-- time/duration;
-- collections;
-- strings;
-- basic networking when architecture permits.
+Completed behavior:
+
+- compiler-provided `io`, `fs`, `env`, `process`, `time`, and `strings` modules;
+- deterministic standard-library identities independent of project and install
+  paths, with reserved-module precedence over project source roots;
+- ordinary public Toro wrappers over one isolated private runtime-intrinsic
+  registry;
+- console output, text-file existence/read/write/removal, environment lookup,
+  process exit, wall/elapsed milliseconds, and foundational string operations;
+- `Result`-based filesystem, environment, and substring failures;
+- process-lifetime immutable storage for native-produced strings, with cleanup
+  at process shutdown;
+- strict-C11, deterministic-emission, project-mode, and native integration
+  coverage.
+
+Console input, argument vectors, monotonic duration APIs, directory operations,
+networking, regular expressions, structured serialization, richer owned-string
+runtime semantics, and a public FFI remain deferred.
 
 ## 7.5 Testing and formatting
 
