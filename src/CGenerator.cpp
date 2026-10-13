@@ -1,4 +1,6 @@
 #include "toro/CGenerator.hpp"
+
+#include "toro/IRLowerer.hpp"
 #include "toro/ModuleIdentity.hpp"
 #include "toro/StandardLibrary.hpp"
 
@@ -581,8 +583,17 @@ std::string escape_c_string(std::string_view value)
 
 class Generator {
 public:
-    std::string generate(const Program& program)
+    std::string generate(const IRProgram& ir_program)
     {
+        if (!ir_program.backend_compatibility_program) {
+            throw std::runtime_error(
+                "C backend error: Toro IR has no typed-AST compatibility payload");
+        }
+        if (ir_program.lifetime_model != IRLifetimeModel::LegacyArc) {
+            throw std::runtime_error(
+                "C backend error: unsupported Toro IR lifetime model");
+        }
+        const Program& program = *ir_program.backend_compatibility_program;
         collect_types(program);
         collect_functions(program);
         collect_local_types(program);
@@ -5823,9 +5834,14 @@ private:
 
 } // namespace
 
-std::string CGenerator::generate(const Program& program)
+std::string CGenerator::generate(const IRProgram& program)
 {
     return Generator{}.generate(program);
+}
+
+std::string CGenerator::generate(const Program& program)
+{
+    return generate(IRLowerer{}.lower(program));
 }
 
 } // namespace toro

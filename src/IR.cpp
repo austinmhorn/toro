@@ -1,0 +1,225 @@
+#include "toro/IR.hpp"
+
+#include <string>
+#include <string_view>
+
+namespace toro {
+namespace {
+
+std::string_view category_name(IRValueCategory category)
+{
+    switch (category) {
+    case IRValueCategory::Primitive: return "primitive";
+    case IRValueCategory::Value: return "value";
+    case IRValueCategory::ManagedReference: return "managed-ref";
+    case IRValueCategory::InterfaceValue: return "interface";
+    case IRValueCategory::CollectionValue: return "collection";
+    case IRValueCategory::ResultValue: return "result";
+    case IRValueCategory::Unknown: return "unknown";
+    }
+    return "unknown";
+}
+
+std::string_view operation_name(IROperationKind kind)
+{
+    switch (kind) {
+    case IROperationKind::Block: return "block";
+    case IROperationKind::Constant: return "constant";
+    case IROperationKind::Load: return "load";
+    case IROperationKind::Declare: return "declare";
+    case IROperationKind::Assign: return "assign";
+    case IROperationKind::MemberAssign: return "member-assign";
+    case IROperationKind::IndexAssign: return "index-assign";
+    case IROperationKind::Unary: return "unary";
+    case IROperationKind::Binary: return "binary";
+    case IROperationKind::Call: return "call";
+    case IROperationKind::ForeignCall: return "foreign-call";
+    case IROperationKind::VirtualCall: return "virtual-call";
+    case IROperationKind::InterfaceCall: return "interface-call";
+    case IROperationKind::Construction: return "construct";
+    case IROperationKind::EnumConstruction: return "enum-construct";
+    case IROperationKind::ResultConstruction: return "result-construct";
+    case IROperationKind::CollectionOperation: return "collection-op";
+    case IROperationKind::MemberAccess: return "member-access";
+    case IROperationKind::IndexAccess: return "index-access";
+    case IROperationKind::Conversion: return "convert";
+    case IROperationKind::PropagateResult: return "propagate-result";
+    case IROperationKind::Branch: return "branch";
+    case IROperationKind::Loop: return "loop";
+    case IROperationKind::ForEach: return "for-each";
+    case IROperationKind::Handle: return "handle";
+    case IROperationKind::Return: return "return";
+    case IROperationKind::Stop: return "stop";
+    case IROperationKind::Continue: return "continue";
+    }
+    return "unknown";
+}
+
+std::string_view declaration_kind_name(IRDeclarationKind kind)
+{
+    switch (kind) {
+    case IRDeclarationKind::Function: return "function";
+    case IRDeclarationKind::ForeignFunction: return "foreign-function";
+    case IRDeclarationKind::Struct: return "struct";
+    case IRDeclarationKind::Class: return "class";
+    case IRDeclarationKind::Interface: return "interface";
+    case IRDeclarationKind::Enum: return "enum";
+    case IRDeclarationKind::Method: return "method";
+    case IRDeclarationKind::Conversion: return "conversion";
+    }
+    return "unknown";
+}
+
+std::string complete_type_name(const IRType& type)
+{
+    std::string result = type_name(type.type);
+    if (type.type.kind == TypeKind::Unknown && !type.type.name.empty()) {
+        result += " {" + type.type.name + '}';
+    }
+    result += " [" + std::string(category_name(type.category)) + ']';
+    return result;
+}
+
+void append_origin(const IROrigin& origin, std::string& output)
+{
+    output += " @";
+    output += origin.module_name.empty() ? "<direct>" : origin.module_name;
+    output += ':' + std::to_string(origin.location.line);
+    output += ':' + std::to_string(origin.location.column);
+}
+
+void append_operation(
+    const IROperation& operation,
+    std::size_t depth,
+    std::string& output)
+{
+    output += std::string(depth * 2, ' ');
+    output += operation_name(operation.kind);
+    if (!operation.name.empty()) {
+        output += ' ' + operation.name;
+    }
+    if (operation.result_type) {
+        output += " : " + complete_type_name(*operation.result_type);
+    }
+    if (!operation.selected_declaration.empty()) {
+        output += " -> " + operation.selected_declaration;
+    }
+    if (!operation.substitutions.empty()) {
+        output += " <";
+        for (std::size_t index = 0; index < operation.substitutions.size(); ++index) {
+            if (index != 0) output += ", ";
+            output += operation.substitutions[index].first + '='
+                + complete_type_name(operation.substitutions[index].second);
+        }
+        output += '>';
+    }
+    if (!operation.argument_names.empty()) {
+        output += " arguments(";
+        for (std::size_t index = 0; index < operation.argument_names.size(); ++index) {
+            if (index != 0) output += ", ";
+            output += operation.argument_names[index].empty()
+                ? "<positional>" : operation.argument_names[index];
+        }
+        output += ')';
+    }
+    append_origin(operation.origin, output);
+    output += '\n';
+    for (const auto& child : operation.children) {
+        append_operation(child, depth + 1, output);
+    }
+}
+
+} // namespace
+
+std::string dump_ir(const IRProgram& program)
+{
+    std::string output = "toro-ir 1\n";
+    output += "entry " + program.entry_module + "\n";
+    output += "lifetime legacy-arc\n";
+    for (const auto& module : program.modules) {
+        output += "module " + module.name;
+        if (!module.imports.empty()) {
+            output += " imports ";
+            for (std::size_t index = 0; index < module.imports.size(); ++index) {
+                if (index != 0) output += ", ";
+                output += module.imports[index];
+            }
+        }
+        output += '\n';
+    }
+    for (const auto& operation : program.top_level_operations) {
+        append_operation(operation, 0, output);
+    }
+    for (const auto& declaration : program.declarations) {
+        output += std::string(declaration.owner_identity.empty() ? 0 : 2, ' ');
+        output += declaration_kind_name(declaration.kind);
+        output += ' ' + declaration.identity;
+        if (!declaration.owner_identity.empty()) {
+            output += " owner " + declaration.owner_identity;
+        }
+        if (!declaration.generic_parameters.empty()) {
+            output += " generic <";
+            for (std::size_t index = 0;
+                 index < declaration.generic_parameters.size(); ++index) {
+                if (index != 0) output += ", ";
+                const auto& parameter = declaration.generic_parameters[index];
+                output += parameter.name;
+                if (!parameter.constraints.empty()) {
+                    output += ": ";
+                    for (std::size_t constraint = 0;
+                         constraint < parameter.constraints.size(); ++constraint) {
+                        if (constraint != 0) output += " + ";
+                        output += complete_type_name(parameter.constraints[constraint]);
+                    }
+                }
+            }
+            output += '>';
+        }
+        if (!declaration.parameters.empty()) {
+            output += " (";
+            for (std::size_t index = 0; index < declaration.parameters.size(); ++index) {
+                if (index != 0) output += ", ";
+                output += declaration.parameters[index].name + ": "
+                    + complete_type_name(declaration.parameters[index].type);
+            }
+            output += ')';
+        }
+        if (declaration.return_type) {
+            output += " -> " + complete_type_name(*declaration.return_type);
+        }
+        if (declaration.is_abstract) output += " abstract";
+        if (declaration.is_virtual) output += " virtual";
+        if (declaration.is_override) output += " override";
+        if (declaration.is_public) output += " public";
+        append_origin(declaration.origin, output);
+        output += '\n';
+        for (const auto& field : declaration.fields) {
+            output += "  field " + field.name + ": "
+                + complete_type_name(field.type);
+            if (field.is_public) output += " public";
+            if (field.is_weak) output += " weak";
+            append_origin(field.origin, output);
+            output += '\n';
+            if (field.default_value) {
+                append_operation(*field.default_value, 2, output);
+            }
+        }
+        for (const auto& variant : declaration.variants) {
+            output += "  variant " + variant.name;
+            if (variant.payload_type) {
+                output += ": " + complete_type_name(*variant.payload_type);
+            }
+            append_origin(variant.origin, output);
+            output += '\n';
+        }
+        for (const auto& related : declaration.related_types) {
+            output += "  relates " + complete_type_name(related) + '\n';
+        }
+        if (declaration.body) {
+            append_operation(*declaration.body, 1, output);
+        }
+    }
+    return output;
+}
+
+} // namespace toro

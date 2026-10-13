@@ -1,5 +1,6 @@
 #include "toro/CGenerator.hpp"
 #include "toro/Formatter.hpp"
+#include "toro/IRLowerer.hpp"
 #include "toro/Lexer.hpp"
 #include "toro/ModuleLoader.hpp"
 #include "toro/NativeCompiler.hpp"
@@ -31,6 +32,7 @@ void print_usage(std::ostream& output)
               "       toro tokens <source.toro>\n"
               "       toro ast-expression <source.toro>\n"
               "       toro ast <source.toro>\n"
+              "       toro ir [source.toro]\n"
               "       toro check [source.toro]\n"
               "       toro emit-c [source.toro] [-o <output.c>]\n"
               "       toro build [source.toro] [-o <output>]\n"
@@ -43,7 +45,7 @@ void print_usage(std::ostream& output)
 
 bool is_project_command(std::string_view command)
 {
-    return command == "check" || command == "emit-c"
+    return command == "check" || command == "ir" || command == "emit-c"
         || command == "build" || command == "run";
 }
 
@@ -82,7 +84,7 @@ bool is_source_command(std::string_view command)
 {
     return command == "tokens" || command == "ast-expression"
         || command == "ast" || command == "check" || command == "emit-c"
-        || command == "build" || command == "run";
+        || command == "ir" || command == "build" || command == "run";
 }
 
 void print_tokens(std::string_view source)
@@ -121,10 +123,19 @@ void check_source(const CompilationInput& input)
 
 std::string generate_c(const CompilationInput& input)
 {
-    const auto program = load_program(input);
+    auto program = load_program(input);
     toro::SemanticAnalyzer().analyze(program);
     toro::TypeChecker().check(program);
-    return toro::CGenerator().generate(program);
+    const auto ir = toro::IRLowerer().lower(program);
+    return toro::CGenerator().generate(ir);
+}
+
+void print_ir(const CompilationInput& input)
+{
+    auto program = load_program(input);
+    toro::SemanticAnalyzer().analyze(program);
+    toro::TypeChecker().check(program);
+    std::cout << toro::dump_ir(toro::IRLowerer().lower(program));
 }
 
 void emit_c(
@@ -346,6 +357,8 @@ int main(int argc, char* argv[])
             const std::string_view command(argv[1]);
             if (command == "check") {
                 check_source(input);
+            } else if (command == "ir") {
+                print_ir(input);
             } else if (command == "emit-c") {
                 emit_c(input);
             } else if (command == "build") {
@@ -361,6 +374,8 @@ int main(int argc, char* argv[])
                 print_expression_ast(toro::load_source_file(argv[2]).contents);
             } else if (std::string_view(argv[1]) == "check") {
                 check_source(direct_input(argv[2]));
+            } else if (std::string_view(argv[1]) == "ir") {
+                print_ir(direct_input(argv[2]));
             } else if (std::string_view(argv[1]) == "emit-c") {
                 emit_c(direct_input(argv[2]));
             } else if (std::string_view(argv[1]) == "build") {

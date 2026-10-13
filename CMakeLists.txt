@@ -16,6 +16,8 @@ include(CTest)
 add_library(toro_core
     src/CGenerator.cpp
     src/Formatter.cpp
+    src/IR.cpp
+    src/IRLowerer.cpp
     src/Lexer.cpp
     src/ModuleLoader.cpp
     src/NativeCompiler.cpp
@@ -68,6 +70,14 @@ if(BUILD_TESTING)
     toro_enable_warnings(toro_type_checker_tests)
     add_test(NAME type_checker COMMAND toro_type_checker_tests)
 
+    add_executable(toro_ir_tests tests/IRTests.cpp)
+    target_link_libraries(toro_ir_tests PRIVATE toro_core)
+    target_compile_definitions(toro_ir_tests PRIVATE
+        TORO_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+    )
+    toro_enable_warnings(toro_ir_tests)
+    add_test(NAME ir COMMAND toro_ir_tests)
+
     add_executable(toro_c_generator_tests tests/CGeneratorTests.cpp)
     target_link_libraries(toro_c_generator_tests PRIVATE toro_core)
     toro_enable_warnings(toro_c_generator_tests)
@@ -116,6 +126,9 @@ if(BUILD_TESTING)
 
     add_test(NAME project_cli_check COMMAND toro check)
     set_tests_properties(project_cli_check PROPERTIES
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/project)
+    add_test(NAME project_cli_ir COMMAND toro ir)
+    set_tests_properties(project_cli_ir PROPERTIES
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/project)
     add_test(NAME project_cli_emit_c COMMAND toro emit-c)
     set_tests_properties(project_cli_emit_c PROPERTIES

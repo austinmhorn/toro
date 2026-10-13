@@ -60,6 +60,12 @@ ordinary typed Toro APIs.
 An explicit, narrow C FFI additionally supports bodyless `extern "C" function`
 declarations using dedicated ABI scalar and borrowed-string types. This public
 FFI remains separate from compiler-private standard-library intrinsics.
+The checked frontend now lowers every program into a deterministic typed Toro IR
+before C generation. The IR retains stable declaration choices, concrete generic
+substitutions, dispatch kinds, runtime-value categories, and source origins.
+Phase 8.1 preserves the existing C/runtime behavior through a documented
+read-only typed-AST compatibility payload while backend emission migrates
+incrementally; it does not yet perform ownership or effect optimization.
 
 ## Build
 
@@ -157,6 +163,15 @@ Run the full semantic-analysis and type-checking pipeline on a source file:
 ./build/toro check examples/hello.toro
 ./build/toro check examples/modules/main.toro
 ```
+
+Inspect the deterministic typed IR after semantic analysis and type checking:
+
+```bash
+./build/toro ir examples/backend_hardening.toro
+```
+
+Like `check`, `emit-c`, `build`, and `run`, `ir` also supports project mode when
+the current directory contains `toro.toml`.
 
 Project commands may omit the source file when the current directory contains
 `toro.toml`:

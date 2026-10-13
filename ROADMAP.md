@@ -41,7 +41,8 @@ Completed foundations include:
 - `init` / `destroy`;
 - single-inheritance runtime;
 - virtual dispatch runtime;
-- runtime interface values and dispatch for classes and structs.
+- runtime interface values and dispatch for classes and structs;
+- a deterministic typed Toro IR boundary before C generation.
 
 The current implementation prioritizes correct semantics over advanced optimization.
 
@@ -328,11 +329,11 @@ header generation, per-module native objects, and first-class
 
 ---
 
-# Phase 8 — Introduce toro IR
+# Phase 8 — Toro IR and compiler analyses
 
 This is the architectural pivot required for the long-term memory/performance thesis.
 
-## 8.1 Typed IR foundation
+## 8.1 Typed IR foundation — completed
 
 Add an intermediate representation between type checking and backend lowering.
 
@@ -348,6 +349,26 @@ Represent:
 - ownership-relevant operations/effects.
 
 Initially lower IR to the existing C backend without changing observable semantics.
+
+Completed behavior:
+
+- a dedicated `IRLowerer` between type checking and C generation;
+- deterministic typed declarations and operation trees with module/source
+  origins, stable declaration identities, and generic substitutions;
+- representation of procedural control flow, foreign/ordinary calls,
+  construction, aggregates, classes, enums, Result, collections, conversions,
+  `handle`, propagation, and virtual/interface dispatch;
+- explicit runtime-value categories and a legacy-ARC lifetime-model marker;
+- `toro ir` for deterministic developer inspection;
+- C generation routed through `IRProgram` with unchanged generated C/native
+  behavior and regression coverage.
+
+The Phase 8.1 migration boundary is deliberately hybrid. The IR owns the new
+typed compiler/backend contract and represents the complete checked program,
+while the C generator temporarily reads a non-owning typed-AST compatibility
+payload for its mature statement/runtime emitters. Explicit ownership/effect
+instructions and removal of that compatibility path belong to 8.2/8.3; no
+optimization is performed in 8.1.
 
 ## 8.2 Effect metadata
 

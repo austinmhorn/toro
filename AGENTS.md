@@ -137,9 +137,9 @@ Performance/memory decisions should eventually be observable and explainable thr
 
 Current pipeline:
 
-`source -> lexer -> parser/AST -> semantic analysis -> type checking -> C generator -> native compiler`
+`source -> lexer -> parser/AST -> semantic analysis -> type checking -> typed toro IR -> C generator -> native compiler`
 
-Future pipeline should evolve toward:
+Future analyses should evolve that pipeline toward:
 
 `source -> frontend -> toro IR -> ownership/escape/borrow analysis -> ARC insertion/elision -> performance validation -> backend`
 

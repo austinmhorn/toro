@@ -2,7 +2,7 @@
 
 ## Current compiler pipeline
 
-Toro currently uses a direct frontend-to-C architecture:
+Toro now has a typed IR boundary between the checked frontend and the C backend:
 
 ```text
 entry .toro source
@@ -24,6 +24,10 @@ AST
 SemanticAnalyzer
     ↓
 TypeChecker
+    ↓
+IRLowerer
+    ↓
+typed toro IR
     ↓
 CGenerator
     ↓
@@ -100,7 +104,7 @@ checking, declaration identity, and backend emission. Runtime intrinsics are
 visible only while checking compiler-provided standard modules; application
 source cannot invoke them directly. This boundary avoids teaching the parser or
 general overload resolver about host services and provides one replacement
-point for a future Toro IR/runtime ABI.
+point for the typed Toro IR and a future runtime ABI.
 
 ### Public C FFI boundary
 
@@ -122,7 +126,7 @@ borrowed immutable view.
 `NativeCompiler` translates them directly to `-l<name>` process arguments; it
 does not construct a shell command or accept arbitrary flags. Compiler-private
 standard-library intrinsics remain a separate registry and are not rewritten in
-terms of the public FFI. This separation gives a future Toro IR a clear foreign
+terms of the public FFI. This separation gives the typed Toro IR a clear foreign
 call/effect boundary.
 
 ### Mixed native CMake integration
@@ -187,10 +191,38 @@ types use stable identities derived from logical module names rather than source
 spelling alone. A same-module declaration shadows imports; otherwise colliding
 public declarations from multiple direct imports produce an ambiguity error.
 
-The backend receives one deterministic dependency-first program with import
-declarations removed, so each shared module is emitted exactly once. It carries
-the same logical identities into type specializations and C symbols; absolute
-filesystem paths never participate in native naming.
+`IRLowerer` receives one deterministic dependency-first checked program with
+import declarations removed, so each shared module is represented exactly once.
+It carries the same logical identities into typed declarations, selected calls,
+generic substitutions, dispatch operations, and source origins; absolute
+filesystem paths never participate in IR or native naming.
+
+### Typed toro IR boundary
+
+The Phase 8.1 IR is a deterministic, typed representation of modules,
+declarations, values, calls, foreign calls, branches, loops, returns,
+construction, member/index operations, conversions, collections, enums,
+`Result`, exhaustive `handle`, propagation, and virtual/interface dispatch.
+Calls retain the exact frontend-selected declaration identity and sorted generic
+substitutions, so the backend does not repeat overload or generic resolution.
+Nominal declarations retain fields, defaults, enum variants, visibility, weak
+field state, constraints, and stable logical identities. Every operation keeps
+a module plus one-based source location for diagnostics and inspection.
+
+All checked programs now pass through `IRLowerer` before C generation. The
+current transition is intentionally hybrid: `IRProgram` also retains a
+read-only reference to its originating typed AST, and `CGenerator` uses that
+compatibility payload for the mature statement/runtime emission paths. The IR
+already describes those paths for inspection and future migration, but Phase
+8.1 does not duplicate or replace the established ARC insertion, specialization
+discovery, runtime-helper registration, or C expression emitter. The IR records
+managed-reference, interface, collection, Result, value, and primitive
+categories and identifies the current lifetime model as legacy ARC; explicit
+ownership/effect instructions remain Phase 8.2/8.3 work.
+
+`toro ir` runs loading, semantic analysis, and type checking, then prints the
+stable textual IR. This dump is a developer inspection format, not a serialized
+ABI or a user-facing language contract.
 
 ### Type checker
 
@@ -422,8 +454,8 @@ helper emission. Generic specialization registries diagnose identity collisions
 rather than silently selecting an unrelated declaration. Shared backend helpers
 prepare call arguments, preserve Array value-copy semantics, retain managed
 parameters, and release owned call temporaries in reverse order. These helpers
-keep the current direct frontend-to-C implementation localized without
-introducing an intermediate representation prematurely.
+remain localized behind the C backend while the typed IR compatibility boundary
+is migrated incrementally; they are not duplicated in `IRLowerer`.
 
 Representative generated output is syntax-checked as strict C11, and a larger
 native integration test exercises inheritance, virtual and interface dispatch,
@@ -464,10 +496,11 @@ Do not prematurely optimize ARC or allocation behavior inside the C generator me
 
 Correct runtime behavior is the priority.
 
-## Future toro IR
+## Typed toro IR and future analyses
 
-Before sophisticated ownership/performance optimization, Toro should introduce
-an intermediate representation between static semantics and backend lowering.
+Toro now has the initial typed intermediate representation between static
+semantics and backend lowering. Sophisticated ownership/performance work remains
+future analysis layered on that foundation.
 
 Target pipeline:
 
