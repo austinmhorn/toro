@@ -242,6 +242,15 @@ functions, header parsing, macros, mutable/owned C strings, dynamic loading,
 C++, and arbitrary linker flags remain unsupported. In particular, no pointer
 type aliases Toro managed class references.
 
+Mixed C/C++ CMake builds may compile a manifest-backed Toro project through the
+repository's `ToroIntegration.cmake` helper. The helper produces a static C11
+library target containing the generated Toro entry object and propagates
+`[ffi].libraries` as transitive native link dependencies. Native translation
+units may provide functions declared by Toro with `extern "C"`; ordinary Toro
+functions are still not exported for direct C/C++ calls. The final executable
+therefore uses Toro's generated `main` and must not define a second native
+entry point.
+
 ### Logical Operators
 
 Toro uses the keywords `and` and `or` rather than symbolic logical operators.

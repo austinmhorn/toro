@@ -1,0 +1,13 @@
+extern "C" function native_increment(value: c_int) -> c_int
+
+extern "C" function pow(base: c_double, exponent: c_double) -> c_double
+
+function main() -> int {
+    native_value := native_increment(41 as c_int) as int
+    powered := pow(2.0 as c_double, 3.0 as c_double) as dec
+    if native_value == 42 and powered == 8.0 {
+        print("mixed native build passed")
+        return 0
+    }
+    return 1
+}

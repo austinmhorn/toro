@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <optional>
 #include <stdexcept>
@@ -31,11 +32,12 @@ void print_usage(std::ostream& output)
               "       toro ast-expression <source.toro>\n"
               "       toro ast <source.toro>\n"
               "       toro check [source.toro]\n"
-              "       toro emit-c [source.toro]\n"
+              "       toro emit-c [source.toro] [-o <output.c>]\n"
               "       toro build [source.toro] [-o <output>]\n"
               "       toro run [source.toro]\n"
               "       toro fmt [--check] [source.toro]\n"
               "       toro test\n"
+              "       toro project-info --cmake\n"
               "       toro --version\n";
 }
 
@@ -125,9 +127,50 @@ std::string generate_c(const CompilationInput& input)
     return toro::CGenerator().generate(program);
 }
 
-void emit_c(const CompilationInput& input)
+void emit_c(
+    const CompilationInput& input,
+    const std::optional<std::filesystem::path>& output_path = std::nullopt)
 {
-    std::cout << generate_c(input);
+    const std::string generated = generate_c(input);
+    if (!output_path) {
+        std::cout << generated;
+        return;
+    }
+    std::ofstream output(*output_path, std::ios::binary);
+    if (!output) {
+        throw std::runtime_error(
+            "could not write generated C file '" + output_path->string() + "'");
+    }
+    output.write(generated.data(), static_cast<std::streamsize>(generated.size()));
+    if (!output) {
+        throw std::runtime_error(
+            "failed while writing generated C file '" + output_path->string() + "'");
+    }
+}
+
+std::string cmake_bracket_argument(std::string_view value)
+{
+    std::string equals;
+    while (value.find("]" + equals + "]") != std::string_view::npos) {
+        equals += '=';
+    }
+    return "[" + equals + "[" + std::string(value) + "]" + equals + "]";
+}
+
+void print_cmake_project_info()
+{
+    const auto project = toro::ProjectConfigLoader().discover();
+    std::cout << "set(TORO_PROJECT_INFO_NAME "
+              << cmake_bracket_argument(project.name) << ")\n"
+              << "set(TORO_PROJECT_INFO_SOURCE_ROOT "
+              << cmake_bracket_argument(project.source_root.string()) << ")\n"
+              << "set(TORO_PROJECT_INFO_ENTRY "
+              << cmake_bracket_argument(project.entry_path.string()) << ")\n"
+              << "set(TORO_PROJECT_INFO_C_LIBRARIES";
+    for (const auto& library : project.c_libraries) {
+        std::cout << ' ' << cmake_bracket_argument(library);
+    }
+    std::cout << ")\n";
 }
 
 void build_native(
@@ -249,6 +292,16 @@ int main(int argc, char* argv[])
             return 1;
         }
     }
+    if (argc == 3 && std::string_view(argv[1]) == "project-info"
+        && std::string_view(argv[2]) == "--cmake") {
+        try {
+            print_cmake_project_info();
+            return 0;
+        } catch (const std::exception& error) {
+            std::cerr << "error: " << error.what() << '\n';
+            return 1;
+        }
+    }
 
     if (argc == 2 && is_source_command(argv[1])
         && !is_project_command(argv[1])) {
@@ -262,18 +315,29 @@ int main(int argc, char* argv[])
     const bool project_build_with_output = argc == 4
         && std::string_view(argv[1]) == "build"
         && std::string_view(argv[2]) == "-o";
+    const bool project_emit_c_with_output = argc == 4
+        && std::string_view(argv[1]) == "emit-c"
+        && std::string_view(argv[2]) == "-o";
     const bool file_build_with_output = argc == 5
         && std::string_view(argv[1]) == "build"
         && std::string_view(argv[3]) == "-o";
+    const bool file_emit_c_with_output = argc == 5
+        && std::string_view(argv[1]) == "emit-c"
+        && std::string_view(argv[3]) == "-o";
     if (argc != 2 && !standard_source_command && !project_build_with_output
-        && !file_build_with_output) {
+        && !project_emit_c_with_output && !file_build_with_output
+        && !file_emit_c_with_output) {
         std::cerr << "error: invalid arguments\n";
         print_usage(std::cerr);
         return 1;
     }
 
     try {
-        if (file_build_with_output) {
+        if (file_emit_c_with_output) {
+            emit_c(direct_input(argv[2]), argv[4]);
+        } else if (project_emit_c_with_output) {
+            emit_c(project_input(), argv[3]);
+        } else if (file_build_with_output) {
             build_native(direct_input(argv[2]), argv[4]);
         } else if (project_build_with_output) {
             build_native(project_input(), argv[3]);

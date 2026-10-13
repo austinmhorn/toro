@@ -152,4 +152,11 @@ if(BUILD_TESTING)
         COMMAND toro build -o ${PROJECT_BINARY_DIR}/toro-ffi-example-test)
     set_tests_properties(ffi_cli_build PROPERTIES
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/ffi)
+
+    add_test(NAME cmake_integration
+        COMMAND ${CMAKE_COMMAND}
+            -DTORO_SOURCE_DIR=${PROJECT_SOURCE_DIR}
+            -DTORO_BINARY_DIR=${PROJECT_BINARY_DIR}
+            -DTORO_EXECUTABLE=$<TARGET_FILE:toro>
+            -P ${PROJECT_SOURCE_DIR}/tests/CMakeIntegrationTest.cmake)
 endif()

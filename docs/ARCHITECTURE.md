@@ -125,6 +125,29 @@ standard-library intrinsics remain a separate registry and are not rewritten in
 terms of the public FFI. This separation gives a future Toro IR a clear foreign
 call/effect boundary.
 
+### Mixed native CMake integration
+
+`cmake/ToroIntegration.cmake` provides the initial mixed-native orchestration
+layer. `toro_add_target(NAME ... PROJECT ...)` asks the compiler for validated
+project metadata through `toro project-info --cmake`, tracks the manifest and
+all `.toro` files beneath its source root, and invokes `toro emit-c -o` through
+a custom command. CMake then compiles that generated source as strict C11 into a
+normal static-library target. Manifest `[ffi].libraries` become transitive link
+dependencies of that target.
+
+The generated source and its static archive are implementation artifacts behind
+the CMake target; consuming code links the target rather than naming generated
+files. Toro's generated object currently owns `main`. Native C/C++ translation
+units can supply C ABI functions that Toro declared with `extern "C"`, while
+ordinary Toro functions remain private generated symbols and cannot be called
+from native code. This makes the supported direction honest without introducing
+exports, callbacks, C++ ABI coupling, or header generation.
+
+CMake performs orchestration only. Manifest validation, module loading,
+semantic analysis, type checking, C generation, and FFI rules remain inside the
+normal compiler pipeline. First-class CMake language support and finer-grained
+per-module artifacts remain deferred.
+
 The lexer tracks one-based line/column locations and recognizes canonical Toro
 syntax, including `::` for type-scoped enum variants.
 

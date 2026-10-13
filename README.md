@@ -324,6 +324,42 @@ cd examples/ffi
 ../../build/toro run
 ```
 
+### CMake integration
+
+`cmake/ToroIntegration.cmake` lets an existing C/C++ CMake build compile a
+normal manifest-backed Toro project into a static library target:
+
+```cmake
+list(APPEND CMAKE_MODULE_PATH "/path/to/toro/cmake")
+include(ToroIntegration)
+
+toro_add_target(
+    NAME game_logic
+    PROJECT "${CMAKE_CURRENT_SOURCE_DIR}/toro"
+)
+
+add_executable(game cpp/native.cpp)
+target_link_libraries(game PRIVATE game_logic)
+```
+
+The consuming project must enable C. The helper uses `TORO_EXECUTABLE` when it
+is set and otherwise locates `toro` with `find_program`. It asks the compiler to
+inspect `toro.toml`, generates C with `toro emit-c -o`, builds a deterministic
+`game_logic` static-library artifact, and propagates manifest `[ffi].libraries`
+to consumers. Toro sources and `toro.toml` are build dependencies; CMake also
+discovers added `.toro` files beneath the configured source root.
+
+The current link direction uses Toro's generated `main`: native C/C++ objects
+linked into the executable may provide explicitly declared `extern "C"`
+functions that Toro calls. Native code cannot directly call ordinary Toro
+functions because exported Toro entry points, callbacks, and header generation
+are not yet supported. The native executable must not define another `main`.
+See `examples/cmake_integration` for a complete C++/Toro build.
+
+For build-system integrations, `toro project-info --cmake` emits validated
+project metadata as CMake assignments. This is a machine-facing interface; it
+keeps manifest parsing in Toro rather than duplicating it in CMake.
+
 Imports use dotted module identities:
 
 ```toro

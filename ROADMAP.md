@@ -306,13 +306,25 @@ Raw pointers, C aggregates, mutable/owned C strings, nullable C pointers,
 callbacks, function pointers, variadics, automatic header parsing/bindgen,
 dynamic loading, and non-C ABIs remain deferred.
 
-## 7.7 Mixed native build integration
+## 7.7 Mixed native build integration — completed
 
-After `toro build` is stable, provide easy CMake integration for embedding Toro in existing native projects.
+Completed behavior:
 
-Initial integration can use CMake custom commands/targets.
+- reusable `toro_add_target(NAME ... PROJECT ...)` support through
+  `cmake/ToroIntegration.cmake`;
+- conventional `find_program` discovery with an injectable `TORO_EXECUTABLE`;
+- compiler-owned `toro project-info --cmake` manifest metadata, avoiding a
+  second manifest parser in CMake;
+- deterministic generated C and a stable static-library CMake target;
+- transitive propagation of structured `[ffi].libraries` dependencies;
+- source, manifest, compiler, clean-build, path-with-spaces, and unchanged-build
+  dependency coverage;
+- a mixed C++/Toro example in which Toro owns `main` and calls an explicitly
+  declared C ABI function supplied by C++.
 
-First-class `project(... LANGUAGES toro)` support is a much-later possibility, not a near-term requirement.
+Direct C/C++ calls into ordinary Toro functions, exported bindings, callbacks,
+header generation, per-module native objects, and first-class
+`project(... LANGUAGES toro)` support remain deferred.
 
 ---
 

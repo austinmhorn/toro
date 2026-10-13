@@ -1,0 +1,9 @@
+[project]
+name = "cmake-game-logic"
+
+[source]
+root = "src"
+entry = "main.toro"
+
+[ffi]
+libraries = ["m"]
