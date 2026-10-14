@@ -3,6 +3,7 @@
 #include "toro/AST.hpp"
 #include "toro/Type.hpp"
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <utility>
@@ -138,18 +139,54 @@ enum class IRLifetimeModel {
     LegacyArc,
 };
 
+enum class IREffect : std::uint8_t {
+    Allocate,
+    Retain,
+    ReleaseDestroy,
+    Escape,
+    Block,
+    FilesystemIO,
+    EnvironmentAccess,
+    TimeQuery,
+    ProcessIO,
+    Synchronize,
+    ForeignCall,
+    NativeCall,
+    DynamicDispatch,
+    Terminate,
+    UnknownExternal,
+    Count,
+};
+
+struct IREffectCause {
+    IREffect effect{IREffect::Allocate};
+    IROrigin origin;
+    std::string via_callable;
+    bool transitive{false};
+};
+
+struct IRCallableEffectSummary {
+    std::string callable_identity;
+    std::vector<IREffect> effects;
+    std::vector<IREffectCause> causes;
+};
+
 struct IRProgram {
     std::vector<IRModule> modules;
     std::vector<IRDeclaration> declarations;
     std::vector<IROperation> top_level_operations;
     std::string entry_module;
     IRLifetimeModel lifetime_model{IRLifetimeModel::LegacyArc};
+    std::vector<IRCallableEffectSummary> effect_summaries;
 
     // Transitional read-only payload used by the C backend while complex
     // statement emission migrates incrementally to native IR operations.
     const Program* backend_compatibility_program{nullptr};
 };
 
-[[nodiscard]] std::string dump_ir(const IRProgram& program);
+[[nodiscard]] std::string_view ir_effect_name(IREffect effect);
+[[nodiscard]] std::string dump_ir(
+    const IRProgram& program,
+    bool include_effects = false);
 
 } // namespace toro

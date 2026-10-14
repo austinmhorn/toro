@@ -1,4 +1,5 @@
 #include "toro/CGenerator.hpp"
+#include "toro/EffectAnalyzer.hpp"
 #include "toro/Formatter.hpp"
 #include "toro/IRLowerer.hpp"
 #include "toro/Lexer.hpp"
@@ -32,7 +33,7 @@ void print_usage(std::ostream& output)
               "       toro tokens <source.toro>\n"
               "       toro ast-expression <source.toro>\n"
               "       toro ast <source.toro>\n"
-              "       toro ir [source.toro]\n"
+              "       toro ir [--effects] [source.toro]\n"
               "       toro check [source.toro]\n"
               "       toro emit-c [source.toro] [-o <output.c>]\n"
               "       toro build [source.toro] [-o <output>]\n"
@@ -126,16 +127,19 @@ std::string generate_c(const CompilationInput& input)
     auto program = load_program(input);
     toro::SemanticAnalyzer().analyze(program);
     toro::TypeChecker().check(program);
-    const auto ir = toro::IRLowerer().lower(program);
+    auto ir = toro::IRLowerer().lower(program);
+    toro::EffectAnalyzer().analyze(ir);
     return toro::CGenerator().generate(ir);
 }
 
-void print_ir(const CompilationInput& input)
+void print_ir(const CompilationInput& input, bool include_effects = false)
 {
     auto program = load_program(input);
     toro::SemanticAnalyzer().analyze(program);
     toro::TypeChecker().check(program);
-    std::cout << toro::dump_ir(toro::IRLowerer().lower(program));
+    auto ir = toro::IRLowerer().lower(program);
+    if (include_effects) toro::EffectAnalyzer().analyze(ir);
+    std::cout << toro::dump_ir(ir, include_effects);
 }
 
 void emit_c(
@@ -323,6 +327,12 @@ int main(int argc, char* argv[])
 
     const bool standard_source_command = argc == 3 && is_source_command(argv[1]);
     const bool project_command = argc == 2 && is_project_command(argv[1]);
+    const bool project_ir_effects = argc == 3
+        && std::string_view(argv[1]) == "ir"
+        && std::string_view(argv[2]) == "--effects";
+    const bool file_ir_effects = argc == 4
+        && std::string_view(argv[1]) == "ir"
+        && std::string_view(argv[2]) == "--effects";
     const bool project_build_with_output = argc == 4
         && std::string_view(argv[1]) == "build"
         && std::string_view(argv[2]) == "-o";
@@ -335,7 +345,8 @@ int main(int argc, char* argv[])
     const bool file_emit_c_with_output = argc == 5
         && std::string_view(argv[1]) == "emit-c"
         && std::string_view(argv[3]) == "-o";
-    if (argc != 2 && !standard_source_command && !project_build_with_output
+    if (argc != 2 && !standard_source_command && !project_ir_effects
+        && !file_ir_effects && !project_build_with_output
         && !project_emit_c_with_output && !file_build_with_output
         && !file_emit_c_with_output) {
         std::cerr << "error: invalid arguments\n";
@@ -344,7 +355,11 @@ int main(int argc, char* argv[])
     }
 
     try {
-        if (file_emit_c_with_output) {
+        if (file_ir_effects) {
+            print_ir(direct_input(argv[3]), true);
+        } else if (project_ir_effects) {
+            print_ir(project_input(), true);
+        } else if (file_emit_c_with_output) {
             emit_c(direct_input(argv[2]), argv[4]);
         } else if (project_emit_c_with_output) {
             emit_c(project_input(), argv[3]);

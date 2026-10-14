@@ -66,6 +66,10 @@ substitutions, dispatch kinds, runtime-value categories, and source origins.
 Phase 8.1 preserves the existing C/runtime behavior through a documented
 read-only typed-AST compatibility payload while backend emission migrates
 incrementally; it does not yet perform ownership or effect optimization.
+The backend-independent effect pass summarizes allocation, lifetime relevance,
+I/O, native/foreign calls, dynamic dispatch, termination, and uncertainty across
+the transitive call graph. These summaries are inspection metadata only; they do
+not optimize code or enforce performance contracts.
 
 ## Build
 
@@ -168,6 +172,7 @@ Inspect the deterministic typed IR after semantic analysis and type checking:
 
 ```bash
 ./build/toro ir examples/backend_hardening.toro
+./build/toro ir --effects examples/backend_hardening.toro
 ```
 
 Like `check`, `emit-c`, `build`, and `run`, `ir` also supports project mode when

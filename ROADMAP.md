@@ -42,7 +42,8 @@ Completed foundations include:
 - single-inheritance runtime;
 - virtual dispatch runtime;
 - runtime interface values and dispatch for classes and structs;
-- a deterministic typed Toro IR boundary before C generation.
+- a deterministic typed Toro IR boundary before C generation;
+- deterministic local/transitive IR effect summaries.
 
 The current implementation prioritizes correct semantics over advanced optimization.
 
@@ -366,11 +367,11 @@ Completed behavior:
 The Phase 8.1 migration boundary is deliberately hybrid. The IR owns the new
 typed compiler/backend contract and represents the complete checked program,
 while the C generator temporarily reads a non-owning typed-AST compatibility
-payload for its mature statement/runtime emitters. Explicit ownership/effect
-instructions and removal of that compatibility path belong to 8.2/8.3; no
+payload for its mature statement/runtime emitters. Explicit lifetime operations
+and removal of that compatibility path belong to 8.3 and later work; no
 optimization is performed in 8.1.
 
-## 8.2 Effect metadata
+## 8.2 Effect metadata — completed
 
 Allow functions/calls to describe compiler-relevant behavior such as:
 
@@ -382,6 +383,27 @@ Allow functions/calls to describe compiler-relevant behavior such as:
 - destruction effects.
 
 This metadata becomes useful for both ownership optimization and future performance contracts.
+
+Completed behavior:
+
+- a dedicated backend-independent `EffectAnalyzer` over typed IR;
+- deterministic local and transitive callable summaries computed to a monotonic
+  call-graph fixed point, including terminating recursive and mutually recursive
+  graphs;
+- allocation, retain, release/destruction, escape, blocking, filesystem,
+  environment, time, process I/O, synchronization, foreign/native call, dynamic
+  dispatch, termination, and unknown-external effect categories;
+- conservative foreign-call summaries and known metadata for compiler-private
+  standard-library intrinsics;
+- virtual/interface calls summarized from all matching known implementations,
+  with explicit uncertainty when no implementation can be proven;
+- concrete generic callable summaries retaining deterministic specialization
+  identities;
+- compact local/transitive causes with source origins and direct callee identity;
+- deterministic `toro ir --effects` developer inspection.
+
+Effect metadata describes what code may do. It does not optimize ARC, infer
+borrows/moves/escapes, change allocation, or enforce `performance function`.
 
 ## 8.3 Backend decoupling
 

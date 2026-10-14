@@ -131,7 +131,30 @@ void append_operation(
 
 } // namespace
 
-std::string dump_ir(const IRProgram& program)
+std::string_view ir_effect_name(IREffect effect)
+{
+    switch (effect) {
+    case IREffect::Allocate: return "allocate";
+    case IREffect::Retain: return "retain";
+    case IREffect::ReleaseDestroy: return "release_destroy";
+    case IREffect::Escape: return "escape";
+    case IREffect::Block: return "block";
+    case IREffect::FilesystemIO: return "filesystem_io";
+    case IREffect::EnvironmentAccess: return "environment_access";
+    case IREffect::TimeQuery: return "time_query";
+    case IREffect::ProcessIO: return "process_io";
+    case IREffect::Synchronize: return "synchronize";
+    case IREffect::ForeignCall: return "foreign_call";
+    case IREffect::NativeCall: return "native_call";
+    case IREffect::DynamicDispatch: return "dynamic_dispatch";
+    case IREffect::Terminate: return "terminate";
+    case IREffect::UnknownExternal: return "unknown_external";
+    case IREffect::Count: break;
+    }
+    return "unknown";
+}
+
+std::string dump_ir(const IRProgram& program, bool include_effects)
 {
     std::string output = "toro-ir 1\n";
     output += "entry " + program.entry_module + "\n";
@@ -217,6 +240,28 @@ std::string dump_ir(const IRProgram& program)
         }
         if (declaration.body) {
             append_operation(*declaration.body, 1, output);
+        }
+    }
+    if (include_effects) {
+        output += "effects\n";
+        for (const auto& summary : program.effect_summaries) {
+            output += "  callable " + summary.callable_identity + '\n';
+            if (summary.effects.empty()) {
+                output += "    none\n";
+                continue;
+            }
+            for (const auto effect : summary.effects) {
+                output += "    " + std::string(ir_effect_name(effect));
+                for (const auto& cause : summary.causes) {
+                    if (cause.effect != effect) continue;
+                    if (cause.transitive) {
+                        output += " via " + cause.via_callable;
+                    }
+                    append_origin(cause.origin, output);
+                    break;
+                }
+                output += '\n';
+            }
         }
     }
     return output;

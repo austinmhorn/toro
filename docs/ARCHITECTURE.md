@@ -29,6 +29,10 @@ IRLowerer
     ↓
 typed toro IR
     ↓
+EffectAnalyzer
+    ↓
+annotated toro IR
+    ↓
 CGenerator
     ↓
 generated C11
@@ -218,11 +222,48 @@ already describes those paths for inspection and future migration, but Phase
 discovery, runtime-helper registration, or C expression emitter. The IR records
 managed-reference, interface, collection, Result, value, and primitive
 categories and identifies the current lifetime model as legacy ARC; explicit
-ownership/effect instructions remain Phase 8.2/8.3 work.
+ownership instructions remain later Phase 8 work.
 
 `toro ir` runs loading, semantic analysis, and type checking, then prints the
 stable textual IR. This dump is a developer inspection format, not a serialized
 ABI or a user-facing language contract.
+
+### Effect metadata and analysis
+
+`EffectAnalyzer` is a backend-independent pass over typed IR. It derives local
+effects from operation kinds, value categories, selected call identities, and a
+small compiler-known metadata table for private standard-library intrinsics. It
+then propagates callee effects through a deterministic monotonic fixed point.
+Recursive and mutually recursive call graphs terminate because summaries only
+gain members from the finite effect set.
+
+The current effect taxonomy covers allocation, retain/reference ownership,
+release or possible destruction, escape, blocking, filesystem I/O, environment
+access, wall-clock queries, process/console I/O, synchronization, foreign calls,
+native runtime calls, dynamic dispatch, process termination, and unknown
+external behavior. Categories are intentionally orthogonal: for example,
+filesystem reads are native, blocking filesystem operations that may allocate,
+while a wall-clock query is a native time query and is not filesystem I/O.
+
+Ordinary selected calls use the declaration identity and sorted generic
+substitutions already recorded by the frontend/IR lowerer. Generic calls receive
+separate deterministic concrete summary identities. Virtual and interface calls
+carry `dynamic_dispatch` and conservatively join all known body-bearing methods
+with the selected callable signature. If no valid body or direct callee summary
+can be proven, `unknown_external` records the uncertainty. Public C FFI calls
+are always `foreign_call + unknown_external` because Toro has no source-level
+FFI effect annotations.
+
+Each summary retains one deterministic cause per effect. A local cause points to
+the originating IR operation; a transitive cause points to the call origin and
+direct callee identity. This is deliberately smaller than a complete diagnostic
+graph but preserves the information needed for future explainability work.
+
+`toro ir --effects` appends these summaries to the ordinary deterministic IR
+dump. Effect analysis runs before normal C generation, but C generation does not
+compute or enforce effects. The pass does not alter ARC, allocation, ownership,
+or native behavior. In particular, it does not implement or validate the future
+`performance function` contract.
 
 ### Type checker
 
@@ -498,9 +539,9 @@ Correct runtime behavior is the priority.
 
 ## Typed toro IR and future analyses
 
-Toro now has the initial typed intermediate representation between static
-semantics and backend lowering. Sophisticated ownership/performance work remains
-future analysis layered on that foundation.
+Toro now has the initial typed intermediate representation and deterministic
+effect summaries between static semantics and backend lowering. Sophisticated
+ownership/performance work remains future analysis layered on that foundation.
 
 Target pipeline:
 
@@ -510,6 +551,8 @@ source
 frontend
     ↓
 typed toro IR
+    ↓
+effect analysis
     ↓
 ownership analysis
     ↓

@@ -1,5 +1,6 @@
 #include "toro/CGenerator.hpp"
 
+#include "toro/EffectAnalyzer.hpp"
 #include "toro/IRLowerer.hpp"
 #include "toro/ModuleIdentity.hpp"
 #include "toro/StandardLibrary.hpp"
@@ -5841,7 +5842,9 @@ std::string CGenerator::generate(const IRProgram& program)
 
 std::string CGenerator::generate(const Program& program)
 {
-    return generate(IRLowerer{}.lower(program));
+    auto ir = IRLowerer{}.lower(program);
+    EffectAnalyzer{}.analyze(ir);
+    return generate(ir);
 }
 
 } // namespace toro

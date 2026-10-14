@@ -15,6 +15,7 @@ include(CTest)
 
 add_library(toro_core
     src/CGenerator.cpp
+    src/EffectAnalyzer.cpp
     src/Formatter.cpp
     src/IR.cpp
     src/IRLowerer.cpp
@@ -78,6 +79,14 @@ if(BUILD_TESTING)
     toro_enable_warnings(toro_ir_tests)
     add_test(NAME ir COMMAND toro_ir_tests)
 
+    add_executable(toro_effect_analyzer_tests tests/EffectAnalyzerTests.cpp)
+    target_link_libraries(toro_effect_analyzer_tests PRIVATE toro_core)
+    target_compile_definitions(toro_effect_analyzer_tests PRIVATE
+        TORO_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+    )
+    toro_enable_warnings(toro_effect_analyzer_tests)
+    add_test(NAME effect_analyzer COMMAND toro_effect_analyzer_tests)
+
     add_executable(toro_c_generator_tests tests/CGeneratorTests.cpp)
     target_link_libraries(toro_c_generator_tests PRIVATE toro_core)
     toro_enable_warnings(toro_c_generator_tests)
@@ -129,6 +138,9 @@ if(BUILD_TESTING)
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/project)
     add_test(NAME project_cli_ir COMMAND toro ir)
     set_tests_properties(project_cli_ir PROPERTIES
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/project)
+    add_test(NAME project_cli_ir_effects COMMAND toro ir --effects)
+    set_tests_properties(project_cli_ir_effects PROPERTIES
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/project)
     add_test(NAME project_cli_emit_c COMMAND toro emit-c)
     set_tests_properties(project_cli_emit_c PROPERTIES
