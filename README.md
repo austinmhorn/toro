@@ -62,10 +62,10 @@ declarations using dedicated ABI scalar and borrowed-string types. This public
 FFI remains separate from compiler-private standard-library intrinsics.
 The checked frontend now lowers every program into a deterministic typed Toro IR
 before C generation. The IR retains stable declaration choices, concrete generic
-substitutions, dispatch kinds, runtime-value categories, and source origins.
-Phase 8.1 preserves the existing C/runtime behavior through a documented
-read-only typed-AST compatibility payload while backend emission migrates
-incrementally; it does not yet perform ownership or effect optimization.
+substitutions, dispatch kinds, runtime-value categories, and source origins. The
+C backend consumes that IR without retaining or reading the originating AST;
+current correctness-first ARC and runtime-helper behavior are preserved without
+ownership or effect optimization.
 The backend-independent effect pass summarizes allocation, lifetime relevance,
 I/O, native/foreign calls, dynamic dispatch, termination, and uncertainty across
 the transitive call graph. These summaries are inspection metadata only; they do

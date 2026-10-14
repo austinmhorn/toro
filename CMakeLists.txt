@@ -14,7 +14,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 include(CTest)
 
 add_library(toro_core
+    src/CBackendModel.cpp
     src/CGenerator.cpp
+    src/CGeneratorFrontend.cpp
     src/EffectAnalyzer.cpp
     src/Formatter.cpp
     src/IR.cpp

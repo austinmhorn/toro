@@ -364,12 +364,9 @@ Completed behavior:
 - C generation routed through `IRProgram` with unchanged generated C/native
   behavior and regression coverage.
 
-The Phase 8.1 migration boundary is deliberately hybrid. The IR owns the new
-typed compiler/backend contract and represents the complete checked program,
-while the C generator temporarily reads a non-owning typed-AST compatibility
-payload for its mature statement/runtime emitters. Explicit lifetime operations
-and removal of that compatibility path belong to 8.3 and later work; no
-optimization is performed in 8.1.
+Phase 8.1 originally used a temporary non-owning typed-AST compatibility
+payload while the mature C emitter migrated. Phase 8.3 removed that payload;
+the historical note remains relevant only to the staged implementation order.
 
 ## 8.2 Effect metadata — completed
 
@@ -405,13 +402,35 @@ Completed behavior:
 Effect metadata describes what code may do. It does not optimize ARC, infer
 borrows/moves/escapes, change allocation, or enforce `performance function`.
 
-## 8.3 Backend decoupling
+## 8.3 Backend decoupling — completed
 
 Move semantics currently encoded directly in `CGenerator` behind IR/backend lowering.
 
 The C backend remains useful as a portable reference backend.
 
 LLVM or another backend should not be considered necessary until the IR is useful independently.
+
+Completed behavior:
+
+- `IRProgram` is the C backend's complete semantic input and no longer retains
+  or references a typed AST;
+- an IR-derived, backend-private emission model normalizes operations for the
+  established C11 emitter without repeating frontend name, overload, generic,
+  or type resolution;
+- concrete specializations are discovered from IR declaration identities and
+  substitutions, preserving module and nullable-type identity;
+- runtime helpers are registered from IR-derived runtime operations and types;
+- current correctness-first ARC is reproduced from typed construction,
+  declaration, assignment, call, return, field, collection, and lifecycle
+  operations under the `legacy-arc` lifetime model;
+- the frontend convenience entry point is isolated from the IR-only backend and
+  lowers through `IRLowerer` before C generation;
+- detached `IRProgram` regression coverage proves that C generation does not
+  require the originating AST to remain alive.
+
+Phase 8.3 intentionally does not add ownership inference or optimize the
+existing ARC schedule. Explicit ownership-transfer and borrow semantics remain
+Phase 9 analysis work.
 
 ---
 

@@ -213,16 +213,26 @@ Nominal declarations retain fields, defaults, enum variants, visibility, weak
 field state, constraints, and stable logical identities. Every operation keeps
 a module plus one-based source location for diagnostics and inspection.
 
-All checked programs now pass through `IRLowerer` before C generation. The
-current transition is intentionally hybrid: `IRProgram` also retains a
-read-only reference to its originating typed AST, and `CGenerator` uses that
-compatibility payload for the mature statement/runtime emission paths. The IR
-already describes those paths for inspection and future migration, but Phase
-8.1 does not duplicate or replace the established ARC insertion, specialization
-discovery, runtime-helper registration, or C expression emitter. The IR records
-managed-reference, interface, collection, Result, value, and primitive
-categories and identifies the current lifetime model as legacy ARC; explicit
-ownership instructions remain later Phase 8 work.
+All checked programs pass through `IRLowerer` before C generation. `IRProgram`
+owns the backend contract and contains no AST pointer or compatibility payload.
+`CGenerator` consumes declarations, typed operations, selected declaration
+identities, substitutions, runtime-value categories, and source origins from IR
+only. A backend-private emission model normalizes those semantic operations for
+the established C11 emitter; it does not consult frontend nodes or repeat name,
+overload, generic, visibility, or type resolution.
+
+The C backend discovers concrete specializations from IR call identities and
+substitutions. Runtime-helper discovery likewise walks IR-derived constructions,
+calls, aggregates, dispatch operations, collections, and compiler intrinsics.
+Both retain dependency-first program order and deterministic insertion order.
+
+The IR identifies the current lifetime model as `legacy-arc`. Typed operations
+for construction, declaration, assignment, member/index assignment, calls,
+returns, collections, and lifecycle bodies contain enough ownership-relevant
+information for the backend to reproduce the existing correctness-first retain,
+release, weak-reference, and destruction schedule. Phase 8.3 did not add a
+second optimized ownership schedule or standalone inferred borrow/move rules;
+making those decisions explicit is later ownership-analysis work.
 
 `toro ir` runs loading, semantic analysis, and type checking, then prints the
 stable textual IR. This dump is a developer inspection format, not a serialized
@@ -539,8 +549,8 @@ Correct runtime behavior is the priority.
 
 ## Typed toro IR and future analyses
 
-Toro now has the initial typed intermediate representation and deterministic
-effect summaries between static semantics and backend lowering. Sophisticated
+Toro now has a typed intermediate representation and deterministic effect
+summaries between static semantics and an IR-only C backend. Sophisticated
 ownership/performance work remains future analysis layered on that foundation.
 
 Target pipeline:

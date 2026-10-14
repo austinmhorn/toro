@@ -1,6 +1,6 @@
 #pragma once
 
-#include "toro/AST.hpp"
+#include "toro/SourceLocation.hpp"
 #include "toro/Type.hpp"
 
 #include <cstdint>
@@ -124,6 +124,7 @@ struct IRDeclaration {
     std::optional<IRType> return_type;
     std::vector<IRType> related_types;
     std::optional<IROperation> body;
+    std::string calling_convention;
     bool is_virtual{false};
     bool is_override{false};
     bool is_abstract{false};
@@ -179,9 +180,6 @@ struct IRProgram {
     IRLifetimeModel lifetime_model{IRLifetimeModel::LegacyArc};
     std::vector<IRCallableEffectSummary> effect_summaries;
 
-    // Transitional read-only payload used by the C backend while complex
-    // statement emission migrates incrementally to native IR operations.
-    const Program* backend_compatibility_program{nullptr};
 };
 
 [[nodiscard]] std::string_view ir_effect_name(IREffect effect);

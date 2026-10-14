@@ -6,6 +6,8 @@
 
 namespace toro {
 
+struct Program;
+
 class CGenerator {
 public:
     [[nodiscard]] std::string generate(const IRProgram& program);

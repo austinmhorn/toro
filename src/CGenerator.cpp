@@ -1,7 +1,6 @@
 #include "toro/CGenerator.hpp"
 
-#include "toro/EffectAnalyzer.hpp"
-#include "toro/IRLowerer.hpp"
+#include "CBackendModel.hpp"
 #include "toro/ModuleIdentity.hpp"
 #include "toro/StandardLibrary.hpp"
 
@@ -16,8 +15,7 @@
 #include <utility>
 #include <vector>
 
-namespace toro {
-namespace {
+namespace toro::detail::c_backend {
 
 template <typename Declaration>
 [[nodiscard]] std::string nominal_identity(const Declaration& declaration)
@@ -586,15 +584,11 @@ class Generator {
 public:
     std::string generate(const IRProgram& ir_program)
     {
-        if (!ir_program.backend_compatibility_program) {
-            throw std::runtime_error(
-                "C backend error: Toro IR has no typed-AST compatibility payload");
-        }
         if (ir_program.lifetime_model != IRLifetimeModel::LegacyArc) {
             throw std::runtime_error(
                 "C backend error: unsupported Toro IR lifetime model");
         }
-        const Program& program = *ir_program.backend_compatibility_program;
+        const Program program = make_emission_model(ir_program);
         collect_types(program);
         collect_functions(program);
         collect_local_types(program);
@@ -5833,18 +5827,13 @@ private:
     SourceLocation current_location_{1, 1};
 };
 
-} // namespace
+} // namespace toro::detail::c_backend
+
+namespace toro {
 
 std::string CGenerator::generate(const IRProgram& program)
 {
-    return Generator{}.generate(program);
-}
-
-std::string CGenerator::generate(const Program& program)
-{
-    auto ir = IRLowerer{}.lower(program);
-    EffectAnalyzer{}.analyze(ir);
-    return generate(ir);
+    return detail::c_backend::Generator{}.generate(program);
 }
 
 } // namespace toro

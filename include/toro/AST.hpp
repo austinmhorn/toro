@@ -1,6 +1,7 @@
 #pragma once
 
 #include "toro/Token.hpp"
+#include "toro/SourceLocation.hpp"
 #include "toro/Type.hpp"
 
 #include <cstddef>
@@ -11,11 +12,6 @@
 #include <vector>
 
 namespace toro {
-
-struct SourceLocation {
-    std::size_t line;
-    std::size_t column;
-};
 
 struct TypeReference {
     std::string name;

@@ -71,7 +71,6 @@ public:
 
         IRProgram result;
         result.entry_module = program.entry_module;
-        result.backend_compatibility_program = &program;
         result.modules.reserve(program.modules.size());
         for (const auto& module : program.modules) {
             result.modules.push_back(IRModule{module.name, module.imports});
@@ -674,6 +673,7 @@ private:
         result.return_type = lower_return_type(
             function.return_type, declaration_origin);
         result.is_public = function.is_public;
+        result.calling_convention = function.calling_convention;
         if (!function.is_external) {
             result.body = lower_block(*function.body, module);
         }

@@ -139,6 +139,10 @@ Current pipeline:
 
 `source -> lexer -> parser/AST -> semantic analysis -> type checking -> typed toro IR -> effect analysis -> C generator -> native compiler`
 
+`IRProgram` is the backend semantic boundary. Backends must not retain or read
+frontend AST nodes; frontend convenience entry points must lower to IR before
+invoking backend code.
+
 Future analyses should evolve that pipeline toward:
 
 `source -> frontend -> toro IR -> effect analysis -> ownership/escape/borrow analysis -> ARC insertion/elision -> performance validation -> backend`

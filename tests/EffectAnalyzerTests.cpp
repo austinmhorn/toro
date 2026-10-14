@@ -29,7 +29,6 @@ toro::IRProgram analyze_source(std::string_view source)
     toro::TypeChecker().check(program);
     auto ir = toro::IRLowerer().lower(program);
     toro::EffectAnalyzer().analyze(ir);
-    ir.backend_compatibility_program = nullptr;
     return ir;
 }
 
@@ -44,7 +43,6 @@ toro::IRProgram analyze_file(
     toro::TypeChecker().check(program);
     auto ir = toro::IRLowerer().lower(program);
     toro::EffectAnalyzer().analyze(ir);
-    ir.backend_compatibility_program = nullptr;
     return ir;
 }
 

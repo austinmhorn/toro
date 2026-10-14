@@ -1,4 +1,5 @@
 #include "toro/CGenerator.hpp"
+#include "toro/EffectAnalyzer.hpp"
 #include "toro/IR.hpp"
 #include "toro/IRLowerer.hpp"
 #include "toro/Lexer.hpp"
@@ -53,6 +54,14 @@ toro::Program load_and_check(
     toro::SemanticAnalyzer().analyze(program);
     toro::TypeChecker().check(program);
     return program;
+}
+
+toro::IRProgram lower_detached(std::string_view source)
+{
+    auto program = parse_and_check(source);
+    auto ir = toro::IRLowerer().lower(program);
+    toro::EffectAnalyzer().analyze(ir);
+    return ir;
 }
 
 void test_typed_operations_and_control_flow()
@@ -171,6 +180,25 @@ void test_standard_library_calls()
         "typed standard-library call");
 }
 
+void test_backend_uses_detached_ir_only()
+{
+    auto ir = lower_detached(
+        "class Box {\n"
+        "    public value: int\n"
+        "    public function get() -> int { return self.value }\n"
+        "}\n"
+        "function main() {\n"
+        "    box := Box(value: 7)\n"
+        "    print(box.get())\n"
+        "}\n");
+    const auto effects_before = toro::dump_ir(ir, true);
+    const auto generated = toro::CGenerator().generate(ir);
+    expect_contains(generated, "toro_class_", "IR-only class lowering");
+    expect_contains(generated, "toro_method_", "IR-only method lowering");
+    expect(effects_before == toro::dump_ir(ir, true),
+        "C generation changed effect summaries");
+}
+
 } // namespace
 
 int main()
@@ -182,6 +210,7 @@ int main()
         test_result_propagation();
         test_modules_and_foreign_calls();
         test_standard_library_calls();
+        test_backend_uses_detached_ir_only();
     } catch (const std::exception& error) {
         std::cerr << "IR test failure: " << error.what() << '\n';
         return 1;
