@@ -3,6 +3,7 @@
 #include "toro/SourceLocation.hpp"
 #include "toro/Type.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -138,6 +139,45 @@ struct IRModule {
 
 enum class IRLifetimeModel {
     LegacyArc,
+    ExplicitArc,
+};
+
+enum class IRArcStage {
+    Semantic,
+    Materialized,
+    Optimized,
+};
+
+enum class IRArcOperationKind {
+    Retain,
+    Release,
+    DestroyFinalize,
+    ManagedAssignment,
+    OwnedTemporary,
+    BorrowedTemporary,
+};
+
+struct IRArcOperation {
+    IRArcOperationKind kind{IRArcOperationKind::Retain};
+    std::string value;
+    IROrigin origin;
+    std::string reason;
+    std::size_t pair_id{0};
+    bool elided{false};
+};
+
+struct IRCallableArcSchedule {
+    std::string callable_identity;
+    std::vector<IRArcOperation> unoptimized_operations;
+    std::vector<IRArcOperation> optimized_operations;
+};
+
+struct IRArcMetrics {
+    std::size_t retains_before{0};
+    std::size_t retains_after{0};
+    std::size_t releases_before{0};
+    std::size_t releases_after{0};
+    std::size_t elided_pairs{0};
 };
 
 enum class IREffect : std::uint8_t {
@@ -179,12 +219,15 @@ struct IRProgram {
     std::string entry_module;
     IRLifetimeModel lifetime_model{IRLifetimeModel::LegacyArc};
     std::vector<IRCallableEffectSummary> effect_summaries;
-
+    IRArcStage arc_stage{IRArcStage::Semantic};
+    std::vector<IRCallableArcSchedule> arc_schedules;
+    IRArcMetrics arc_metrics;
 };
 
 [[nodiscard]] std::string_view ir_effect_name(IREffect effect);
 [[nodiscard]] std::string dump_ir(
     const IRProgram& program,
-    bool include_effects = false);
+    bool include_effects = false,
+    bool include_arc = false);
 
 } // namespace toro

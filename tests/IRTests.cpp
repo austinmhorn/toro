@@ -1,4 +1,5 @@
 #include "toro/CGenerator.hpp"
+#include "toro/ArcOptimizer.hpp"
 #include "toro/EffectAnalyzer.hpp"
 #include "toro/IR.hpp"
 #include "toro/IRLowerer.hpp"
@@ -61,6 +62,8 @@ toro::IRProgram lower_detached(std::string_view source)
     auto program = parse_and_check(source);
     auto ir = toro::IRLowerer().lower(program);
     toro::EffectAnalyzer().analyze(ir);
+    toro::ArcMaterializer().materialize(ir);
+    toro::ArcOptimizer().optimize(ir);
     return ir;
 }
 
@@ -116,8 +119,8 @@ void test_representative_feature_inventory_and_determinism()
 {
     const auto root = std::filesystem::path(TORO_TEST_SOURCE_DIR);
     auto program = load_and_check(root / "examples/backend_hardening.toro");
-    const auto first_ir = toro::IRLowerer().lower(program);
-    const auto second_ir = toro::IRLowerer().lower(program);
+    auto first_ir = toro::IRLowerer().lower(program);
+    auto second_ir = toro::IRLowerer().lower(program);
     const auto first_dump = toro::dump_ir(first_ir);
     const auto second_dump = toro::dump_ir(second_ir);
 
@@ -136,6 +139,13 @@ void test_representative_feature_inventory_and_determinism()
         first_dump,
         "declare named : Named {module__17_backend_hardening__5_Named} [interface]",
         "declared interface type");
+
+    toro::EffectAnalyzer().analyze(first_ir);
+    toro::ArcMaterializer().materialize(first_ir);
+    toro::ArcOptimizer().optimize(first_ir);
+    toro::EffectAnalyzer().analyze(second_ir);
+    toro::ArcMaterializer().materialize(second_ir);
+    toro::ArcOptimizer().optimize(second_ir);
 
     const auto first_c = toro::CGenerator().generate(first_ir);
     const auto second_c = toro::CGenerator().generate(second_ir);

@@ -227,6 +227,7 @@ struct FunctionDeclarationStmt final : Stmt {
     bool is_external;
     std::string calling_convention;
     std::string identity;
+    std::vector<std::string> borrowed_parameters;
 };
 struct ReturnStmt final : Stmt {
     ReturnStmt(SourceLocation location, std::unique_ptr<Expr> value)
@@ -323,6 +324,7 @@ struct MethodDeclaration final : ClassMember {
     bool is_override;
     std::unique_ptr<BlockStmt> body;
     std::string identity;
+    std::vector<std::string> borrowed_parameters;
 };
 struct InterfaceMethod {
     std::string name;

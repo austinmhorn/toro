@@ -70,6 +70,19 @@ std::string_view declaration_kind_name(IRDeclarationKind kind)
     return "unknown";
 }
 
+std::string_view arc_operation_name(IRArcOperationKind kind)
+{
+    switch (kind) {
+    case IRArcOperationKind::Retain: return "retain";
+    case IRArcOperationKind::Release: return "release";
+    case IRArcOperationKind::DestroyFinalize: return "destroy-finalize";
+    case IRArcOperationKind::ManagedAssignment: return "managed-assign";
+    case IRArcOperationKind::OwnedTemporary: return "owned-temporary";
+    case IRArcOperationKind::BorrowedTemporary: return "borrowed-temporary";
+    }
+    return "unknown";
+}
+
 std::string complete_type_name(const IRType& type)
 {
     std::string result = type_name(type.type);
@@ -154,11 +167,15 @@ std::string_view ir_effect_name(IREffect effect)
     return "unknown";
 }
 
-std::string dump_ir(const IRProgram& program, bool include_effects)
+std::string dump_ir(
+    const IRProgram& program,
+    bool include_effects,
+    bool include_arc)
 {
     std::string output = "toro-ir 1\n";
     output += "entry " + program.entry_module + "\n";
-    output += "lifetime legacy-arc\n";
+    output += program.lifetime_model == IRLifetimeModel::LegacyArc
+        ? "lifetime legacy-arc\n" : "lifetime explicit-arc\n";
     for (const auto& module : program.modules) {
         output += "module " + module.name;
         if (!module.imports.empty()) {
@@ -260,6 +277,45 @@ std::string dump_ir(const IRProgram& program, bool include_effects)
                     append_origin(cause.origin, output);
                     break;
                 }
+                output += '\n';
+            }
+        }
+    }
+    if (include_arc) {
+        output += "arc\n";
+        output += "  stage ";
+        switch (program.arc_stage) {
+        case IRArcStage::Semantic: output += "semantic\n"; break;
+        case IRArcStage::Materialized: output += "materialized\n"; break;
+        case IRArcStage::Optimized: output += "optimized\n"; break;
+        }
+        output += "  metrics retains-before "
+            + std::to_string(program.arc_metrics.retains_before)
+            + " retains-after "
+            + std::to_string(program.arc_metrics.retains_after)
+            + " releases-before "
+            + std::to_string(program.arc_metrics.releases_before)
+            + " releases-after "
+            + std::to_string(program.arc_metrics.releases_after)
+            + " elided-pairs "
+            + std::to_string(program.arc_metrics.elided_pairs) + "\n";
+        for (const auto& schedule : program.arc_schedules) {
+            output += "  callable " + schedule.callable_identity + "\n";
+            output += "    before\n";
+            for (const auto& operation : schedule.unoptimized_operations) {
+                output += "      " + std::string(arc_operation_name(operation.kind));
+                if (!operation.value.empty()) output += ' ' + operation.value;
+                if (!operation.reason.empty()) output += " ; " + operation.reason;
+                append_origin(operation.origin, output);
+                output += '\n';
+            }
+            output += "    after\n";
+            for (const auto& operation : schedule.optimized_operations) {
+                output += "      " + std::string(arc_operation_name(operation.kind));
+                if (!operation.value.empty()) output += ' ' + operation.value;
+                if (operation.elided) output += " [elided]";
+                if (!operation.reason.empty()) output += " ; " + operation.reason;
+                append_origin(operation.origin, output);
                 output += '\n';
             }
         }

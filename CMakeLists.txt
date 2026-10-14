@@ -14,6 +14,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 include(CTest)
 
 add_library(toro_core
+    src/ArcOptimizer.cpp
     src/CBackendModel.cpp
     src/CGenerator.cpp
     src/CGeneratorFrontend.cpp
@@ -89,6 +90,14 @@ if(BUILD_TESTING)
     toro_enable_warnings(toro_effect_analyzer_tests)
     add_test(NAME effect_analyzer COMMAND toro_effect_analyzer_tests)
 
+    add_executable(toro_arc_optimizer_tests tests/ArcOptimizerTests.cpp)
+    target_link_libraries(toro_arc_optimizer_tests PRIVATE toro_core)
+    target_compile_definitions(toro_arc_optimizer_tests PRIVATE
+        TORO_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+    )
+    toro_enable_warnings(toro_arc_optimizer_tests)
+    add_test(NAME arc_optimizer COMMAND toro_arc_optimizer_tests)
+
     add_executable(toro_c_generator_tests tests/CGeneratorTests.cpp)
     target_link_libraries(toro_c_generator_tests PRIVATE toro_core)
     toro_enable_warnings(toro_c_generator_tests)
@@ -143,6 +152,9 @@ if(BUILD_TESTING)
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/project)
     add_test(NAME project_cli_ir_effects COMMAND toro ir --effects)
     set_tests_properties(project_cli_ir_effects PROPERTIES
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/project)
+    add_test(NAME project_cli_ir_arc COMMAND toro ir --arc)
+    set_tests_properties(project_cli_ir_arc PROPERTIES
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/project)
     add_test(NAME project_cli_emit_c COMMAND toro emit-c)
     set_tests_properties(project_cli_emit_c PROPERTIES

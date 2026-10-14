@@ -13,7 +13,8 @@ public:
     [[nodiscard]] std::string generate(const IRProgram& program);
 
     // Transitional convenience entry point. It performs the same typed-AST to
-    // IR lowering as the compiler pipeline before entering the IR backend.
+    // IR lowering, effect analysis, and ARC materialization/optimization as the
+    // compiler pipeline before entering the IR backend.
     [[nodiscard]] std::string generate(const Program& program);
 };
 

@@ -146,7 +146,10 @@ ARC where shared lifetime remains necessary
 ARC retain/release elision
 ```
 
-This should be implemented gradually after correct runtime semantics and a suitable toro IR exists.
+This is being implemented gradually now that correct runtime semantics and a
+suitable toro IR exist. The first step only materializes the current ARC
+schedule and removes locally proven redundant parameter retain/release pairs;
+the broader hierarchy remains future work.
 
 ## Why not expose ownership everywhere?
 

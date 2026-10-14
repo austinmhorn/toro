@@ -64,8 +64,10 @@ The checked frontend now lowers every program into a deterministic typed Toro IR
 before C generation. The IR retains stable declaration choices, concrete generic
 substitutions, dispatch kinds, runtime-value categories, and source origins. The
 C backend consumes that IR without retaining or reading the originating AST;
-current correctness-first ARC and runtime-helper behavior are preserved without
-ownership or effect optimization.
+current correctness-first ARC and runtime-helper behavior are preserved. A
+separate ARC materialization pass records the lifetime schedule before a
+conservative optimizer removes only locally proven parameter retain/release
+pairs. Effect analysis remains descriptive rather than policy enforcement.
 The backend-independent effect pass summarizes allocation, lifetime relevance,
 I/O, native/foreign calls, dynamic dispatch, termination, and uncertainty across
 the transitive call graph. These summaries are inspection metadata only; they do
@@ -173,7 +175,14 @@ Inspect the deterministic typed IR after semantic analysis and type checking:
 ```bash
 ./build/toro ir examples/backend_hardening.toro
 ./build/toro ir --effects examples/backend_hardening.toro
+./build/toro ir --arc examples/backend_hardening.toro
+./build/toro ir --arc --no-opt examples/backend_hardening.toro
 ```
+
+`--arc` shows deterministic before/after lifetime operations and retain,
+release, and elided-pair counts. `--no-opt` exposes the materialized baseline.
+These are compiler-development inspection formats, not stable source or ABI
+contracts.
 
 Like `check`, `emit-c`, `build`, and `run`, `ir` also supports project mode when
 the current directory contains `toro.toml`.

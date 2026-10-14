@@ -442,11 +442,27 @@ This phase implements the principle:
 
 Normal Toro source should remain largely unchanged.
 
-## 9.1 ARC retain/release elision
+## 9.1 ARC retain/release elision — completed
 
 Remove trivially unnecessary retain/release pairs.
 
 Establish correctness tests comparing optimized and unoptimized lifetime behavior.
+
+Completed behavior:
+
+- deterministic explicit ARC schedules on typed IR, including retain, release,
+  destroy/finalize, managed assignment, and owned/borrowed temporary events;
+- distinct materialized baseline and optimized schedules with stable metrics;
+- conservative elimination of an owned-parameter retain/release pair only for
+  locally proven non-escaping observations;
+- effect-summary barriers for escape, foreign/unknown calls, and dynamic
+  dispatch, plus conservative handling of generics and storage;
+- an IR-only C backend that consumes the selected parameter ownership schedule;
+- `toro ir --arc` and `toro ir --arc --no-opt` inspection;
+- differential native lifetime/destruction coverage.
+
+This milestone does not implement ownership transfer, general borrow inference,
+escape analysis, stack allocation, cycles, arenas, or source ownership syntax.
 
 ## 9.2 Ownership transfer / move analysis
 

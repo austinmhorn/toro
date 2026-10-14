@@ -2,6 +2,7 @@
 
 #include "toro/ModuleIdentity.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 #include <string_view>
 #include <unordered_map>
@@ -95,6 +96,7 @@ public:
 
     Program build()
     {
+        validate_arc_schedules();
         Program result;
         result.entry_module = ir_.entry_module;
         create_top_level(result);
@@ -104,6 +106,45 @@ public:
     }
 
 private:
+    void validate_arc_schedules() const
+    {
+        for (const auto& declaration : ir_.declarations) {
+            const bool requires_schedule = declaration.body.has_value()
+                || declaration.kind == IRDeclarationKind::Class;
+            if (!requires_schedule) continue;
+            const std::string identity = declaration.kind == IRDeclarationKind::Class
+                ? declaration.identity + "#lifetime" : declaration.identity;
+            const bool present = std::ranges::any_of(
+                ir_.arc_schedules,
+                [&](const auto& schedule) {
+                    return schedule.callable_identity == identity;
+                });
+            if (!present) {
+                fail(declaration.origin,
+                    "materialized ARC schedule is missing for '" + identity + "'");
+            }
+        }
+    }
+
+    std::vector<std::string> borrowed_parameters(
+        std::string_view callable_identity) const
+    {
+        if (ir_.arc_stage != IRArcStage::Optimized) return {};
+        for (const auto& schedule : ir_.arc_schedules) {
+            if (schedule.callable_identity != callable_identity) continue;
+            std::vector<std::string> result;
+            for (const auto& operation : schedule.optimized_operations) {
+                if (operation.kind == IRArcOperationKind::BorrowedTemporary
+                    && operation.reason
+                        == "locally proven non-escaping parameter borrow") {
+                    result.push_back(operation.value);
+                }
+            }
+            return result;
+        }
+        return {};
+    }
+
     void apply_statement_metadata(Stmt& statement, const IRDeclaration& declaration)
     {
         statement.module_name = declaration.origin.module_name;
@@ -130,6 +171,8 @@ private:
                     declaration.kind == IRDeclarationKind::ForeignFunction,
                     declaration.calling_convention);
                 value->identity = declaration.identity;
+                value->borrowed_parameters = borrowed_parameters(
+                    declaration.identity);
                 apply_statement_metadata(*value, declaration);
                 functions_.emplace(declaration.identity, value.get());
                 declarations_.emplace(declaration.identity, &declaration);
@@ -297,6 +340,7 @@ private:
             declaration.is_override,
             nullptr);
         value->identity = declaration.identity;
+        value->borrowed_parameters = borrowed_parameters(declaration.identity);
         auto* pointer = value.get();
         if (auto structure = structs_.find(declaration.owner_identity);
             structure != structs_.end()) {

@@ -226,13 +226,28 @@ substitutions. Runtime-helper discovery likewise walks IR-derived constructions,
 calls, aggregates, dispatch operations, collections, and compiler intrinsics.
 Both retain dependency-first program order and deterministic insertion order.
 
-The IR identifies the current lifetime model as `legacy-arc`. Typed operations
-for construction, declaration, assignment, member/index assignment, calls,
-returns, collections, and lifecycle bodies contain enough ownership-relevant
-information for the backend to reproduce the existing correctness-first retain,
-release, weak-reference, and destruction schedule. Phase 8.3 did not add a
-second optimized ownership schedule or standalone inferred borrow/move rules;
-making those decisions explicit is later ownership-analysis work.
+The semantic IR initially identifies the inherited lifetime model as
+`legacy-arc`. `ArcMaterializer` converts it into `explicit-arc` schedules with
+deterministic retain, release, destroy/finalize, managed-assignment,
+owned-temporary, and borrowed-temporary events. Each callable keeps an
+unoptimized baseline and an active schedule, so lifetime behavior can be tested
+before and after optimization. Class lifetime schedules also expose finalization,
+strong-field teardown, and non-owning weak slots.
+
+`ArcOptimizer` consumes the existing effect summaries rather than recomputing
+effects. Its first deliberately narrow rule turns an owned class/interface or
+shared-collection parameter into a borrow only when every use is a local,
+non-owning observation and the callable has no escape, foreign/unknown-call, or
+dynamic-dispatch barrier. Generic callables, returned/stored references,
+managed assignments, calls with the reference, and uncertain cases retain the
+baseline schedule. The C backend requires materialized lifetime IR and consumes
+the selected parameter ownership schedule; it does not independently decide
+whether that pair is safe to elide.
+
+`toro ir --arc` prints both schedules, marks elided operations, and reports
+before/after counts. `toro ir --arc --no-opt` keeps the baseline active for
+differential runtime testing. This is internal ownership analysis: Toro adds no
+source-level `move`, `borrow`, `owned`, reference, or lifetime syntax.
 
 `toro ir` runs loading, semantic analysis, and type checking, then prints the
 stable textual IR. This dump is a developer inspection format, not a serialized
@@ -270,10 +285,10 @@ direct callee identity. This is deliberately smaller than a complete diagnostic
 graph but preserves the information needed for future explainability work.
 
 `toro ir --effects` appends these summaries to the ordinary deterministic IR
-dump. Effect analysis runs before normal C generation, but C generation does not
-compute or enforce effects. The pass does not alter ARC, allocation, ownership,
-or native behavior. In particular, it does not implement or validate the future
-`performance function` contract.
+dump. Effect analysis runs before ARC materialization and normal C generation.
+It does not itself alter ARC, allocation, ownership, or native behavior, though
+the later ARC optimizer consumes its escape/dynamic/foreign/unknown barriers.
+It does not implement or validate the future `performance function` contract.
 
 ### Type checker
 
@@ -533,7 +548,8 @@ Important unsupported or deferred runtime features include:
 - separate object-file compilation and linking per module;
 - raw pointers, C aggregates, callbacks, variadics, header parsing, dynamic
   loading, and C++/Objective-C/Rust ABI interoperability;
-- ownership/escape/borrow optimization;
+- ownership transfer, escape analysis, and general borrow optimization beyond
+  the first local ARC-pair elision rule;
 - `performance function` enforcement.
 
 The type system may understand some concepts before the C backend can execute them. The backend should reject unsupported constructs clearly rather than emit incorrect C.
@@ -543,15 +559,19 @@ The type system may understand some concepts before the C backend can execute th
 The completed Phase 6 C backend is a semantic proving ground and the runtime
 baseline for Phase 7 application work.
 
-Do not prematurely optimize ARC or allocation behavior inside the C generator merely to approximate the future ownership model.
+Do not add ARC or allocation heuristics inside the C generator. Lifetime
+materialization and optimization belong in explicit IR passes before backend
+emission.
 
 Correct runtime behavior is the priority.
 
 ## Typed toro IR and future analyses
 
-Toro now has a typed intermediate representation and deterministic effect
-summaries between static semantics and an IR-only C backend. Sophisticated
-ownership/performance work remains future analysis layered on that foundation.
+Toro now has a typed intermediate representation, deterministic effect
+summaries, and explicit baseline/optimized ARC schedules between static
+semantics and an IR-only C backend. More sophisticated ownership transfer,
+escape, general borrowing, and performance work remains layered on that
+foundation.
 
 Target pipeline:
 

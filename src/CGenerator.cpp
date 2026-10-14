@@ -584,9 +584,10 @@ class Generator {
 public:
     std::string generate(const IRProgram& ir_program)
     {
-        if (ir_program.lifetime_model != IRLifetimeModel::LegacyArc) {
+        if (ir_program.lifetime_model != IRLifetimeModel::ExplicitArc
+            || ir_program.arc_stage == IRArcStage::Semantic) {
             throw std::runtime_error(
-                "C backend error: unsupported Toro IR lifetime model");
+                "C backend error: Toro IR lifetime operations were not materialized");
         }
         const Program program = make_emission_model(ir_program);
         collect_types(program);
@@ -3238,7 +3239,8 @@ private:
         push_scope();
         current_substitutions_ = info.substitutions;
         current_return_type_ = info.return_type;
-        bind_parameters(function.parameters, info.parameter_types);
+        bind_parameters(function.parameters, info.parameter_types,
+            function.borrowed_parameters);
 
         std::string output = function_declaration(key) + "\n{\n";
         output += retain_owned_parameters(1);
@@ -3272,7 +3274,8 @@ private:
                 "toro_self",
                 owner_kind == CValueKind::Struct,
             });
-        bind_parameters(method.parameters, info.parameter_types);
+        bind_parameters(method.parameters, info.parameter_types,
+            method.borrowed_parameters);
 
         std::string output = method_declaration_text(
             owner, owner_kind, method, info) + "\n{\n";
@@ -5728,7 +5731,8 @@ private:
 
     void bind_parameters(
         const std::vector<Parameter>& parameters,
-        const std::vector<CValueType>& parameter_types)
+        const std::vector<CValueType>& parameter_types,
+        const std::vector<std::string>& borrowed_parameters)
     {
         if (parameters.size() != parameter_types.size()) {
             throw_backend_error(
@@ -5736,7 +5740,10 @@ private:
         }
         for (std::size_t index = 0; index < parameters.size(); ++index) {
             const bool owns_parameter =
-                is_managed_reference(parameter_types[index]);
+                is_managed_reference(parameter_types[index])
+                && std::ranges::find(
+                    borrowed_parameters, parameters[index].name)
+                    == borrowed_parameters.end();
             const std::string name = parameter_name(parameters[index].name);
             scopes_.back().emplace(
                 parameters[index].name,

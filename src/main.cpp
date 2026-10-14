@@ -1,3 +1,4 @@
+#include "toro/ArcOptimizer.hpp"
 #include "toro/CGenerator.hpp"
 #include "toro/EffectAnalyzer.hpp"
 #include "toro/Formatter.hpp"
@@ -33,7 +34,7 @@ void print_usage(std::ostream& output)
               "       toro tokens <source.toro>\n"
               "       toro ast-expression <source.toro>\n"
               "       toro ast <source.toro>\n"
-              "       toro ir [--effects] [source.toro]\n"
+              "       toro ir [--effects | --arc [--no-opt]] [source.toro]\n"
               "       toro check [source.toro]\n"
               "       toro emit-c [source.toro] [-o <output.c>]\n"
               "       toro build [source.toro] [-o <output>]\n"
@@ -129,17 +130,27 @@ std::string generate_c(const CompilationInput& input)
     toro::TypeChecker().check(program);
     auto ir = toro::IRLowerer().lower(program);
     toro::EffectAnalyzer().analyze(ir);
+    toro::ArcMaterializer().materialize(ir);
+    toro::ArcOptimizer().optimize(ir);
     return toro::CGenerator().generate(ir);
 }
 
-void print_ir(const CompilationInput& input, bool include_effects = false)
+void print_ir(
+    const CompilationInput& input,
+    bool include_effects = false,
+    bool include_arc = false,
+    bool optimize_arc = true)
 {
     auto program = load_program(input);
     toro::SemanticAnalyzer().analyze(program);
     toro::TypeChecker().check(program);
     auto ir = toro::IRLowerer().lower(program);
-    if (include_effects) toro::EffectAnalyzer().analyze(ir);
-    std::cout << toro::dump_ir(ir, include_effects);
+    if (include_effects || include_arc) toro::EffectAnalyzer().analyze(ir);
+    if (include_arc) {
+        toro::ArcMaterializer().materialize(ir);
+        if (optimize_arc) toro::ArcOptimizer().optimize(ir);
+    }
+    std::cout << toro::dump_ir(ir, include_effects, include_arc);
 }
 
 void emit_c(
@@ -333,6 +344,20 @@ int main(int argc, char* argv[])
     const bool file_ir_effects = argc == 4
         && std::string_view(argv[1]) == "ir"
         && std::string_view(argv[2]) == "--effects";
+    const bool project_ir_arc = argc == 3
+        && std::string_view(argv[1]) == "ir"
+        && std::string_view(argv[2]) == "--arc";
+    const bool file_ir_arc = argc == 4
+        && std::string_view(argv[1]) == "ir"
+        && std::string_view(argv[2]) == "--arc";
+    const bool project_ir_arc_unoptimized = argc == 4
+        && std::string_view(argv[1]) == "ir"
+        && std::string_view(argv[2]) == "--arc"
+        && std::string_view(argv[3]) == "--no-opt";
+    const bool file_ir_arc_unoptimized = argc == 5
+        && std::string_view(argv[1]) == "ir"
+        && std::string_view(argv[2]) == "--arc"
+        && std::string_view(argv[3]) == "--no-opt";
     const bool project_build_with_output = argc == 4
         && std::string_view(argv[1]) == "build"
         && std::string_view(argv[2]) == "-o";
@@ -346,7 +371,9 @@ int main(int argc, char* argv[])
         && std::string_view(argv[1]) == "emit-c"
         && std::string_view(argv[3]) == "-o";
     if (argc != 2 && !standard_source_command && !project_ir_effects
-        && !file_ir_effects && !project_build_with_output
+        && !file_ir_effects && !project_ir_arc && !file_ir_arc
+        && !project_ir_arc_unoptimized && !file_ir_arc_unoptimized
+        && !project_build_with_output
         && !project_emit_c_with_output && !file_build_with_output
         && !file_emit_c_with_output) {
         std::cerr << "error: invalid arguments\n";
@@ -355,7 +382,15 @@ int main(int argc, char* argv[])
     }
 
     try {
-        if (file_ir_effects) {
+        if (file_ir_arc_unoptimized) {
+            print_ir(direct_input(argv[4]), false, true, false);
+        } else if (project_ir_arc_unoptimized) {
+            print_ir(project_input(), false, true, false);
+        } else if (file_ir_arc) {
+            print_ir(direct_input(argv[3]), false, true);
+        } else if (project_ir_arc) {
+            print_ir(project_input(), false, true);
+        } else if (file_ir_effects) {
             print_ir(direct_input(argv[3]), true);
         } else if (project_ir_effects) {
             print_ir(project_input(), true);
