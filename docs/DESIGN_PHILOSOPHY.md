@@ -147,9 +147,12 @@ ARC retain/release elision
 ```
 
 This is being implemented gradually now that correct runtime semantics and a
-suitable toro IR exist. The first step only materializes the current ARC
-schedule and removes locally proven redundant parameter retain/release pairs;
-the broader hierarchy remains future work.
+suitable toro IR exist. Toro now materializes the current ARC schedule, removes
+locally proven redundant parameter retain/release pairs, and transfers an
+ownership obligation through straightforward block-local final uses. The
+analysis remains deliberately conservative across calls and uncertain control
+flow; escape analysis, general borrow inference, and the broader hierarchy
+remain future work.
 
 ## Why not expose ownership everywhere?
 

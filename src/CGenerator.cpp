@@ -585,9 +585,10 @@ public:
     std::string generate(const IRProgram& ir_program)
     {
         if (ir_program.lifetime_model != IRLifetimeModel::ExplicitArc
-            || ir_program.arc_stage == IRArcStage::Semantic) {
+            || ir_program.arc_stage == IRArcStage::Semantic
+            || ir_program.arc_stage == IRArcStage::TransfersAnalyzed) {
             throw std::runtime_error(
-                "C backend error: Toro IR lifetime operations were not materialized");
+                "C backend error: Toro IR lifetime operations are not ready for emission");
         }
         const Program program = make_emission_model(ir_program);
         collect_types(program);
@@ -2488,6 +2489,13 @@ private:
             output += "    " + collection_element_release(
                 element, "toro_value->toro_data[toro_index]");
             output += "    toro_value->toro_data[toro_index] = toro_element;\n}\n\n";
+            output += "static void " + name + "_set_move(" + name
+                + "* toro_value, int64_t toro_index, " + c_type_name(element)
+                + " toro_element)\n{\n"
+                  "    if (toro_index < 0 || (size_t)toro_index >= toro_value->toro_count) { abort(); }\n";
+            output += "    " + collection_element_release(
+                element, "toro_value->toro_data[toro_index]");
+            output += "    toro_value->toro_data[toro_index] = toro_element;\n}\n\n";
             return output;
         }
 
@@ -2518,6 +2526,14 @@ private:
                   "        if (toro_data == NULL) { abort(); }\n        toro_value->toro_data = toro_data;\n        toro_value->toro_capacity = toro_capacity;\n    }\n";
             output += "    " + collection_element_retain(element, "toro_element");
             output += "    toro_value->toro_data[toro_value->toro_count++] = toro_element;\n}\n\n";
+            output += "static void " + name + "_add_move(" + name
+                + "* toro_value, " + c_type_name(element)
+                + " toro_element)\n{\n"
+                  "    if (toro_value->toro_count == toro_value->toro_capacity)\n    {\n"
+                  "        size_t toro_capacity = toro_value->toro_capacity == 0 ? 4 : toro_value->toro_capacity * 2;\n"
+                  "        void* toro_data = realloc(toro_value->toro_data, toro_capacity * sizeof(*toro_value->toro_data));\n"
+                  "        if (toro_data == NULL) { abort(); }\n        toro_value->toro_data = toro_data;\n        toro_value->toro_capacity = toro_capacity;\n    }\n"
+                  "    toro_value->toro_data[toro_value->toro_count++] = toro_element;\n}\n\n";
             output += "static " + c_type_name(element) + " " + name
                 + "_get(" + name + "* toro_value, int64_t toro_index)\n{\n"
                   "    if (toro_index < 0 || (size_t)toro_index >= toro_value->toro_count) { abort(); }\n"
@@ -2527,6 +2543,13 @@ private:
                 + " toro_element)\n{\n"
                   "    if (toro_index < 0 || (size_t)toro_index >= toro_value->toro_count) { abort(); }\n";
             output += "    " + collection_element_retain(element, "toro_element");
+            output += "    " + collection_element_release(
+                element, "toro_value->toro_data[toro_index]");
+            output += "    toro_value->toro_data[toro_index] = toro_element;\n}\n\n";
+            output += "static void " + name + "_set_move(" + name
+                + "* toro_value, int64_t toro_index, " + c_type_name(element)
+                + " toro_element)\n{\n"
+                  "    if (toro_index < 0 || (size_t)toro_index >= toro_value->toro_count) { abort(); }\n";
             output += "    " + collection_element_release(
                 element, "toro_value->toro_data[toro_index]");
             output += "    toro_value->toro_data[toro_index] = toro_element;\n}\n\n";
@@ -2573,6 +2596,9 @@ private:
         output += "static void " + name + "_set(" + name
             + "* toro_value, const char* toro_key, " + c_type_name(value)
             + " toro_element);\n\n";
+        output += "static void " + name + "_set_move(" + name
+            + "* toro_value, const char* toro_key, " + c_type_name(value)
+            + " toro_element);\n\n";
         output += "static void " + name + "_grow(" + name + "* toro_value)\n{\n"
             "    size_t toro_old_capacity = toro_value->toro_capacity;\n"
             "    const char** toro_old_keys = toro_value->toro_keys;\n"
@@ -2598,6 +2624,15 @@ private:
             + collection_element_release(value, "toro_value->toro_values[toro_slot]")
             + "    } else { toro_value->toro_occupied[toro_slot] = true; toro_value->toro_keys[toro_slot] = toro_key; ++toro_value->toro_count; }\n"
             "    toro_value->toro_values[toro_slot] = toro_element;\n}\n\n";
+        output += "static void " + name + "_set_move(" + name
+            + "* toro_value, const char* toro_key, " + c_type_name(value)
+            + " toro_element)\n{\n    if ((toro_value->toro_count + 1) * 10 >= toro_value->toro_capacity * 7) { "
+            + name + "_grow(toro_value); }\n    size_t toro_slot = " + name
+            + "_slot(toro_value, toro_key);\n"
+              "    if (toro_value->toro_occupied[toro_slot]) { "
+            + collection_element_release(value, "toro_value->toro_values[toro_slot]")
+            + "    } else { toro_value->toro_occupied[toro_slot] = true; toro_value->toro_keys[toro_slot] = toro_key; ++toro_value->toro_count; }\n"
+              "    toro_value->toro_values[toro_slot] = toro_element;\n}\n\n";
         output += "static bool " + name + "_contains(" + name
             + "* toro_value, const char* toro_key)\n{\n    size_t toro_slot = "
             + name + "_slot(toro_value, toro_key);\n    return toro_value->toro_occupied[toro_slot];\n}\n\n";
@@ -3361,8 +3396,14 @@ private:
             output += prefix + c_type_name(type) + " " + c_name + " = "
                 + initializer.code + ";\n";
             if (is_owned_runtime_value(type)) {
-                if (is_managed_reference(type) && !initializer.owned) {
+                const bool transferred = statement.transfer_source.has_value();
+                if (is_managed_reference(type) && !initializer.owned
+                    && !transferred) {
                     output += prefix + retain_call(type, c_name) + ";\n";
+                }
+                if (transferred) {
+                    relinquish_owned_value(
+                        *statement.transfer_source, statement.location);
                 }
                 owned_reference_values_.back().push_back(
                     ValueInfo{type, c_name, false, true});
@@ -3405,11 +3446,15 @@ private:
                 std::string output = indent_prelude(value.prelude, depth);
                 output += prefix + c_type_name(target.type) + " " + temporary
                     + " = " + value.code + ";\n";
-                if (!value.owned) {
+                if (!value.owned && !statement.transfer_source) {
                     output += prefix + retain_call(target.type, temporary) + ";\n";
                 }
                 output += prefix + release_call(target.type, target.c_name) + ";\n";
                 output += prefix + target.c_name + " = " + temporary + ";\n";
+                if (statement.transfer_source) {
+                    relinquish_owned_value(
+                        *statement.transfer_source, statement.location);
+                }
                 return output;
             }
             return indent_prelude(value.prelude, depth)
@@ -3464,8 +3509,13 @@ private:
                 std::string output = indent_prelude(value.prelude, depth);
                 output += prefix + c_type_name(value.type) + " " + temporary
                     + " = " + value.code + ";\n";
-                if (!value.owned) {
+                if (!value.owned && !statement.transfer_source) {
                     output += prefix + retain_call(value.type, temporary) + ";\n";
+                }
+                if (statement.transfer_source
+                    && *statement.transfer_source != "<temporary>") {
+                    relinquish_owned_value(
+                        *statement.transfer_source, statement.location);
                 }
                 output += all_scope_cleanup(depth);
                 output += prefix + "return " + temporary + ";\n";
@@ -4851,9 +4901,15 @@ private:
                 + " = " + value.code + ";\n";
             value_code = *owned_temporary;
         }
-        output += prefix + collection_name(object.type) + "_set("
+        const bool transferred = assignment.transfer_source.has_value();
+        output += prefix + collection_name(object.type)
+            + (transferred ? "_set_move(" : "_set(")
             + (object.type.kind == CValueKind::Array ? "&" : "")
             + object.code + ", " + subscript.code + ", " + value_code + ");\n";
+        if (transferred) {
+            relinquish_owned_value(
+                *assignment.transfer_source, assignment.location);
+        }
         if (owned_temporary) {
             output += prefix + release_call(value.type, *owned_temporary) + ";\n";
         }
@@ -4888,6 +4944,13 @@ private:
                 *call.arguments.front().value, receiver.type.arguments[0]);
             std::string prelude = receiver.prelude + value.prelude;
             std::string value_code = value.code;
+            if (call.transfer_source) {
+                prelude += collection_name(receiver.type) + "_add_move("
+                    + receiver.code + ", " + value_code + ");\n";
+                relinquish_owned_value(
+                    *call.transfer_source, current_location_);
+                return {"(void)0", void_type, false, false, std::move(prelude)};
+            }
             if (is_owned_runtime_value(value.type) && value.owned) {
                 const std::string temporary =
                     "toro_list_element_" + std::to_string(temporary_index_++);
@@ -5054,13 +5117,17 @@ private:
                 "toro_field_class_" + std::to_string(temporary_index_++);
             output += prefix + c_type_name(field_info.type) + " " + temporary
                 + " = " + value.code + ";\n";
-            if (!value.owned) {
+            if (!value.owned && !assignment.transfer_source) {
                 output += prefix + retain_name(field_info.type.nominal_name)
                     + "(" + temporary + ");\n";
             }
             output += prefix + release_name(field_info.type.nominal_name)
                 + "(" + access + ");\n";
             output += prefix + access + " = " + temporary + ";\n";
+            if (assignment.transfer_source) {
+                relinquish_owned_value(
+                    *assignment.transfer_source, assignment.location);
+            }
             return output;
         }
         output += prefix + access + " = " + value.code + ";\n";
@@ -5793,6 +5860,38 @@ private:
             output += scope_cleanup(index - 1, depth);
         }
         return output;
+    }
+
+    void relinquish_owned_value(
+        const std::string& name,
+        const SourceLocation& location)
+    {
+        for (std::size_t index = scopes_.size(); index > 0; --index) {
+            auto& scope = scopes_[index - 1];
+            const auto value = scope.find(name);
+            if (value == scope.end()) continue;
+            if (!value->second.owned_local) {
+                throw_backend_error(location,
+                    "internal ownership transfer from non-owning value '"
+                        + name + "'");
+            }
+            auto& owned = owned_reference_values_[index - 1];
+            const auto cleanup = std::ranges::find_if(
+                owned,
+                [&](const ValueInfo& candidate) {
+                    return candidate.c_name == value->second.c_name;
+                });
+            if (cleanup == owned.end()) {
+                throw_backend_error(location,
+                    "internal ownership transfer missing cleanup for '"
+                        + name + "'");
+            }
+            owned.erase(cleanup);
+            value->second.owned_local = false;
+            return;
+        }
+        throw_backend_error(location,
+            "internal ownership transfer cannot resolve value '" + name + "'");
     }
 
     const ValueInfo& find_value(const std::string& name) const

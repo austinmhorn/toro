@@ -79,6 +79,7 @@ std::string_view arc_operation_name(IRArcOperationKind kind)
     case IRArcOperationKind::ManagedAssignment: return "managed-assign";
     case IRArcOperationKind::OwnedTemporary: return "owned-temporary";
     case IRArcOperationKind::BorrowedTemporary: return "borrowed-temporary";
+    case IRArcOperationKind::OwnershipTransfer: return "transfer";
     }
     return "unknown";
 }
@@ -287,6 +288,9 @@ std::string dump_ir(
         switch (program.arc_stage) {
         case IRArcStage::Semantic: output += "semantic\n"; break;
         case IRArcStage::Materialized: output += "materialized\n"; break;
+        case IRArcStage::TransfersAnalyzed:
+            output += "transfers-analyzed\n";
+            break;
         case IRArcStage::Optimized: output += "optimized\n"; break;
         }
         output += "  metrics retains-before "
@@ -298,7 +302,9 @@ std::string dump_ir(
             + " releases-after "
             + std::to_string(program.arc_metrics.releases_after)
             + " elided-pairs "
-            + std::to_string(program.arc_metrics.elided_pairs) + "\n";
+            + std::to_string(program.arc_metrics.elided_pairs)
+            + " ownership-transfers "
+            + std::to_string(program.arc_metrics.ownership_transfers) + "\n";
         for (const auto& schedule : program.arc_schedules) {
             output += "  callable " + schedule.callable_identity + "\n";
             output += "    before\n";

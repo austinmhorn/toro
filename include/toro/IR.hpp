@@ -63,6 +63,12 @@ enum class IROperationKind {
     Continue,
 };
 
+struct IROwnershipTransfer {
+    std::string source;
+    std::string destination;
+    IROrigin source_origin;
+};
+
 struct IROperation {
     IROperationKind kind{IROperationKind::Block};
     IROrigin origin;
@@ -72,6 +78,7 @@ struct IROperation {
     std::vector<std::pair<std::string, IRType>> substitutions;
     std::vector<std::string> argument_names;
     std::vector<IROperation> children;
+    std::optional<IROwnershipTransfer> ownership_transfer;
 };
 
 struct IRGenericParameter {
@@ -145,6 +152,7 @@ enum class IRLifetimeModel {
 enum class IRArcStage {
     Semantic,
     Materialized,
+    TransfersAnalyzed,
     Optimized,
 };
 
@@ -155,6 +163,7 @@ enum class IRArcOperationKind {
     ManagedAssignment,
     OwnedTemporary,
     BorrowedTemporary,
+    OwnershipTransfer,
 };
 
 struct IRArcOperation {
@@ -178,6 +187,7 @@ struct IRArcMetrics {
     std::size_t releases_before{0};
     std::size_t releases_after{0};
     std::size_t elided_pairs{0};
+    std::size_t ownership_transfers{0};
 };
 
 enum class IREffect : std::uint8_t {

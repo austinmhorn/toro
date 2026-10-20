@@ -102,6 +102,7 @@ struct CallExpr final : Expr {
     const FunctionDeclarationStmt* resolved_function{nullptr};
     const MethodDeclaration* resolved_method{nullptr};
     const InterfaceMethod* resolved_interface_method{nullptr};
+    std::optional<std::string> transfer_source;
 };
 struct IndexExpr final : Expr {
     IndexExpr(std::unique_ptr<Expr> object, std::unique_ptr<Expr> index)
@@ -156,6 +157,7 @@ struct Stmt {
     SourceLocation location;
     std::string module_name;
     bool is_public{false};
+    std::optional<std::string> transfer_source;
 };
 struct ImportDeclarationStmt final : Stmt {
     ImportDeclarationStmt(SourceLocation location, std::vector<std::string> path)

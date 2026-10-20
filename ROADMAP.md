@@ -464,11 +464,32 @@ Completed behavior:
 This milestone does not implement ownership transfer, general borrow inference,
 escape analysis, stack allocation, cycles, arenas, or source ownership syntax.
 
-## 9.2 Ownership transfer / move analysis
+## 9.2 Ownership transfer / move analysis — completed
 
 Recognize when a strong reference can transfer ownership without retain/release ping-pong.
 
 Avoid mandatory source-level `move` syntax for obvious cases.
+
+Completed behavior:
+
+- a dedicated final-use pass between ARC materialization and ARC optimization;
+- explicit ownership-transfer operations and deterministic transfer metrics in
+  `toro ir --arc`;
+- locally proven transfers through declarations, reassignment, returns, strong
+  class fields, and class-valued List/Map/Array storage;
+- concrete nullable, generic-class, interface-backed, and derived-to-base
+  reference transfers using the same local proof;
+- conservative treatment of branches, loops, weak fields, ordinary calls,
+  dynamic dispatch, and foreign/unknown calls;
+- an IR-only C backend that consumes the selected transfer rather than
+  reconstructing liveness;
+- differential native coverage for output, identity, weak invalidation, and
+  exactly-once derived-to-base destruction.
+
+Ordinary function arguments remain non-consuming until later interprocedural
+ownership summaries can establish a stable parameter ownership convention.
+General borrow inference, escape analysis, stack allocation, cycle handling,
+and source ownership syntax remain deferred.
 
 ## 9.3 Escape analysis
 

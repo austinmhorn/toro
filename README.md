@@ -67,7 +67,12 @@ C backend consumes that IR without retaining or reading the originating AST;
 current correctness-first ARC and runtime-helper behavior are preserved. A
 separate ARC materialization pass records the lifetime schedule before a
 conservative optimizer removes only locally proven parameter retain/release
-pairs. Effect analysis remains descriptive rather than policy enforcement.
+pairs. A block-local ownership-transfer pass also recognizes final-use moves
+through locals, returns, strong fields, and supported class-valued collections;
+`toro ir --arc` exposes those decisions and their deterministic metrics. Calls,
+uncertain control flow, weak storage, and unknown effects remain conservative.
+This is compiler-internal analysis and adds no source-level ownership syntax.
+Effect analysis remains descriptive rather than policy enforcement.
 The backend-independent effect pass summarizes allocation, lifetime relevance,
 I/O, native/foreign calls, dynamic dispatch, termination, and uncertainty across
 the transitive call graph. These summaries are inspection metadata only; they do

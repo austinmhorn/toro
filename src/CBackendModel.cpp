@@ -567,6 +567,9 @@ private:
         }
         auto value = std::make_unique<CallExpr>(
             std::move(callee), std::move(generic_arguments), std::move(arguments));
+        if (operation.ownership_transfer) {
+            value->transfer_source = operation.ownership_transfer->source;
+        }
         if (operation.result_type) value->resolved_type = operation.result_type->type;
         for (const auto& [name, type] : operation.substitutions) {
             value->resolved_substitutions.emplace_back(name, type.type);
@@ -714,6 +717,9 @@ private:
             break;
         }
         result->module_name = operation.origin.module_name;
+        if (operation.ownership_transfer) {
+            result->transfer_source = operation.ownership_transfer->source;
+        }
         return result;
     }
 

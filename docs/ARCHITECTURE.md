@@ -235,7 +235,20 @@ before and after optimization. Class lifetime schedules also expose finalization
 strong-field teardown, and non-owning weak slots.
 
 `ArcOptimizer` consumes the existing effect summaries rather than recomputing
-effects. Its first deliberately narrow rule turns an owned class/interface or
+effects. Before it runs, `OwnershipTransferAnalyzer` performs deterministic
+block-local final-use analysis. It records an explicit transfer when a directly
+loaded owning reference is stored into another local, returned, assigned to a
+strong class field, or inserted into currently supported managed collection
+storage and the source has no later use in that block. Nullable class values,
+derived-to-base upcasts, class-backed interfaces, and concrete generic classes
+use the same rule. The analysis deliberately does not transfer outer ownership
+inside nested control flow, across loops, through weak fields, or into ordinary,
+virtual, interface, foreign, or otherwise unknown calls. Those cases await
+interprocedural ownership summaries and general escape/borrow analysis.
+
+`ArcOptimizer` replaces each proven destination retain plus source cleanup
+release with the transfer operation, while preserving the destination's final
+lifetime-ending release. Its earlier narrow borrow rule turns an owned class/interface or
 shared-collection parameter into a borrow only when every use is a local,
 non-owning observation and the callable has no escape, foreign/unknown-call, or
 dynamic-dispatch barrier. Generic callables, returned/stored references,
@@ -244,8 +257,8 @@ baseline schedule. The C backend requires materialized lifetime IR and consumes
 the selected parameter ownership schedule; it does not independently decide
 whether that pair is safe to elide.
 
-`toro ir --arc` prints both schedules, marks elided operations, and reports
-before/after counts. `toro ir --arc --no-opt` keeps the baseline active for
+`toro ir --arc` prints both schedules, marks elided operations, reports
+before/after counts and ownership-transfer totals. `toro ir --arc --no-opt` keeps the baseline active for
 differential runtime testing. This is internal ownership analysis: Toro adds no
 source-level `move`, `borrow`, `owned`, reference, or lifetime syntax.
 
@@ -548,8 +561,9 @@ Important unsupported or deferred runtime features include:
 - separate object-file compilation and linking per module;
 - raw pointers, C aggregates, callbacks, variadics, header parsing, dynamic
   loading, and C++/Objective-C/Rust ABI interoperability;
-- ownership transfer, escape analysis, and general borrow optimization beyond
-  the first local ARC-pair elision rule;
+- interprocedural ownership transfer, escape analysis, and general borrow
+  optimization beyond the current block-local final-use transfer and local
+  parameter ARC-pair elision rules;
 - `performance function` enforcement.
 
 The type system may understand some concepts before the C backend can execute them. The backend should reject unsupported constructs clearly rather than emit incorrect C.
@@ -568,10 +582,10 @@ Correct runtime behavior is the priority.
 ## Typed toro IR and future analyses
 
 Toro now has a typed intermediate representation, deterministic effect
-summaries, and explicit baseline/optimized ARC schedules between static
-semantics and an IR-only C backend. More sophisticated ownership transfer,
-escape, general borrowing, and performance work remains layered on that
-foundation.
+summaries, explicit block-local ownership transfers, and baseline/optimized ARC
+schedules between static semantics and an IR-only C backend. Interprocedural
+ownership transfer, escape, general borrowing, and performance work remains
+layered on that foundation.
 
 Target pipeline:
 

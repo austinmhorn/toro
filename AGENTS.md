@@ -137,13 +137,15 @@ Performance/memory decisions should eventually be observable and explainable thr
 
 Current pipeline:
 
-`source -> lexer -> parser/AST -> semantic analysis -> type checking -> typed toro IR -> effect analysis -> ARC materialization/elision -> C generator -> native compiler`
+`source -> lexer -> parser/AST -> semantic analysis -> type checking -> typed toro IR -> effect analysis -> ARC materialization -> ownership-transfer analysis -> ARC optimization -> C generator -> native compiler`
 
 `IRProgram` is the backend semantic boundary. Backends must not retain or read
 frontend AST nodes; frontend convenience entry points must lower to IR before
 invoking backend code.
 
-The C backend requires materialized lifetime IR. ARC optimization must preserve
+The C backend requires materialized lifetime IR. Ownership-transfer analysis
+records proven final-use transfers before ARC optimization; the backend consumes
+those decisions rather than repeating liveness analysis. ARC optimization must preserve
 an inspectable unoptimized schedule and must consume existing effect summaries
 conservatively rather than recomputing effects or introducing source ownership
 syntax.

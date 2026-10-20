@@ -71,15 +71,20 @@ void materialize_operation(
         }
         break;
     case IROperationKind::Declare:
-    case IROperationKind::Assign:
-        if (operation.result_type && owns_runtime_storage(*operation.result_type)) {
+    case IROperationKind::Assign: {
+        const IRType* assigned_type = operation.result_type
+            ? &*operation.result_type
+            : (!operation.children.empty() && operation.children.back().result_type
+                    ? &*operation.children.back().result_type
+                    : nullptr);
+        if (assigned_type && owns_runtime_storage(*assigned_type)) {
             append_operation(schedule, IRArcOperationKind::ManagedAssignment,
                 operation.name, operation.origin,
                 operation.kind == IROperationKind::Declare
                     ? "managed local initialization"
                     : "managed local replacement");
             const auto pair = next_pair++;
-            if (is_shared_reference(*operation.result_type)
+            if (is_shared_reference(*assigned_type)
                 && !operation.children.empty()
                 && expression_is_borrowed(operation.children.back())) {
                 append_operation(schedule, IRArcOperationKind::Retain,
@@ -94,6 +99,7 @@ void materialize_operation(
                 pair);
         }
         break;
+    }
     case IROperationKind::MemberAssign:
     case IROperationKind::IndexAssign:
         if (!operation.children.empty()) {
@@ -233,6 +239,267 @@ bool parameter_is_observed_only(
     return true;
 }
 
+std::size_t load_count(const IROperation& operation, std::string_view name)
+{
+    std::size_t result = operation.kind == IROperationKind::Load
+            && operation.name == name
+        ? 1 : 0;
+    for (const auto& child : operation.children) {
+        result += load_count(child, name);
+    }
+    return result;
+}
+
+bool used_after(
+    const IROperation& block,
+    std::size_t statement_index,
+    std::string_view name)
+{
+    for (std::size_t index = statement_index + 1;
+         index < block.children.size(); ++index) {
+        if (load_count(block.children[index], name) != 0) return true;
+    }
+    return false;
+}
+
+const IROperation* direct_load(const IROperation& operation)
+{
+    return operation.kind == IROperationKind::Load ? &operation : nullptr;
+}
+
+class TransferAnalysis {
+public:
+    explicit TransferAnalysis(IRProgram& program) : program_(program)
+    {
+        for (const auto& declaration : program.declarations) {
+            declarations_.emplace(declaration.identity, &declaration);
+        }
+    }
+
+    void run()
+    {
+        for (auto& declaration : program_.declarations) {
+            if (!declaration.body) continue;
+            std::unordered_map<std::string, IROrigin> owned;
+            for (const auto& parameter : declaration.parameters) {
+                if (is_shared_reference(parameter.type)) {
+                    owned.emplace(parameter.name, parameter.origin);
+                }
+            }
+            analyze_block(*declaration.body, std::move(owned));
+        }
+        for (auto& operation : program_.top_level_operations) {
+            if (operation.kind == IROperationKind::Block) {
+                analyze_block(operation, {});
+            }
+        }
+    }
+
+private:
+    bool strong_field(const IROperation& operation) const
+    {
+        if (operation.kind != IROperationKind::MemberAssign
+            || operation.children.empty()
+            || !operation.children.front().result_type) {
+            return false;
+        }
+        std::string owner = operation.children.front().result_type->type.name;
+        while (!owner.empty()) {
+            const auto found = declarations_.find(owner);
+            if (found == declarations_.end()) return false;
+            for (const auto& field : found->second->fields) {
+                if (field.name == operation.name) {
+                    return !field.is_weak
+                        && field.type.category == IRValueCategory::ManagedReference;
+                }
+            }
+            std::string base;
+            for (const auto& related : found->second->related_types) {
+                if (related.category == IRValueCategory::ManagedReference) {
+                    base = related.type.name;
+                    break;
+                }
+            }
+            owner = std::move(base);
+        }
+        return false;
+    }
+
+    void mark(
+        IROperation& operation,
+        const IROperation& source,
+        std::string destination,
+        std::unordered_map<std::string, IROrigin>& owned)
+    {
+        if (!owned.contains(source.name) || source.name == destination) return;
+        operation.ownership_transfer = IROwnershipTransfer{
+            source.name, std::move(destination), owned.at(source.name)};
+        owned.erase(source.name);
+    }
+
+    void analyze_block(
+        IROperation& block,
+        std::unordered_map<std::string, IROrigin> owned)
+    {
+        if (block.kind != IROperationKind::Block) return;
+        for (std::size_t index = 0; index < block.children.size(); ++index) {
+            auto& operation = block.children[index];
+            const IROperation* source = nullptr;
+            std::string destination;
+            bool eligible = false;
+            switch (operation.kind) {
+            case IROperationKind::Declare:
+                if (!operation.children.empty()) {
+                    source = direct_load(operation.children.front());
+                    destination = operation.name;
+                    eligible = source && operation.result_type
+                        && is_shared_reference(*operation.result_type);
+                }
+                break;
+            case IROperationKind::Assign:
+                if (!operation.children.empty()) {
+                    source = direct_load(operation.children.front());
+                    destination = operation.name;
+                    eligible = source && source->result_type
+                        && is_shared_reference(*source->result_type)
+                        && owned.contains(destination);
+                }
+                break;
+            case IROperationKind::Return:
+                if (!operation.children.empty()) {
+                    source = direct_load(operation.children.front());
+                    destination = "return";
+                    eligible = source && source->result_type
+                        && is_shared_reference(*source->result_type);
+                    if (!source && operation.children.front().kind
+                            == IROperationKind::Construction
+                        && operation.children.front().result_type
+                        && is_shared_reference(
+                            *operation.children.front().result_type)) {
+                        operation.ownership_transfer = IROwnershipTransfer{
+                            "<temporary>", "return",
+                            operation.children.front().origin};
+                    }
+                }
+                break;
+            case IROperationKind::MemberAssign:
+                if (operation.children.size() == 2 && strong_field(operation)) {
+                    source = direct_load(operation.children.back());
+                    destination = "field " + operation.name;
+                    eligible = source && source->result_type
+                        && is_shared_reference(*source->result_type);
+                }
+                break;
+            case IROperationKind::IndexAssign:
+                if (!operation.children.empty()) {
+                    source = direct_load(operation.children.back());
+                    destination = "collection element";
+                    eligible = source && source->result_type
+                        && is_shared_reference(*source->result_type);
+                }
+                break;
+            case IROperationKind::CollectionOperation:
+                if ((operation.name == "add" || operation.name == "append")
+                    && operation.children.size() == 2) {
+                    source = direct_load(operation.children.back());
+                    destination = "collection element";
+                    eligible = source && source->result_type
+                        && is_shared_reference(*source->result_type);
+                }
+                break;
+            default:
+                break;
+            }
+            if (eligible && source && load_count(operation, source->name) == 1
+                && !used_after(block, index, source->name)) {
+                mark(operation, *source, destination, owned);
+            }
+            if (operation.kind == IROperationKind::Declare
+                && operation.result_type
+                && is_shared_reference(*operation.result_type)) {
+                owned.insert_or_assign(operation.name, operation.origin);
+            }
+
+            // Nested control flow gets independent local reasoning. Ownership
+            // from an outer scope is deliberately not transferred there.
+            for (auto& child : operation.children) {
+                if (child.kind == IROperationKind::Block) {
+                    analyze_block(child, {});
+                }
+            }
+        }
+    }
+
+    IRProgram& program_;
+    std::unordered_map<std::string, const IRDeclaration*> declarations_;
+};
+
+void apply_transfer_operations(
+    const IROperation& operation,
+    IRCallableArcSchedule& schedule,
+    std::size_t& transfer_count)
+{
+    if (operation.ownership_transfer) {
+        const auto& transfer = *operation.ownership_transfer;
+        const auto& source = transfer.source;
+        const auto& destination = transfer.destination;
+        if (source != "<temporary>") {
+            for (auto& arc : schedule.optimized_operations) {
+                if (arc.elided) continue;
+                const bool at_destination = arc.origin.module_name
+                        == operation.origin.module_name
+                    && arc.origin.location.line == operation.origin.location.line
+                    && arc.origin.location.column
+                        == operation.origin.location.column;
+                const bool source_release = arc.kind == IRArcOperationKind::Release
+                    && arc.value == source
+                    && arc.origin.module_name
+                        == transfer.source_origin.module_name
+                    && arc.origin.location.line
+                        == transfer.source_origin.location.line
+                    && arc.origin.location.column
+                        == transfer.source_origin.location.column
+                    && (arc.reason == "owning local scope cleanup"
+                        || arc.reason == "owned parameter exit");
+                bool destination_retain = false;
+                if (operation.kind == IROperationKind::Return) {
+                    destination_retain = arc.kind == IRArcOperationKind::Retain
+                        && arc.value == "return";
+                } else if (operation.kind == IROperationKind::MemberAssign) {
+                    destination_retain = arc.kind == IRArcOperationKind::Retain
+                        && arc.value == operation.name
+                        && arc.reason == "new stored reference";
+                } else if (operation.kind == IROperationKind::IndexAssign) {
+                    destination_retain = arc.kind == IRArcOperationKind::Retain
+                        && arc.reason == "new stored reference";
+                } else if (operation.kind == IROperationKind::CollectionOperation) {
+                    destination_retain = arc.kind == IRArcOperationKind::Retain
+                        && arc.value == source
+                        && arc.reason == "reference stored in collection";
+                } else {
+                    destination_retain = arc.kind == IRArcOperationKind::Retain
+                        && arc.value == operation.name
+                        && arc.reason == "borrowed value stored in owning local";
+                }
+                destination_retain = destination_retain && at_destination;
+                if (source_release || destination_retain) arc.elided = true;
+            }
+        }
+        schedule.optimized_operations.push_back(IRArcOperation{
+            IRArcOperationKind::OwnershipTransfer,
+            source + " -> " + destination,
+            operation.origin,
+            "final-use ownership transfer",
+            0,
+            false,
+        });
+        ++transfer_count;
+    }
+    for (const auto& child : operation.children) {
+        apply_transfer_operations(child, schedule, transfer_count);
+    }
+}
+
 const IRCallableEffectSummary* find_summary(
     const IRProgram& program,
     std::string_view identity)
@@ -330,6 +597,16 @@ void ArcMaterializer::materialize(IRProgram& program) const
     update_metrics(program);
 }
 
+void OwnershipTransferAnalyzer::analyze(IRProgram& program) const
+{
+    if (program.arc_stage != IRArcStage::Materialized) {
+        throw std::runtime_error(
+            "ownership-transfer analysis requires materialized lifetime IR");
+    }
+    TransferAnalysis(program).run();
+    program.arc_stage = IRArcStage::TransfersAnalyzed;
+}
+
 void ArcOptimizer::optimize(IRProgram& program) const
 {
     if (program.arc_stage == IRArcStage::Semantic) {
@@ -349,13 +626,16 @@ void ArcOptimizer::optimize(IRProgram& program) const
     }
 
     std::size_t elided_pairs = 0;
+    std::size_t transfer_count = 0;
     for (auto& schedule : program.arc_schedules) {
         schedule.optimized_operations = schedule.unoptimized_operations;
         const auto declaration = declarations.find(schedule.callable_identity);
-        if (declaration == declarations.end() || !declaration->second->body
-            || !declaration->second->generic_parameters.empty()) {
+        if (declaration == declarations.end() || !declaration->second->body) {
             continue;
         }
+        apply_transfer_operations(
+            *declaration->second->body, schedule, transfer_count);
+        if (!declaration->second->generic_parameters.empty()) continue;
         const auto* effects = find_summary(program, schedule.callable_identity);
         if (!effects || has_barrier(*effects)) continue;
 
@@ -389,9 +669,22 @@ void ArcOptimizer::optimize(IRProgram& program) const
             ++elided_pairs;
         }
     }
+    if (!program.top_level_operations.empty()) {
+        const auto schedule = std::ranges::find_if(
+            program.arc_schedules,
+            [](const auto& candidate) {
+                return candidate.callable_identity == "<top-level>";
+            });
+        if (schedule != program.arc_schedules.end()) {
+            for (const auto& operation : program.top_level_operations) {
+                apply_transfer_operations(operation, *schedule, transfer_count);
+            }
+        }
+    }
     program.arc_stage = IRArcStage::Optimized;
     update_metrics(program);
     program.arc_metrics.elided_pairs = elided_pairs;
+    program.arc_metrics.ownership_transfers = transfer_count;
 }
 
 } // namespace toro

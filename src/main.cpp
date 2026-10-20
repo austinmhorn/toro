@@ -131,6 +131,7 @@ std::string generate_c(const CompilationInput& input)
     auto ir = toro::IRLowerer().lower(program);
     toro::EffectAnalyzer().analyze(ir);
     toro::ArcMaterializer().materialize(ir);
+    toro::OwnershipTransferAnalyzer().analyze(ir);
     toro::ArcOptimizer().optimize(ir);
     return toro::CGenerator().generate(ir);
 }
@@ -148,7 +149,10 @@ void print_ir(
     if (include_effects || include_arc) toro::EffectAnalyzer().analyze(ir);
     if (include_arc) {
         toro::ArcMaterializer().materialize(ir);
-        if (optimize_arc) toro::ArcOptimizer().optimize(ir);
+        if (optimize_arc) {
+            toro::OwnershipTransferAnalyzer().analyze(ir);
+            toro::ArcOptimizer().optimize(ir);
+        }
     }
     std::cout << toro::dump_ir(ir, include_effects, include_arc);
 }

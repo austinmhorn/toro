@@ -14,4 +14,9 @@ public:
     void optimize(IRProgram& program) const;
 };
 
+class OwnershipTransferAnalyzer {
+public:
+    void analyze(IRProgram& program) const;
+};
+
 } // namespace toro
