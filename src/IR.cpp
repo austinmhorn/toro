@@ -206,6 +206,38 @@ std::string_view ir_storage_class_name(IRStorageClass storage)
     return "heap";
 }
 
+std::string_view ir_reference_mode_name(IRReferenceMode mode)
+{
+    switch (mode) {
+    case IRReferenceMode::Own: return "own";
+    case IRReferenceMode::Transfer: return "transfer";
+    case IRReferenceMode::Borrow: return "borrow";
+    case IRReferenceMode::Weak: return "weak";
+    }
+    return "own";
+}
+
+std::string_view ir_borrow_kind_name(IRBorrowKind kind)
+{
+    switch (kind) {
+    case IRBorrowKind::Parameter: return "parameter";
+    case IRBorrowKind::Receiver: return "receiver";
+    case IRBorrowKind::CallArgument: return "argument";
+    case IRBorrowKind::LocalAlias: return "local-alias";
+    }
+    return "argument";
+}
+
+std::string_view ir_parameter_use_name(IRParameterUse use)
+{
+    switch (use) {
+    case IRParameterUse::ObservedOnly: return "observed-only";
+    case IRParameterUse::RetainedOrEscaped: return "retained-or-escaped";
+    case IRParameterUse::Unknown: return "unknown";
+    }
+    return "unknown";
+}
+
 std::string dump_ir(
     const IRProgram& program,
     bool include_effects,
@@ -363,6 +395,9 @@ std::string dump_ir(
         case IRArcStage::TransfersAnalyzed:
             output += "transfers-analyzed\n";
             break;
+        case IRArcStage::BorrowsAnalyzed:
+            output += "borrows-analyzed\n";
+            break;
         case IRArcStage::Optimized: output += "optimized\n"; break;
         }
         output += "  metrics retains-before "
@@ -376,7 +411,22 @@ std::string dump_ir(
             + " elided-pairs "
             + std::to_string(program.arc_metrics.elided_pairs)
             + " ownership-transfers "
-            + std::to_string(program.arc_metrics.ownership_transfers) + "\n";
+            + std::to_string(program.arc_metrics.ownership_transfers)
+            + " borrows-inferred "
+            + std::to_string(program.arc_metrics.borrows_inferred) + "\n";
+        if (!program.borrow_summaries.empty()) {
+            output += "  borrow-summaries\n";
+            for (const auto& summary : program.borrow_summaries) {
+                output += "    " + summary.callable_identity + "."
+                    + summary.parameter_name + " "
+                    + std::string(ir_parameter_use_name(summary.use));
+                if (!summary.reason.empty()) {
+                    output += " ; " + summary.reason;
+                }
+                append_origin(summary.origin, output);
+                output += '\n';
+            }
+        }
         for (const auto& schedule : program.arc_schedules) {
             output += "  callable " + schedule.callable_identity + "\n";
             output += "    before\n";

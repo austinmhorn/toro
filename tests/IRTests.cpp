@@ -1,5 +1,6 @@
 #include "toro/CGenerator.hpp"
 #include "toro/ArcOptimizer.hpp"
+#include "toro/BorrowInferenceAnalyzer.hpp"
 #include "toro/EffectAnalyzer.hpp"
 #include "toro/IR.hpp"
 #include "toro/IRLowerer.hpp"
@@ -64,6 +65,7 @@ toro::IRProgram lower_detached(std::string_view source)
     toro::EffectAnalyzer().analyze(ir);
     toro::ArcMaterializer().materialize(ir);
     toro::OwnershipTransferAnalyzer().analyze(ir);
+    toro::BorrowInferenceAnalyzer().analyze(ir);
     toro::ArcOptimizer().optimize(ir);
     return ir;
 }
@@ -144,10 +146,12 @@ void test_representative_feature_inventory_and_determinism()
     toro::EffectAnalyzer().analyze(first_ir);
     toro::ArcMaterializer().materialize(first_ir);
     toro::OwnershipTransferAnalyzer().analyze(first_ir);
+    toro::BorrowInferenceAnalyzer().analyze(first_ir);
     toro::ArcOptimizer().optimize(first_ir);
     toro::EffectAnalyzer().analyze(second_ir);
     toro::ArcMaterializer().materialize(second_ir);
     toro::OwnershipTransferAnalyzer().analyze(second_ir);
+    toro::BorrowInferenceAnalyzer().analyze(second_ir);
     toro::ArcOptimizer().optimize(second_ir);
 
     const auto first_c = toro::CGenerator().generate(first_ir);

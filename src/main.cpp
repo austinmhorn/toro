@@ -1,4 +1,5 @@
 #include "toro/ArcOptimizer.hpp"
+#include "toro/BorrowInferenceAnalyzer.hpp"
 #include "toro/CGenerator.hpp"
 #include "toro/EffectAnalyzer.hpp"
 #include "toro/EscapeAnalyzer.hpp"
@@ -136,6 +137,7 @@ std::string generate_c(const CompilationInput& input)
     toro::StorageDecisionAnalyzer().analyze(ir);
     toro::ArcMaterializer().materialize(ir);
     toro::OwnershipTransferAnalyzer().analyze(ir);
+    toro::BorrowInferenceAnalyzer().analyze(ir);
     toro::ArcOptimizer().optimize(ir);
     return toro::CGenerator().generate(ir);
 }
@@ -162,6 +164,7 @@ void print_ir(
         toro::ArcMaterializer().materialize(ir);
         if (optimize_arc) {
             toro::OwnershipTransferAnalyzer().analyze(ir);
+            toro::BorrowInferenceAnalyzer().analyze(ir);
             toro::ArcOptimizer().optimize(ir);
         }
     }

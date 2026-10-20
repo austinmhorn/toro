@@ -65,12 +65,14 @@ before C generation. The IR retains stable declaration choices, concrete generic
 substitutions, dispatch kinds, runtime-value categories, and source origins. The
 C backend consumes that IR without retaining or reading the originating AST;
 current correctness-first ARC and runtime-helper behavior are preserved. A
-separate ARC materialization pass records the lifetime schedule before a
-conservative optimizer removes only locally proven parameter retain/release
-pairs. A block-local ownership-transfer pass also recognizes final-use moves
-through locals, returns, strong fields, and supported class-valued collections;
-`toro ir --arc` exposes those decisions and their deterministic metrics. Calls,
-uncertain control flow, weak storage, and unknown effects remain conservative.
+separate ARC materialization pass records the lifetime schedule. A block-local
+ownership-transfer pass recognizes final-use moves through locals, returns,
+strong fields, and supported class-valued collections. Borrow inference then
+records operation-bounded receiver, parameter, call-argument, and local-alias
+observations and removes only the corresponding proven ARC pairs. `toro ir
+--arc` exposes transfers, borrows, per-parameter facts, and deterministic
+before/after metrics. Escaping stores, weak access, uncertain control flow, and
+unknown/foreign ownership boundaries remain conservative.
 This is compiler-internal analysis and adds no source-level ownership syntax.
 An allocation-site escape pass now follows effect analysis and classifies each
 managed construction as non-escaping, escaping, or unknown. It propagates local

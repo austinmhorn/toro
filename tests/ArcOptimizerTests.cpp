@@ -1,4 +1,5 @@
 #include "toro/ArcOptimizer.hpp"
+#include "toro/BorrowInferenceAnalyzer.hpp"
 #include "toro/CGenerator.hpp"
 #include "toro/EffectAnalyzer.hpp"
 #include "toro/IRLowerer.hpp"
@@ -38,6 +39,7 @@ toro::IRProgram lower(std::string_view source, bool optimize)
     toro::ArcMaterializer().materialize(ir);
     if (optimize) {
         toro::OwnershipTransferAnalyzer().analyze(ir);
+        toro::BorrowInferenceAnalyzer().analyze(ir);
         toro::ArcOptimizer().optimize(ir);
     }
     return ir;
@@ -57,8 +59,8 @@ bool has_borrow(const toro::IRCallableArcSchedule& value)
 {
     for (const auto& operation : value.optimized_operations) {
         if (operation.kind == toro::IRArcOperationKind::BorrowedTemporary
-            && operation.reason
-                == "locally proven non-escaping parameter borrow") {
+            && operation.reason.find("parameter borrow")
+                != std::string::npos) {
             return true;
         }
     }
@@ -179,10 +181,10 @@ void test_escape_dynamic_generic_and_storage_barriers()
         true);
     expect(!has_borrow(schedule(ir, "escape(Box)")),
         "escaping return was treated as borrowed");
-    expect(!has_borrow(schedule(ir, "dynamic(Readable)")),
-        "dynamic dispatch was treated as borrowed");
+    expect(has_borrow(schedule(ir, "dynamic(Readable)")),
+        "safe interface receiver was not treated as borrowed");
     expect(!has_borrow(schedule(ir, "identity(T)")),
-        "generic parameter was optimized without concrete proof");
+        "returned generic parameter was treated as borrowed");
     expect(!has_borrow(schedule(ir, "store(Box)")),
         "stored parameter was treated as borrowed");
 }
@@ -209,8 +211,8 @@ void test_nullable_observation_and_foreign_barrier()
         "    return box.value\n"
         "}\n",
         true);
-    expect(!has_borrow(schedule(foreign, "observe(Box)")),
-        "foreign-call effect barrier was ignored");
+    expect(has_borrow(schedule(foreign, "observe(Box)")),
+        "unrelated foreign effect blocked parameter-specific borrowing");
 }
 
 void test_weak_fields_and_managed_payloads_are_explicit()

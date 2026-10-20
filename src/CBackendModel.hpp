@@ -159,6 +159,7 @@ struct Stmt {
     std::string module_name;
     bool is_public{false};
     std::optional<std::string> transfer_source;
+    bool borrowed_alias{false};
 };
 struct ImportDeclarationStmt final : Stmt {
     ImportDeclarationStmt(SourceLocation location, std::vector<std::string> path)

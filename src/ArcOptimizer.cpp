@@ -199,49 +199,6 @@ void materialize_operation(
     }
 }
 
-bool has_barrier(const IRCallableEffectSummary& summary)
-{
-    for (const auto effect : summary.effects) {
-        if (effect == IREffect::Escape || effect == IREffect::ForeignCall
-            || effect == IREffect::DynamicDispatch
-            || effect == IREffect::UnknownExternal) {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool safe_parameter_load(
-    const IROperation& parent,
-    std::size_t child_index)
-{
-    if (parent.kind == IROperationKind::MemberAccess && child_index == 0
-        && parent.result_type && !owns_runtime_storage(*parent.result_type)) {
-        return true;
-    }
-    return parent.kind == IROperationKind::Binary
-        && (parent.name == "==" || parent.name == "!=");
-}
-
-bool parameter_is_observed_only(
-    const IROperation& operation,
-    std::string_view parameter,
-    const IROperation* parent = nullptr,
-    std::size_t child_index = 0)
-{
-    if (operation.kind == IROperationKind::Load
-        && operation.name == parameter) {
-        return parent && safe_parameter_load(*parent, child_index);
-    }
-    for (std::size_t index = 0; index < operation.children.size(); ++index) {
-        if (!parameter_is_observed_only(
-                operation.children[index], parameter, &operation, index)) {
-            return false;
-        }
-    }
-    return true;
-}
-
 std::size_t load_count(const IROperation& operation, std::string_view name)
 {
     std::size_t result = operation.kind == IROperationKind::Load
@@ -504,16 +461,65 @@ void apply_transfer_operations(
     }
 }
 
-const IRCallableEffectSummary* find_summary(
-    const IRProgram& program,
-    std::string_view identity)
+void elide_pair(
+    IRCallableArcSchedule& schedule,
+    std::size_t pair,
+    std::size_t& elided_pairs)
 {
-    const auto found = std::ranges::find_if(
-        program.effect_summaries,
-        [&](const auto& summary) {
-            return summary.callable_identity == identity;
+    if (pair == 0) return;
+    bool changed = false;
+    for (auto& operation : schedule.optimized_operations) {
+        if (operation.pair_id == pair && !operation.elided) {
+            operation.elided = true;
+            changed = true;
+        }
+    }
+    if (changed) ++elided_pairs;
+}
+
+std::size_t local_alias_pair(
+    const IROperation& operation,
+    const IRBorrowUse& borrow,
+    const IRCallableArcSchedule& schedule)
+{
+    for (const auto& arc : schedule.optimized_operations) {
+        if (arc.kind == IRArcOperationKind::Retain
+            && arc.value == borrow.destination
+            && arc.origin.module_name == operation.origin.module_name
+            && arc.origin.location.line == operation.origin.location.line
+            && arc.origin.location.column == operation.origin.location.column
+            && arc.reason == "borrowed value stored in owning local") {
+            return arc.pair_id;
+        }
+    }
+    return 0;
+}
+
+void apply_borrow_operations(
+    const IROperation& operation,
+    IRCallableArcSchedule& schedule,
+    std::size_t& borrow_count,
+    std::size_t& elided_pairs)
+{
+    for (const auto& borrow : operation.borrows) {
+        if (borrow.kind == IRBorrowKind::LocalAlias) {
+            elide_pair(schedule,
+                local_alias_pair(operation, borrow, schedule), elided_pairs);
+        }
+        schedule.optimized_operations.push_back(IRArcOperation{
+            IRArcOperationKind::BorrowedTemporary,
+            borrow.source + " -> " + borrow.destination,
+            borrow.origin,
+            borrow.reason,
+            0,
+            false,
         });
-    return found == program.effect_summaries.end() ? nullptr : &*found;
+        ++borrow_count;
+    }
+    for (const auto& child : operation.children) {
+        apply_borrow_operations(
+            child, schedule, borrow_count, elided_pairs);
+    }
 }
 
 void update_metrics(IRProgram& program)
@@ -613,9 +619,9 @@ void OwnershipTransferAnalyzer::analyze(IRProgram& program) const
 
 void ArcOptimizer::optimize(IRProgram& program) const
 {
-    if (program.arc_stage == IRArcStage::Semantic) {
+    if (program.arc_stage != IRArcStage::BorrowsAnalyzed) {
         throw std::runtime_error(
-            "ARC optimizer requires materialized lifetime IR");
+            "ARC optimizer requires completed borrow inference");
     }
     const bool has_callable = std::ranges::any_of(
         program.declarations, is_callable);
@@ -631,6 +637,7 @@ void ArcOptimizer::optimize(IRProgram& program) const
 
     std::size_t elided_pairs = 0;
     std::size_t transfer_count = 0;
+    std::size_t borrow_count = 0;
     for (auto& schedule : program.arc_schedules) {
         schedule.optimized_operations = schedule.unoptimized_operations;
         const auto declaration = declarations.find(schedule.callable_identity);
@@ -639,39 +646,35 @@ void ArcOptimizer::optimize(IRProgram& program) const
         }
         apply_transfer_operations(
             *declaration->second->body, schedule, transfer_count);
-        if (!declaration->second->generic_parameters.empty()) continue;
-        const auto* effects = find_summary(program, schedule.callable_identity);
-        if (!effects || has_barrier(*effects)) continue;
-
-        for (const auto& parameter : declaration->second->parameters) {
-            if (!is_shared_reference(parameter.type)
-                || !parameter_is_observed_only(
-                    *declaration->second->body, parameter.name)) {
+        for (const auto& summary : program.borrow_summaries) {
+            if (summary.callable_identity != schedule.callable_identity
+                || summary.use != IRParameterUse::ObservedOnly) {
                 continue;
             }
             std::size_t pair = 0;
             for (const auto& operation : schedule.optimized_operations) {
                 if (operation.kind == IRArcOperationKind::Retain
-                    && operation.value == parameter.name
+                    && operation.value == summary.parameter_name
                     && operation.reason == "owned parameter entry") {
                     pair = operation.pair_id;
                     break;
                 }
             }
-            if (pair == 0) continue;
-            for (auto& operation : schedule.optimized_operations) {
-                if (operation.pair_id == pair) operation.elided = true;
-            }
+            elide_pair(schedule, pair, elided_pairs);
             schedule.optimized_operations.push_back(IRArcOperation{
                 IRArcOperationKind::BorrowedTemporary,
-                parameter.name,
-                parameter.origin,
-                "locally proven non-escaping parameter borrow",
+                summary.parameter_name,
+                summary.origin,
+                summary.receiver
+                    ? "inferred operation-bounded receiver borrow"
+                    : "inferred operation-bounded parameter borrow",
                 pair,
                 false,
             });
-            ++elided_pairs;
+            ++borrow_count;
         }
+        apply_borrow_operations(*declaration->second->body, schedule,
+            borrow_count, elided_pairs);
     }
     if (!program.top_level_operations.empty()) {
         const auto schedule = std::ranges::find_if(
@@ -689,6 +692,7 @@ void ArcOptimizer::optimize(IRProgram& program) const
     update_metrics(program);
     program.arc_metrics.elided_pairs = elided_pairs;
     program.arc_metrics.ownership_transfers = transfer_count;
+    program.arc_metrics.borrows_inferred = borrow_count;
 }
 
 } // namespace toro

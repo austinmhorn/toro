@@ -136,7 +136,7 @@ private:
             for (const auto& operation : schedule.optimized_operations) {
                 if (operation.kind == IRArcOperationKind::BorrowedTemporary
                     && operation.reason
-                        == "locally proven non-escaping parameter borrow") {
+                        == "inferred operation-bounded parameter borrow") {
                     result.push_back(operation.value);
                 }
             }
@@ -721,6 +721,11 @@ private:
         if (operation.ownership_transfer) {
             result->transfer_source = operation.ownership_transfer->source;
         }
+        result->borrowed_alias = std::ranges::any_of(
+            operation.borrows,
+            [](const auto& borrow) {
+                return borrow.kind == IRBorrowKind::LocalAlias;
+            });
         return result;
     }
 

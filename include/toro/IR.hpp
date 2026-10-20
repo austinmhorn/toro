@@ -69,6 +69,29 @@ struct IROwnershipTransfer {
     IROrigin source_origin;
 };
 
+enum class IRReferenceMode : std::uint8_t {
+    Own,
+    Transfer,
+    Borrow,
+    Weak,
+};
+
+enum class IRBorrowKind : std::uint8_t {
+    Parameter,
+    Receiver,
+    CallArgument,
+    LocalAlias,
+};
+
+struct IRBorrowUse {
+    IRBorrowKind kind{IRBorrowKind::CallArgument};
+    std::size_t operand_index{0};
+    std::string source;
+    std::string destination;
+    IROrigin origin;
+    std::string reason;
+};
+
 enum class IRStorageClass : std::uint8_t {
     Heap,
     Stack,
@@ -84,6 +107,7 @@ struct IROperation {
     std::vector<std::string> argument_names;
     std::vector<IROperation> children;
     std::optional<IROwnershipTransfer> ownership_transfer;
+    std::vector<IRBorrowUse> borrows;
     std::string allocation_identity;
     std::optional<IRStorageClass> storage;
 };
@@ -160,6 +184,7 @@ enum class IRArcStage {
     Semantic,
     Materialized,
     TransfersAnalyzed,
+    BorrowsAnalyzed,
     Optimized,
 };
 
@@ -195,6 +220,23 @@ struct IRArcMetrics {
     std::size_t releases_after{0};
     std::size_t elided_pairs{0};
     std::size_t ownership_transfers{0};
+    std::size_t borrows_inferred{0};
+};
+
+enum class IRParameterUse : std::uint8_t {
+    ObservedOnly,
+    RetainedOrEscaped,
+    Unknown,
+};
+
+struct IRParameterBorrowSummary {
+    std::string callable_identity;
+    std::string parameter_name;
+    std::size_t parameter_index{0};
+    IRParameterUse use{IRParameterUse::Unknown};
+    IROrigin origin;
+    std::string reason;
+    bool receiver{false};
 };
 
 enum class IREffect : std::uint8_t {
@@ -290,12 +332,16 @@ struct IRProgram {
     IRArcStage arc_stage{IRArcStage::Semantic};
     std::vector<IRCallableArcSchedule> arc_schedules;
     IRArcMetrics arc_metrics;
+    std::vector<IRParameterBorrowSummary> borrow_summaries;
 };
 
 [[nodiscard]] std::string_view ir_effect_name(IREffect effect);
 [[nodiscard]] std::string_view ir_escape_state_name(IREscapeState state);
 [[nodiscard]] std::string_view ir_escape_reason_name(IREscapeReason reason);
 [[nodiscard]] std::string_view ir_storage_class_name(IRStorageClass storage);
+[[nodiscard]] std::string_view ir_reference_mode_name(IRReferenceMode mode);
+[[nodiscard]] std::string_view ir_borrow_kind_name(IRBorrowKind kind);
+[[nodiscard]] std::string_view ir_parameter_use_name(IRParameterUse use);
 [[nodiscard]] std::string dump_ir(
     const IRProgram& program,
     bool include_effects = false,

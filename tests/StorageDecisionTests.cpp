@@ -1,4 +1,5 @@
 #include "toro/ArcOptimizer.hpp"
+#include "toro/BorrowInferenceAnalyzer.hpp"
 #include "toro/CGenerator.hpp"
 #include "toro/EffectAnalyzer.hpp"
 #include "toro/EscapeAnalyzer.hpp"
@@ -48,6 +49,7 @@ std::string generate(toro::IRProgram ir)
 {
     toro::ArcMaterializer().materialize(ir);
     toro::OwnershipTransferAnalyzer().analyze(ir);
+    toro::BorrowInferenceAnalyzer().analyze(ir);
     toro::ArcOptimizer().optimize(ir);
     return toro::CGenerator().generate(ir);
 }
@@ -91,9 +93,11 @@ void test_stack_promotion_and_heap_only_mode()
     auto heap_arc = heap_only;
     toro::ArcMaterializer().materialize(stack_arc);
     toro::OwnershipTransferAnalyzer().analyze(stack_arc);
+    toro::BorrowInferenceAnalyzer().analyze(stack_arc, false);
     toro::ArcOptimizer().optimize(stack_arc);
     toro::ArcMaterializer().materialize(heap_arc);
     toro::OwnershipTransferAnalyzer().analyze(heap_arc);
+    toro::BorrowInferenceAnalyzer().analyze(heap_arc, false);
     toro::ArcOptimizer().optimize(heap_arc);
     expect(stack_arc.arc_metrics.retains_after
                 < heap_arc.arc_metrics.retains_after

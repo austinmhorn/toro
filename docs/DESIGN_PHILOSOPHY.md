@@ -147,17 +147,19 @@ ARC retain/release elision
 ```
 
 This is being implemented gradually now that correct runtime semantics and a
-suitable toro IR exist. Toro now materializes the current ARC schedule, removes
-locally proven redundant parameter retain/release pairs, and transfers an
-ownership obligation through straightforward block-local final uses. The
+suitable toro IR exist. Toro now materializes the current ARC schedule,
+transfers ownership through straightforward block-local final uses, and removes
+ARC pairs selected by operation-bounded borrow inference. The
 compiler also classifies managed allocation sites as local, escaping, or unknown
 while propagating aliases and recording escape causes. A separate storage pass
 now promotes direct local owners to automatic storage when identity, dispatch,
 and lifecycle behavior remain provably bounded, while heap + ARC remains the
 conservative fallback. Weak-observed and uncertain lifetimes are intentionally
-not promoted. Broader stack placement, interprocedural ownership summaries,
-general borrow inference, and the rest of the optimization hierarchy remain
-future work.
+not promoted. A following borrow pass now identifies operation-bounded
+non-owning parameters, receivers, call arguments, and straightforward local
+aliases, removing ARC traffic without changing the source model. Broader stack
+placement, general interprocedural ownership summaries, longer-lived borrow
+reasoning, and the rest of the optimization hierarchy remain future work.
 
 ## Why not expose ownership everywhere?
 

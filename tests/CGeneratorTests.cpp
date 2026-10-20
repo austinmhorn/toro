@@ -37,6 +37,18 @@ void expect_contains(
     }
 }
 
+void expect_not_contains(
+    std::string_view output,
+    std::string_view unexpected,
+    std::string_view description)
+{
+    if (output.find(unexpected) != std::string_view::npos) {
+        throw std::runtime_error(
+            "generated C unexpectedly contained " + std::string(description)
+                + ": " + std::string(unexpected));
+    }
+}
+
 void expect_backend_error(std::string_view source, std::string_view expected)
 {
     try {
@@ -435,10 +447,10 @@ void test_class_arc_lowering()
         "static void toro_class_7_Counter_release",
         "class release helper");
     expect_contains(output, "free(toro_value);", "final strong release frees object");
-    expect_contains(
+    expect_not_contains(
         output,
         "toro_class_7_Counter_retain(toro_var_copy);",
-        "reference copy retain");
+        "retain for an inferred local borrow");
     expect_contains(
         output,
         "toro_class_7_Counter_release(toro_var_replacement);",

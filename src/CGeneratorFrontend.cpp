@@ -1,6 +1,7 @@
 #include "toro/CGenerator.hpp"
 
 #include "toro/ArcOptimizer.hpp"
+#include "toro/BorrowInferenceAnalyzer.hpp"
 #include "toro/EffectAnalyzer.hpp"
 #include "toro/EscapeAnalyzer.hpp"
 #include "toro/IRLowerer.hpp"
@@ -16,6 +17,7 @@ std::string CGenerator::generate(const Program& program)
     StorageDecisionAnalyzer{}.analyze(ir);
     ArcMaterializer{}.materialize(ir);
     OwnershipTransferAnalyzer{}.analyze(ir);
+    BorrowInferenceAnalyzer{}.analyze(ir);
     ArcOptimizer{}.optimize(ir);
     return generate(ir);
 }

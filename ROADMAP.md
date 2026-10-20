@@ -559,13 +559,38 @@ control-block lifetime that the current local proof does not extend. Stack
 promotion does not recursively promote strong fields; each construction must
 qualify independently.
 
-## 9.5 Borrow inference
+## 9.5 Borrow inference — completed
 
 Represent temporary non-owning access internally.
 
 Eliminate ARC traffic for calls proven not to retain/escape references.
 
 Do not expose lifetime syntax unless real programs demonstrate a need.
+
+Completed behavior:
+
+- a dedicated borrow-inference pass between ownership transfer and ARC
+  optimization;
+- deterministic per-parameter `observed-only`, `retained-or-escaped`, or
+  `unknown` facts without treating unrelated callable effects as parameter
+  escapes;
+- explicit receiver, call-argument, parameter, and lexical local-alias borrows
+  in lifetime IR;
+- safe direct, generic, virtual, and interface calls when every relevant target
+  observes without retaining;
+- borrowed derived/base and class/interface views, stack- and heap-backed
+  locals, and immediate strong-field or collection-element observations;
+- operation-bounded alias lifetimes that keep the original owner responsible
+  for destruction;
+- ARC-pair removal and deterministic borrow metrics in `toro ir --arc`;
+- conservative ownership for returns, persistent stores, collection insertion,
+  escaping forwarding, foreign/unknown calls, unsafe dynamic targets, weak
+  access, reassignment, and branch/loop lifetime uncertainty;
+- borrow-enabled/disabled native differential coverage preserving identity,
+  mutation, storage decisions, weak behavior, and destruction order.
+
+This is deliberately not the general interprocedural ownership-summary system
+planned for Phase 9.6.
 
 ## 9.6 Interprocedural ownership summaries
 

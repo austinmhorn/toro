@@ -15,6 +15,7 @@ include(CTest)
 
 add_library(toro_core
     src/ArcOptimizer.cpp
+    src/BorrowInferenceAnalyzer.cpp
     src/CBackendModel.cpp
     src/CGenerator.cpp
     src/CGeneratorFrontend.cpp
@@ -101,6 +102,11 @@ if(BUILD_TESTING)
     target_link_libraries(toro_storage_decision_tests PRIVATE toro_core)
     toro_enable_warnings(toro_storage_decision_tests)
     add_test(NAME storage_decision COMMAND toro_storage_decision_tests)
+
+    add_executable(toro_borrow_inference_tests tests/BorrowInferenceTests.cpp)
+    target_link_libraries(toro_borrow_inference_tests PRIVATE toro_core)
+    toro_enable_warnings(toro_borrow_inference_tests)
+    add_test(NAME borrow_inference COMMAND toro_borrow_inference_tests)
 
     add_executable(toro_arc_optimizer_tests tests/ArcOptimizerTests.cpp)
     target_link_libraries(toro_arc_optimizer_tests PRIVATE toro_core)

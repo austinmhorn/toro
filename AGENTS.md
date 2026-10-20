@@ -141,22 +141,24 @@ Performance/memory decisions should eventually be observable and explainable thr
 
 Current pipeline:
 
-`source -> lexer -> parser/AST -> semantic analysis -> type checking -> typed toro IR -> effect analysis -> escape analysis -> storage decisions -> ARC materialization -> ownership-transfer analysis -> ARC optimization -> C generator -> native compiler`
+`source -> lexer -> parser/AST -> semantic analysis -> type checking -> typed toro IR -> effect analysis -> escape analysis -> storage decisions -> ARC materialization -> ownership-transfer analysis -> borrow inference -> ARC optimization -> C generator -> native compiler`
 
 `IRProgram` is the backend semantic boundary. Backends must not retain or read
 frontend AST nodes; frontend convenience entry points must lower to IR before
 invoking backend code.
 
 The C backend requires materialized lifetime IR. Ownership-transfer analysis
-records proven final-use transfers before ARC optimization; the backend consumes
-those decisions rather than repeating liveness analysis. ARC optimization must preserve
+records proven final-use transfers, then borrow inference records proven
+operation-bounded non-owning uses before ARC optimization. The backend consumes
+those decisions rather than repeating lifetime analysis. ARC optimization must preserve
 an inspectable unoptimized schedule and must consume existing effect summaries
 conservatively rather than recomputing effects or introducing source ownership
 syntax.
 
-Future analyses should extend that pipeline with explicit borrow inference,
-storage selection, broader ARC elision, and performance validation before the
-backend. These remain IR passes rather than backend reasoning.
+Future analyses should extend that pipeline with interprocedural ownership
+summaries, broader borrow/storage reasoning, broader ARC elision, and
+performance validation before the backend. These remain IR passes rather than
+backend reasoning.
 
 Escape annotations remain descriptive; only the explicit storage-decision pass
 may select stack storage. Heap remains the fallback whenever proof is uncertain.

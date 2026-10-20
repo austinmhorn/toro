@@ -1,4 +1,5 @@
 #include "toro/ArcOptimizer.hpp"
+#include "toro/BorrowInferenceAnalyzer.hpp"
 #include "toro/CGenerator.hpp"
 #include "toro/EffectAnalyzer.hpp"
 #include "toro/EscapeAnalyzer.hpp"
@@ -346,9 +347,11 @@ void test_analysis_does_not_change_arc_or_generated_c()
         "escape analysis changed effect inspection output");
     toro::ArcMaterializer().materialize(baseline);
     toro::OwnershipTransferAnalyzer().analyze(baseline);
+    toro::BorrowInferenceAnalyzer().analyze(baseline);
     toro::ArcOptimizer().optimize(baseline);
     toro::ArcMaterializer().materialize(annotated);
     toro::OwnershipTransferAnalyzer().analyze(annotated);
+    toro::BorrowInferenceAnalyzer().analyze(annotated);
     toro::ArcOptimizer().optimize(annotated);
     expect(baseline.arc_metrics.retains_after
                 == annotated.arc_metrics.retains_after

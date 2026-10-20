@@ -1,5 +1,6 @@
 #include "toro/CGenerator.hpp"
 #include "toro/ArcOptimizer.hpp"
+#include "toro/BorrowInferenceAnalyzer.hpp"
 #include "toro/EffectAnalyzer.hpp"
 #include "toro/EscapeAnalyzer.hpp"
 #include "toro/IRLowerer.hpp"
@@ -48,6 +49,7 @@ std::string generate_with_storage(std::string_view source, bool enable_stack)
     toro::StorageDecisionAnalyzer().analyze(ir, enable_stack);
     toro::ArcMaterializer().materialize(ir);
     toro::OwnershipTransferAnalyzer().analyze(ir);
+    toro::BorrowInferenceAnalyzer().analyze(ir);
     toro::ArcOptimizer().optimize(ir);
     return toro::CGenerator().generate(ir);
 }

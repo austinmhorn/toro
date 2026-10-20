@@ -3419,7 +3419,7 @@ private:
                 const bool transferred = statement.transfer_source.has_value();
                 if (is_managed_reference(type) && !initializer.owned
                     && !initializer.stack_backed
-                    && !transferred) {
+                    && !transferred && !statement.borrowed_alias) {
                     output += prefix + retain_call(type, c_name) + ";\n";
                 }
                 if (transferred && !initializer.stack_backed) {
@@ -3436,7 +3436,7 @@ private:
                             true,
                         });
                     }
-                } else {
+                } else if (!statement.borrowed_alias) {
                     owned_reference_values_.back().push_back(
                         ValueInfo{type, c_name, false, true});
                 }
@@ -3447,7 +3447,8 @@ private:
                     type,
                     c_name,
                     false,
-                    is_owned_runtime_value(type) && !initializer.stack_backed,
+                    is_owned_runtime_value(type) && !initializer.stack_backed
+                        && !statement.borrowed_alias,
                     initializer.stack_backed,
                 });
             return output;

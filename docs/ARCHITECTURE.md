@@ -33,6 +33,18 @@ EffectAnalyzer
     ↓
 annotated toro IR
     ↓
+EscapeAnalyzer
+    ↓
+StorageDecisionAnalyzer
+    ↓
+ArcMaterializer
+    ↓
+OwnershipTransferAnalyzer
+    ↓
+BorrowInferenceAnalyzer
+    ↓
+ArcOptimizer
+    ↓
 CGenerator
     ↓
 generated C11
@@ -234,8 +246,8 @@ unoptimized baseline and an active schedule, so lifetime behavior can be tested
 before and after optimization. Class lifetime schedules also expose finalization,
 strong-field teardown, and non-owning weak slots.
 
-`ArcOptimizer` consumes the existing effect summaries rather than recomputing
-effects. Before it runs, `OwnershipTransferAnalyzer` performs deterministic
+`ArcOptimizer` consumes the existing lifetime facts rather than recomputing
+them. Before it runs, `OwnershipTransferAnalyzer` performs deterministic
 block-local final-use analysis. It records an explicit transfer when a directly
 loaded owning reference is stored into another local, returned, assigned to a
 strong class field, or inserted into currently supported managed collection
@@ -244,21 +256,34 @@ derived-to-base upcasts, class-backed interfaces, and concrete generic classes
 use the same rule. The analysis deliberately does not transfer outer ownership
 inside nested control flow, across loops, through weak fields, or into ordinary,
 virtual, interface, foreign, or otherwise unknown calls. Those cases await
-interprocedural ownership summaries and general escape/borrow analysis.
+interprocedural ownership summaries and broader lifetime analysis.
+
+`BorrowInferenceAnalyzer` follows transfer analysis. It computes deterministic,
+parameter-specific `observed-only`, `retained-or-escaped`, or `unknown` facts
+and annotates operation-bounded receiver, argument, and local-alias borrows.
+IR reference modes distinguish `own`, `transfer`, `borrow`, and `weak`; borrow
+uses carry their operand, source, destination, origin, kind, and proof reason.
+The current borrow lifetime is one call/immediate expression or the last proven
+straight-line use of a local alias. It is not a general lifetime-variable
+system.
+Unrelated effects in a callable do not automatically make every parameter
+owning. Direct and concrete-generic calls may borrow an observed parameter;
+virtual and interface calls require every reachable implementation to be safe.
+Straight-line aliases borrow only through their last proven observation while
+the original owner remains live. Returns, persistent storage, collection
+insertion, escaping forwarding, foreign/unknown ownership boundaries, unsafe
+dynamic targets, weak access, reassignment, and branch/loop uncertainty retain
+the owning baseline.
 
 `ArcOptimizer` replaces each proven destination retain plus source cleanup
-release with the transfer operation, while preserving the destination's final
-lifetime-ending release. Its earlier narrow borrow rule turns an owned class/interface or
-shared-collection parameter into a borrow only when every use is a local,
-non-owning observation and the callable has no escape, foreign/unknown-call, or
-dynamic-dispatch barrier. Generic callables, returned/stored references,
-managed assignments, calls with the reference, and uncertain cases retain the
-baseline schedule. The C backend requires materialized lifetime IR and consumes
-the selected parameter ownership schedule; it does not independently decide
-whether that pair is safe to elide.
+release with a transfer, and elides parameter or local-alias ARC pairs selected
+by borrow inference, while preserving the final owning lifetime edge. Transfer
+and borrow metadata are disjoint. The C backend consumes those explicit IR
+decisions; it does not independently infer moves, borrows, or lifetimes.
 
 `toro ir --arc` prints both schedules, marks elided operations, reports
-before/after counts and ownership-transfer totals. `toro ir --arc --no-opt` keeps the baseline active for
+parameter facts, and includes before/after, ownership-transfer, and inferred
+borrow totals. `toro ir --arc --no-opt` keeps the baseline active for
 differential runtime testing. This is internal ownership analysis: Toro adds no
 source-level `move`, `borrow`, `owned`, reference, or lifetime syntax.
 
@@ -625,10 +650,10 @@ Important unsupported or deferred runtime features include:
 - separate object-file compilation and linking per module;
 - raw pointers, C aggregates, callbacks, variadics, header parsing, dynamic
   loading, and C++/Objective-C/Rust ABI interoperability;
-- interprocedural ownership/escape summaries and general borrow optimization
-  beyond the current direct-local stack promotion, allocation-site escape
-  annotations, block-local final-use transfer, and local parameter ARC-pair
-  elision rules;
+- interprocedural ownership/escape summaries and broader borrow optimization
+  beyond the current operation-bounded parameter, receiver, argument, and
+  straight-line local-alias facts, direct-local stack promotion,
+  allocation-site escape annotations, and block-local final-use transfer;
 - `performance function` enforcement.
 
 The type system may understand some concepts before the C backend can execute them. The backend should reject unsupported constructs clearly rather than emit incorrect C.
@@ -648,10 +673,11 @@ Correct runtime behavior is the priority.
 
 Toro now has a typed intermediate representation, deterministic effect
 summaries, allocation-site escape annotations, explicit storage decisions,
-block-local ownership transfers, and baseline/optimized ARC schedules between
-static semantics and an IR-only C backend. Broader stack allocation,
-interprocedural ownership/escape summaries, general borrowing, and performance
-work remain layered on that foundation.
+block-local ownership transfers, operation-bounded borrow facts, and
+baseline/optimized ARC schedules between static semantics and an IR-only C
+backend. Broader stack allocation, interprocedural ownership summaries,
+longer-lived borrow reasoning, and performance work remain layered on that
+foundation.
 
 Target pipeline:
 
@@ -672,9 +698,11 @@ ARC materialization
     ↓
 ownership-transfer analysis
     ↓
+borrow inference
+    ↓
 ARC optimization/elision
     ↓
-future borrow and broader storage analysis
+future ownership summaries and broader storage/borrow analysis
     ↓
 performance-contract validation
     ↓
@@ -711,7 +739,9 @@ function print_user(user: User) {
 }
 ```
 
-If the callee cannot retain `user`, the compiler should eventually avoid unnecessary retain/release traffic.
+If the callee cannot retain `user`, the compiler avoids the parameter
+retain/release pair and records an operation-bounded borrow. Longer-lived or
+ambiguous borrowing remains conservative.
 
 ### Ownership transfer
 
