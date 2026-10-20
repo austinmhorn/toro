@@ -19,6 +19,7 @@ add_library(toro_core
     src/CGenerator.cpp
     src/CGeneratorFrontend.cpp
     src/EffectAnalyzer.cpp
+    src/EscapeAnalyzer.cpp
     src/Formatter.cpp
     src/IR.cpp
     src/IRLowerer.cpp
@@ -90,6 +91,11 @@ if(BUILD_TESTING)
     toro_enable_warnings(toro_effect_analyzer_tests)
     add_test(NAME effect_analyzer COMMAND toro_effect_analyzer_tests)
 
+    add_executable(toro_escape_analyzer_tests tests/EscapeAnalyzerTests.cpp)
+    target_link_libraries(toro_escape_analyzer_tests PRIVATE toro_core)
+    toro_enable_warnings(toro_escape_analyzer_tests)
+    add_test(NAME escape_analyzer COMMAND toro_escape_analyzer_tests)
+
     add_executable(toro_arc_optimizer_tests tests/ArcOptimizerTests.cpp)
     target_link_libraries(toro_arc_optimizer_tests PRIVATE toro_core)
     target_compile_definitions(toro_arc_optimizer_tests PRIVATE
@@ -152,6 +158,9 @@ if(BUILD_TESTING)
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/project)
     add_test(NAME project_cli_ir_effects COMMAND toro ir --effects)
     set_tests_properties(project_cli_ir_effects PROPERTIES
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/project)
+    add_test(NAME project_cli_ir_escape COMMAND toro ir --escape)
+    set_tests_properties(project_cli_ir_escape PROPERTIES
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/project)
     add_test(NAME project_cli_ir_arc COMMAND toro ir --arc)
     set_tests_properties(project_cli_ir_arc PROPERTIES

@@ -168,10 +168,40 @@ std::string_view ir_effect_name(IREffect effect)
     return "unknown";
 }
 
+std::string_view ir_escape_state_name(IREscapeState state)
+{
+    switch (state) {
+    case IREscapeState::DoesNotEscape: return "no";
+    case IREscapeState::Escapes: return "yes";
+    case IREscapeState::Unknown: return "unknown";
+    }
+    return "unknown";
+}
+
+std::string_view ir_escape_reason_name(IREscapeReason reason)
+{
+    switch (reason) {
+    case IREscapeReason::Return: return "return";
+    case IREscapeReason::GlobalStorage: return "global-storage";
+    case IREscapeReason::StrongField: return "strong-field";
+    case IREscapeReason::CollectionStorage: return "collection-storage";
+    case IREscapeReason::CallArgument: return "call-argument";
+    case IREscapeReason::DynamicCall: return "dynamic-call";
+    case IREscapeReason::ForeignCall: return "foreign-call";
+    case IREscapeReason::UnknownCall: return "unknown-call";
+    case IREscapeReason::WeakObservation: return "weak-observation";
+    case IREscapeReason::InterfaceAlias: return "interface-alias";
+    case IREscapeReason::ResultPayload: return "result-payload";
+    case IREscapeReason::EnumPayload: return "enum-payload";
+    }
+    return "unknown";
+}
+
 std::string dump_ir(
     const IRProgram& program,
     bool include_effects,
-    bool include_arc)
+    bool include_arc,
+    bool include_escape)
 {
     std::string output = "toro-ir 1\n";
     output += "entry " + program.entry_module + "\n";
@@ -278,6 +308,32 @@ std::string dump_ir(
                     append_origin(cause.origin, output);
                     break;
                 }
+                output += '\n';
+            }
+        }
+    }
+    if (include_escape) {
+        output += "escape\n";
+        output += "  metrics managed-allocations "
+            + std::to_string(program.escape_metrics.managed_allocations)
+            + " non-escaping "
+            + std::to_string(program.escape_metrics.non_escaping)
+            + " escaping "
+            + std::to_string(program.escape_metrics.escaping)
+            + " unknown "
+            + std::to_string(program.escape_metrics.unknown) + "\n";
+        for (const auto& allocation : program.escape_allocations) {
+            output += "  allocation " + allocation.identity + " : "
+                + complete_type_name(allocation.type);
+            append_origin(allocation.origin, output);
+            output += "\n    escape "
+                + std::string(ir_escape_state_name(allocation.state)) + '\n';
+            for (const auto& cause : allocation.causes) {
+                output += cause.causes_escape ? "    reason " : "    constraint ";
+                output += ir_escape_reason_name(cause.reason);
+                if (cause.uncertain) output += " uncertain";
+                if (!cause.detail.empty()) output += " " + cause.detail;
+                append_origin(cause.origin, output);
                 output += '\n';
             }
         }

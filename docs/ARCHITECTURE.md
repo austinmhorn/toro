@@ -303,6 +303,36 @@ It does not itself alter ARC, allocation, ownership, or native behavior, though
 the later ARC optimizer consumes its escape/dynamic/foreign/unknown barriers.
 It does not implement or validate the future `performance function` contract.
 
+### Escape analysis
+
+`EscapeAnalyzer` runs after effect analysis and before ARC materialization. It
+assigns every managed class construction a stable identity derived from its
+callable identity, logical module, source location, and deterministic occurrence
+index. Each site is classified as `does not escape`, `escapes`, or `unknown`
+and keeps compact reason records with source origins.
+
+The pass carries allocation-site sets through local aliases, reassignment,
+nullable/reference wrappers, inheritance upcasts, class-backed interfaces,
+concrete generic classes, and Result/enum payloads. A return, top-level/global
+store, strong-field store, or supported Array/List/Map store is a definite
+escape. Weak-field storage records a non-owning runtime constraint but does not
+itself make the target escape. Branch facts are joined conservatively; loop
+bodies are joined with the pre-loop state so analysis remains deterministic and
+terminating.
+
+Direct calls use the exact declaration identity, generic substitutions, and
+existing effect summaries. Proven observing calls preserve locality. Calls with
+escape/foreign/unknown/dynamic effects, virtual or interface dispatch, and C
+FFI boundaries produce an `unknown` result when the current summaries cannot
+identify parameter-specific behavior. This is deliberately conservative and
+does not attempt interprocedural ownership summaries.
+
+`toro ir --escape` prints allocation classifications, causes, origins, and
+managed/non-escaping/escaping/unknown counts. Escape annotations do not change
+ARC materialization, ownership transfer, generated C, object layout, or native
+behavior. Phase 9.4 may consume proven non-escape facts for storage decisions;
+until then all class instances remain heap-backed and ARC-managed.
+
 ### Type checker
 
 The type checker currently owns the static semantics for:
@@ -561,9 +591,9 @@ Important unsupported or deferred runtime features include:
 - separate object-file compilation and linking per module;
 - raw pointers, C aggregates, callbacks, variadics, header parsing, dynamic
   loading, and C++/Objective-C/Rust ABI interoperability;
-- interprocedural ownership transfer, escape analysis, and general borrow
-  optimization beyond the current block-local final-use transfer and local
-  parameter ARC-pair elision rules;
+- interprocedural ownership/escape summaries, stack allocation, and general
+  borrow optimization beyond the current allocation-site escape annotations,
+  block-local final-use transfer, and local parameter ARC-pair elision rules;
 - `performance function` enforcement.
 
 The type system may understand some concepts before the C backend can execute them. The backend should reject unsupported constructs clearly rather than emit incorrect C.
@@ -582,10 +612,10 @@ Correct runtime behavior is the priority.
 ## Typed toro IR and future analyses
 
 Toro now has a typed intermediate representation, deterministic effect
-summaries, explicit block-local ownership transfers, and baseline/optimized ARC
-schedules between static semantics and an IR-only C backend. Interprocedural
-ownership transfer, escape, general borrowing, and performance work remains
-layered on that foundation.
+summaries, allocation-site escape annotations, explicit block-local ownership
+transfers, and baseline/optimized ARC schedules between static semantics and an
+IR-only C backend. Stack allocation, interprocedural ownership/escape summaries,
+general borrowing, and performance work remain layered on that foundation.
 
 Target pipeline:
 
@@ -598,17 +628,15 @@ typed toro IR
     ↓
 effect analysis
     ↓
-ownership analysis
-    ↓
 escape analysis
     ↓
-borrow analysis
+ARC materialization
     ↓
-lifetime/storage decisions
-    ↓
-ARC insertion where required
+ownership-transfer analysis
     ↓
 ARC optimization/elision
+    ↓
+future borrow and storage analysis
     ↓
 performance-contract validation
     ↓

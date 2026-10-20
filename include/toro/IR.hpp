@@ -222,6 +222,51 @@ struct IRCallableEffectSummary {
     std::vector<IREffectCause> causes;
 };
 
+enum class IREscapeState : std::uint8_t {
+    DoesNotEscape,
+    Escapes,
+    Unknown,
+};
+
+enum class IREscapeReason : std::uint8_t {
+    Return,
+    GlobalStorage,
+    StrongField,
+    CollectionStorage,
+    CallArgument,
+    DynamicCall,
+    ForeignCall,
+    UnknownCall,
+    WeakObservation,
+    InterfaceAlias,
+    ResultPayload,
+    EnumPayload,
+};
+
+struct IREscapeCause {
+    IREscapeReason reason{IREscapeReason::Return};
+    IROrigin origin;
+    std::string detail;
+    bool causes_escape{true};
+    bool uncertain{false};
+};
+
+struct IRAllocationEscape {
+    std::string identity;
+    std::string callable_identity;
+    IRType type;
+    IROrigin origin;
+    IREscapeState state{IREscapeState::DoesNotEscape};
+    std::vector<IREscapeCause> causes;
+};
+
+struct IREscapeMetrics {
+    std::size_t managed_allocations{0};
+    std::size_t non_escaping{0};
+    std::size_t escaping{0};
+    std::size_t unknown{0};
+};
+
 struct IRProgram {
     std::vector<IRModule> modules;
     std::vector<IRDeclaration> declarations;
@@ -229,15 +274,20 @@ struct IRProgram {
     std::string entry_module;
     IRLifetimeModel lifetime_model{IRLifetimeModel::LegacyArc};
     std::vector<IRCallableEffectSummary> effect_summaries;
+    std::vector<IRAllocationEscape> escape_allocations;
+    IREscapeMetrics escape_metrics;
     IRArcStage arc_stage{IRArcStage::Semantic};
     std::vector<IRCallableArcSchedule> arc_schedules;
     IRArcMetrics arc_metrics;
 };
 
 [[nodiscard]] std::string_view ir_effect_name(IREffect effect);
+[[nodiscard]] std::string_view ir_escape_state_name(IREscapeState state);
+[[nodiscard]] std::string_view ir_escape_reason_name(IREscapeReason reason);
 [[nodiscard]] std::string dump_ir(
     const IRProgram& program,
     bool include_effects = false,
-    bool include_arc = false);
+    bool include_arc = false,
+    bool include_escape = false);
 
 } // namespace toro

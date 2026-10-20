@@ -1,6 +1,7 @@
 #include "toro/ArcOptimizer.hpp"
 #include "toro/CGenerator.hpp"
 #include "toro/EffectAnalyzer.hpp"
+#include "toro/EscapeAnalyzer.hpp"
 #include "toro/Formatter.hpp"
 #include "toro/IRLowerer.hpp"
 #include "toro/Lexer.hpp"
@@ -34,7 +35,7 @@ void print_usage(std::ostream& output)
               "       toro tokens <source.toro>\n"
               "       toro ast-expression <source.toro>\n"
               "       toro ast <source.toro>\n"
-              "       toro ir [--effects | --arc [--no-opt]] [source.toro]\n"
+              "       toro ir [--effects | --escape | --arc [--no-opt]] [source.toro]\n"
               "       toro check [source.toro]\n"
               "       toro emit-c [source.toro] [-o <output.c>]\n"
               "       toro build [source.toro] [-o <output>]\n"
@@ -130,6 +131,7 @@ std::string generate_c(const CompilationInput& input)
     toro::TypeChecker().check(program);
     auto ir = toro::IRLowerer().lower(program);
     toro::EffectAnalyzer().analyze(ir);
+    toro::EscapeAnalyzer().analyze(ir);
     toro::ArcMaterializer().materialize(ir);
     toro::OwnershipTransferAnalyzer().analyze(ir);
     toro::ArcOptimizer().optimize(ir);
@@ -140,13 +142,17 @@ void print_ir(
     const CompilationInput& input,
     bool include_effects = false,
     bool include_arc = false,
-    bool optimize_arc = true)
+    bool optimize_arc = true,
+    bool include_escape = false)
 {
     auto program = load_program(input);
     toro::SemanticAnalyzer().analyze(program);
     toro::TypeChecker().check(program);
     auto ir = toro::IRLowerer().lower(program);
-    if (include_effects || include_arc) toro::EffectAnalyzer().analyze(ir);
+    if (include_effects || include_arc || include_escape) {
+        toro::EffectAnalyzer().analyze(ir);
+    }
+    if (include_escape) toro::EscapeAnalyzer().analyze(ir);
     if (include_arc) {
         toro::ArcMaterializer().materialize(ir);
         if (optimize_arc) {
@@ -154,7 +160,8 @@ void print_ir(
             toro::ArcOptimizer().optimize(ir);
         }
     }
-    std::cout << toro::dump_ir(ir, include_effects, include_arc);
+    std::cout << toro::dump_ir(
+        ir, include_effects, include_arc, include_escape);
 }
 
 void emit_c(
@@ -348,6 +355,12 @@ int main(int argc, char* argv[])
     const bool file_ir_effects = argc == 4
         && std::string_view(argv[1]) == "ir"
         && std::string_view(argv[2]) == "--effects";
+    const bool project_ir_escape = argc == 3
+        && std::string_view(argv[1]) == "ir"
+        && std::string_view(argv[2]) == "--escape";
+    const bool file_ir_escape = argc == 4
+        && std::string_view(argv[1]) == "ir"
+        && std::string_view(argv[2]) == "--escape";
     const bool project_ir_arc = argc == 3
         && std::string_view(argv[1]) == "ir"
         && std::string_view(argv[2]) == "--arc";
@@ -376,6 +389,7 @@ int main(int argc, char* argv[])
         && std::string_view(argv[3]) == "-o";
     if (argc != 2 && !standard_source_command && !project_ir_effects
         && !file_ir_effects && !project_ir_arc && !file_ir_arc
+        && !project_ir_escape && !file_ir_escape
         && !project_ir_arc_unoptimized && !file_ir_arc_unoptimized
         && !project_build_with_output
         && !project_emit_c_with_output && !file_build_with_output
@@ -398,6 +412,10 @@ int main(int argc, char* argv[])
             print_ir(direct_input(argv[3]), true);
         } else if (project_ir_effects) {
             print_ir(project_input(), true);
+        } else if (file_ir_escape) {
+            print_ir(direct_input(argv[3]), false, false, true, true);
+        } else if (project_ir_escape) {
+            print_ir(project_input(), false, false, true, true);
         } else if (file_emit_c_with_output) {
             emit_c(direct_input(argv[2]), argv[4]);
         } else if (project_emit_c_with_output) {

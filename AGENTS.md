@@ -125,7 +125,10 @@ Long term:
 - Class/reference semantics remain stable even if the compiler changes storage strategy.
 - The compiler should infer moves, borrows, escape behavior, and stack allocation where safe.
 - ARC is a semantic fallback for shared reference lifetime, not the identity of the language.
-- Future ownership/escape/borrow analysis belongs behind a toro IR layer, not as ad-hoc logic spread through the C generator.
+- Ownership/escape/borrow analysis belongs behind the toro IR layer, not as
+  ad-hoc logic spread through the C generator. The current `EscapeAnalyzer`
+  annotates managed allocation sites only; the backend must not use those facts
+  to change storage until the roadmap reaches stack allocation.
 - Avoid source-level ownership syntax unless real programs prove it necessary.
 - Do not prematurely implement arenas, atomic ARC, ownership annotations, or other advanced memory features before the roadmap reaches them.
 
@@ -137,7 +140,7 @@ Performance/memory decisions should eventually be observable and explainable thr
 
 Current pipeline:
 
-`source -> lexer -> parser/AST -> semantic analysis -> type checking -> typed toro IR -> effect analysis -> ARC materialization -> ownership-transfer analysis -> ARC optimization -> C generator -> native compiler`
+`source -> lexer -> parser/AST -> semantic analysis -> type checking -> typed toro IR -> effect analysis -> escape analysis -> ARC materialization -> ownership-transfer analysis -> ARC optimization -> C generator -> native compiler`
 
 `IRProgram` is the backend semantic boundary. Backends must not retain or read
 frontend AST nodes; frontend convenience entry points must lower to IR before
@@ -150,9 +153,12 @@ an inspectable unoptimized schedule and must consume existing effect summaries
 conservatively rather than recomputing effects or introducing source ownership
 syntax.
 
-Future analyses should evolve that pipeline toward:
+Future analyses should extend that pipeline with explicit borrow inference,
+storage selection, broader ARC elision, and performance validation before the
+backend. These remain IR passes rather than backend reasoning.
 
-`source -> frontend -> toro IR -> effect analysis -> ownership/escape/borrow analysis -> ARC insertion/elision -> performance validation -> backend`
+Escape annotations are descriptive in Phase 9.3 and must not change allocation,
+object layout, or ARC behavior on their own.
 
 Do not tightly couple new language semantics to C-specific implementation details if a clean backend abstraction is practical.
 

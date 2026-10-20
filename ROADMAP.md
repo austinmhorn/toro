@@ -488,10 +488,11 @@ Completed behavior:
 
 Ordinary function arguments remain non-consuming until later interprocedural
 ownership summaries can establish a stable parameter ownership convention.
-General borrow inference, escape analysis, stack allocation, cycle handling,
-and source ownership syntax remain deferred.
+General borrow inference, stack allocation, cycle handling, and source ownership
+syntax remain deferred. Escape analysis is implemented by the following
+milestone without changing storage or ARC behavior.
 
-## 9.3 Escape analysis
+## 9.3 Escape analysis — completed
 
 Determine whether class instances escape their local lifetime.
 
@@ -504,6 +505,29 @@ Track escapes through:
 - closures;
 - weak relationships;
 - unknown calls.
+
+Completed behavior:
+
+- a dedicated `EscapeAnalyzer` after effect analysis and before ARC
+  materialization;
+- deterministic allocation-site identities and `does not escape`, `escapes`,
+  and `unknown` classifications with compact causes and source origins;
+- local alias propagation through copies, reassignment, nullable references,
+  inheritance upcasts, interfaces, concrete generic classes, and Result/enum
+  payload wrappers;
+- conservative control-flow merging across branches and loops;
+- definite escape classification for returns, top-level/global storage, strong
+  fields, and supported Array/List/Map storage, while weak slots record a
+  non-owning constraint;
+- declaration-identity/effect-summary handling for direct calls and conservative
+  barriers for dynamic, foreign, or otherwise unknown calls;
+- deterministic `toro ir --escape` inspection and managed-allocation metrics;
+- differential coverage proving generated C, native behavior, effect summaries,
+  and Phase 9.1/9.2 ARC decisions remain unchanged.
+
+The analysis is intentionally annotation-only. All class instances remain
+heap-backed and ARC-managed; Phase 9.4 will decide whether a proven local
+allocation can safely use different storage.
 
 ## 9.4 Stack allocation of non-escaping class instances
 

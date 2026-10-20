@@ -72,6 +72,13 @@ through locals, returns, strong fields, and supported class-valued collections;
 `toro ir --arc` exposes those decisions and their deterministic metrics. Calls,
 uncertain control flow, weak storage, and unknown effects remain conservative.
 This is compiler-internal analysis and adds no source-level ownership syntax.
+An allocation-site escape pass now follows effect analysis and classifies each
+managed construction as non-escaping, escaping, or unknown. It propagates local
+aliases, merges branches and loops conservatively, records compact reasons and
+source origins, and treats weak observation as a storage constraint rather than
+an owning escape. `toro ir --escape` exposes the facts and allocation counts.
+The results are annotations only: objects still use the existing heap-backed ARC
+representation until the later stack-allocation milestone.
 Effect analysis remains descriptive rather than policy enforcement.
 The backend-independent effect pass summarizes allocation, lifetime relevance,
 I/O, native/foreign calls, dynamic dispatch, termination, and uncertainty across
@@ -180,11 +187,14 @@ Inspect the deterministic typed IR after semantic analysis and type checking:
 ```bash
 ./build/toro ir examples/backend_hardening.toro
 ./build/toro ir --effects examples/backend_hardening.toro
+./build/toro ir --escape examples/backend_hardening.toro
 ./build/toro ir --arc examples/backend_hardening.toro
 ./build/toro ir --arc --no-opt examples/backend_hardening.toro
 ```
 
-`--arc` shows deterministic before/after lifetime operations and retain,
+`--escape` shows deterministic managed-allocation classifications, reasons,
+origins, and non-escaping/escaping/unknown metrics. `--arc` shows deterministic
+before/after lifetime operations and retain,
 release, and elided-pair counts. `--no-opt` exposes the materialized baseline.
 These are compiler-development inspection formats, not stable source or ABI
 contracts.
