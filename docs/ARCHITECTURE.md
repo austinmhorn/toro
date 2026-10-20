@@ -328,10 +328,44 @@ identify parameter-specific behavior. This is deliberately conservative and
 does not attempt interprocedural ownership summaries.
 
 `toro ir --escape` prints allocation classifications, causes, origins, and
-managed/non-escaping/escaping/unknown counts. Escape annotations do not change
-ARC materialization, ownership transfer, generated C, object layout, or native
-behavior. Phase 9.4 may consume proven non-escape facts for storage decisions;
-until then all class instances remain heap-backed and ARC-managed.
+managed/non-escaping/escaping/unknown counts. Escape annotations do not directly
+change allocation or ownership; the following storage-decision pass is the only
+consumer permitted to select a different representation.
+
+### Storage decisions and stack-backed classes
+
+`StorageDecisionAnalyzer` runs after escape analysis and before ARC
+materialization. It records `heap` or `stack` on each managed allocation site
+and copies that decision onto the relevant construction and alias operations.
+The decision is deterministic and includes a compact fallback reason.
+
+Stack promotion currently requires a `DoesNotEscape` construction with a direct
+local declaration as its lifetime owner. Managed reassignment, indirect
+construction ownership, a weak-observation constraint, or any escaping/unknown
+classification keeps heap storage. Returns, globals, strong escaping fields,
+collections, foreign calls, and uncertain dynamic dispatch therefore use the
+heap. Branch- and loop-local declarations qualify when their object remains
+inside that lexical lifetime. Strong fields do not recursively promote their
+referents; each construction is decided independently.
+
+The C11 backend reuses the ordinary class layout. A promoted object and its
+control block are automatic variables, and Toro references remain pointers to
+that single object. The existing base embedding, vtable/interface thunks, init,
+field access, and method paths are unchanged. A header bit distinguishes heap
+and stack storage so the common finalizer never frees automatic storage. The
+owning lexical cleanup invokes finalization exactly once, including derived to
+base `destroy` order and strong/weak field cleanup. ARC operations solely needed
+to own local aliases are omitted; calls may still use conservative balanced
+retain/release operations.
+
+Weak-observed targets are deliberately not promoted. Although each stack object
+uses an automatic control block for existing dispatch/layout compatibility, the
+current proof does not extend that block for arbitrary zeroing weak slots.
+Preserving weak safety takes precedence over promotion coverage.
+
+Heap-only storage decisions are available programmatically for differential
+tests. Stack and heap modes must preserve output, identity, dispatch, destruction
+order, and cleanup. The optimization changes no Toro syntax or type semantics.
 
 ### Type checker
 
@@ -591,9 +625,10 @@ Important unsupported or deferred runtime features include:
 - separate object-file compilation and linking per module;
 - raw pointers, C aggregates, callbacks, variadics, header parsing, dynamic
   loading, and C++/Objective-C/Rust ABI interoperability;
-- interprocedural ownership/escape summaries, stack allocation, and general
-  borrow optimization beyond the current allocation-site escape annotations,
-  block-local final-use transfer, and local parameter ARC-pair elision rules;
+- interprocedural ownership/escape summaries and general borrow optimization
+  beyond the current direct-local stack promotion, allocation-site escape
+  annotations, block-local final-use transfer, and local parameter ARC-pair
+  elision rules;
 - `performance function` enforcement.
 
 The type system may understand some concepts before the C backend can execute them. The backend should reject unsupported constructs clearly rather than emit incorrect C.
@@ -612,10 +647,11 @@ Correct runtime behavior is the priority.
 ## Typed toro IR and future analyses
 
 Toro now has a typed intermediate representation, deterministic effect
-summaries, allocation-site escape annotations, explicit block-local ownership
-transfers, and baseline/optimized ARC schedules between static semantics and an
-IR-only C backend. Stack allocation, interprocedural ownership/escape summaries,
-general borrowing, and performance work remain layered on that foundation.
+summaries, allocation-site escape annotations, explicit storage decisions,
+block-local ownership transfers, and baseline/optimized ARC schedules between
+static semantics and an IR-only C backend. Broader stack allocation,
+interprocedural ownership/escape summaries, general borrowing, and performance
+work remain layered on that foundation.
 
 Target pipeline:
 
@@ -630,13 +666,15 @@ effect analysis
     ↓
 escape analysis
     ↓
+storage decisions
+    ↓
 ARC materialization
     ↓
 ownership-transfer analysis
     ↓
 ARC optimization/elision
     ↓
-future borrow and storage analysis
+future borrow and broader storage analysis
     ↓
 performance-contract validation
     ↓
@@ -693,7 +731,9 @@ function update() {
 }
 ```
 
-If `enemy` does not escape or participate in an incompatible weak/lifetime relationship, it may eventually be stack allocated while retaining class/reference semantics at the source level.
+If `enemy` does not escape or participate in an incompatible weak/lifetime
+relationship, the storage-decision pass may stack allocate it while retaining
+class/reference semantics at the source level.
 
 ## performance function architecture
 

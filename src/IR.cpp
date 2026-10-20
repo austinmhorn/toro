@@ -197,6 +197,15 @@ std::string_view ir_escape_reason_name(IREscapeReason reason)
     return "unknown";
 }
 
+std::string_view ir_storage_class_name(IRStorageClass storage)
+{
+    switch (storage) {
+    case IRStorageClass::Heap: return "heap";
+    case IRStorageClass::Stack: return "stack";
+    }
+    return "heap";
+}
+
 std::string dump_ir(
     const IRProgram& program,
     bool include_effects,
@@ -321,13 +330,20 @@ std::string dump_ir(
             + " escaping "
             + std::to_string(program.escape_metrics.escaping)
             + " unknown "
-            + std::to_string(program.escape_metrics.unknown) + "\n";
+            + std::to_string(program.escape_metrics.unknown)
+            + " stack "
+            + std::to_string(program.escape_metrics.stack_allocations)
+            + " heap "
+            + std::to_string(program.escape_metrics.heap_allocations) + "\n";
         for (const auto& allocation : program.escape_allocations) {
             output += "  allocation " + allocation.identity + " : "
                 + complete_type_name(allocation.type);
             append_origin(allocation.origin, output);
             output += "\n    escape "
                 + std::string(ir_escape_state_name(allocation.state)) + '\n';
+            output += "    storage "
+                + std::string(ir_storage_class_name(allocation.storage))
+                + " ; " + allocation.storage_reason + '\n';
             for (const auto& cause : allocation.causes) {
                 output += cause.causes_escape ? "    reason " : "    constraint ";
                 output += ir_escape_reason_name(cause.reason);

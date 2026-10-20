@@ -81,6 +81,7 @@ struct ValueInfo {
     std::string c_name;
     bool pointer{false};
     bool owned_local{false};
+    bool stack_backed{false};
 };
 
 struct FunctionInfo {
@@ -180,6 +181,9 @@ struct GeneratedExpression {
     bool pointer{false};
     std::string prelude;
     bool owned{false};
+    bool stack_backed{false};
+    std::string stack_object;
+    CValueType stack_type{CValueKind::Void};
 
     GeneratedExpression(
         std::string code,
@@ -2987,6 +2991,7 @@ private:
                 output += "    " + class_name(*info.base_name) + " toro_base;\n";
             } else {
                 output += "    uint64_t toro_strong_count;\n";
+                output += "    bool toro_heap_allocated;\n";
                 output += "    toro_weak_control* toro_weak_control;\n";
                 output += "    void (*toro_finalize)(void*);\n";
                 if (!virtual_slots(name).empty()) {
@@ -3008,6 +3013,9 @@ private:
                 + "(void* toro_raw_value)\n{\n";
             output += "    " + object + "* toro_value = (" + object
                 + "*)toro_raw_value;\n";
+            output += "    const bool toro_heap_allocated = "
+                + class_header_access("toro_value", name, "toro_heap_allocated")
+                + ";\n";
             output += "    toro_weak_control* toro_control = "
                 + class_header_access("toro_value", name, "toro_weak_control")
                 + ";\n";
@@ -3038,8 +3046,9 @@ private:
                         field->second->type.nominal_name) + "(" + access + ");\n";
                 }
             }
-            output += "    if (--toro_control->toro_weak_count == 0) { free(toro_control); }\n";
-            output += "    free(toro_value);\n";
+            output += "    if (--toro_control->toro_weak_count == 0"
+                " && toro_heap_allocated) { free(toro_control); }\n";
+            output += "    if (toro_heap_allocated) { free(toro_value); }\n";
             output += "}\n\n";
 
             output += "static void " + retain_name(name) + "(" + object
@@ -3054,6 +3063,14 @@ private:
             output += "}\n\n";
             output += "static void " + release_name(name) + "(" + object
                 + "* toro_value)\n{\n";
+            output += "    if (toro_value != NULL && !"
+                + class_header_access("toro_value", name, "toro_heap_allocated")
+                + ")\n    {\n"
+                "        if ("
+                + class_header_access("toro_value", name, "toro_strong_count")
+                + " > 1) { --"
+                + class_header_access("toro_value", name, "toro_strong_count")
+                + "; }\n        return;\n    }\n";
             output += "    if (toro_value != NULL && --"
                 + class_header_access("toro_value", name, "toro_strong_count")
                 + " == 0)\n";
@@ -3271,6 +3288,7 @@ private:
         current_location_ = function.location;
         scopes_.clear();
         owned_reference_values_.clear();
+        stack_reference_values_.clear();
         push_scope();
         current_substitutions_ = info.substitutions;
         current_return_type_ = info.return_type;
@@ -3300,6 +3318,7 @@ private:
         current_substitutions_ = info.substitutions;
         scopes_.clear();
         owned_reference_values_.clear();
+        stack_reference_values_.clear();
         push_scope();
         current_return_type_ = info.return_type;
         scopes_.back().emplace(
@@ -3338,6 +3357,7 @@ private:
             : classes_.at(owner).substitutions;
         scopes_.clear();
         owned_reference_values_.clear();
+        stack_reference_values_.clear();
         push_scope();
         current_return_type_ = info.target_type;
         scopes_.back().emplace(
@@ -3398,19 +3418,38 @@ private:
             if (is_owned_runtime_value(type)) {
                 const bool transferred = statement.transfer_source.has_value();
                 if (is_managed_reference(type) && !initializer.owned
+                    && !initializer.stack_backed
                     && !transferred) {
                     output += prefix + retain_call(type, c_name) + ";\n";
                 }
-                if (transferred) {
+                if (transferred && !initializer.stack_backed) {
                     relinquish_owned_value(
                         *statement.transfer_source, statement.location);
                 }
-                owned_reference_values_.back().push_back(
-                    ValueInfo{type, c_name, false, true});
+                if (initializer.stack_backed) {
+                    if (!initializer.stack_object.empty()) {
+                        stack_reference_values_.back().push_back(ValueInfo{
+                            initializer.stack_type,
+                            initializer.stack_object,
+                            false,
+                            false,
+                            true,
+                        });
+                    }
+                } else {
+                    owned_reference_values_.back().push_back(
+                        ValueInfo{type, c_name, false, true});
+                }
             }
             scopes_.back().emplace(
                 declaration.name,
-                ValueInfo{type, c_name, false, is_owned_runtime_value(type)});
+                ValueInfo{
+                    type,
+                    c_name,
+                    false,
+                    is_owned_runtime_value(type) && !initializer.stack_backed,
+                    initializer.stack_backed,
+                });
             return output;
         }
         case StmtKind::Assignment: {
@@ -3535,7 +3574,10 @@ private:
             }
             const bool has_owned_references = std::ranges::any_of(
                 owned_reference_values_,
-                [](const auto& values) { return !values.empty(); });
+                [](const auto& values) { return !values.empty(); })
+                || std::ranges::any_of(
+                    stack_reference_values_,
+                    [](const auto& values) { return !values.empty(); });
             if (!has_owned_references) {
                 return indent_prelude(value.prelude, depth)
                     + prefix + "return " + value.code + ";\n";
@@ -3802,7 +3844,7 @@ private:
                 + " = " + struct_value;
         }
         code += "}";
-        return {
+        GeneratedExpression result{
             std::move(code),
             target,
             false,
@@ -3810,6 +3852,10 @@ private:
             std::move(value.prelude),
             value.type.kind == CValueKind::Struct || value.owned,
         };
+        result.stack_backed = value.stack_backed;
+        result.stack_object = std::move(value.stack_object);
+        result.stack_type = std::move(value.stack_type);
+        return result;
     }
 
     GeneratedExpression emit_expression(
@@ -3860,7 +3906,10 @@ private:
         case ExprKind::Identifier: {
             const auto& identifier = static_cast<const IdentifierExpr&>(expression);
             const auto& value = find_value(identifier.name);
-            return {value.c_name, value.type, true, value.pointer};
+            GeneratedExpression result{
+                value.c_name, value.type, true, value.pointer};
+            result.stack_backed = value.stack_backed;
+            return result;
         }
         case ExprKind::Unary: {
             const auto& unary = static_cast<const UnaryExpr&>(expression);
@@ -4569,9 +4618,19 @@ private:
         const CValueType type{CValueKind::Class, name};
         const std::string temporary =
             "toro_new_class_" + std::to_string(temporary_index_++);
-        std::string prelude = c_type_name(type) + " " + temporary
-            + " = malloc(sizeof(*" + temporary + "));\n";
-        prelude += "if (" + temporary + " == NULL) { abort(); }\n";
+        const std::string stack_object = temporary + "_storage";
+        const std::string stack_control = temporary + "_control";
+        std::string prelude;
+        if (call.stack_storage) {
+            prelude += class_name(name) + " " + stack_object + ";\n";
+            prelude += "toro_weak_control " + stack_control + ";\n";
+            prelude += c_type_name(type) + " " + temporary + " = &"
+                + stack_object + ";\n";
+        } else {
+            prelude += c_type_name(type) + " " + temporary
+                + " = malloc(sizeof(*" + temporary + "));\n";
+            prelude += "if (" + temporary + " == NULL) { abort(); }\n";
+        }
         const std::string strong_count = class_header_access(
             temporary, name, "toro_strong_count");
         const std::string weak_control = class_header_access(
@@ -4579,8 +4638,15 @@ private:
         const std::string finalizer = class_header_access(
             temporary, name, "toro_finalize");
         prelude += strong_count + " = 1;\n";
-        prelude += weak_control + " = malloc(sizeof(*" + weak_control + "));\n";
-        prelude += "if (" + weak_control + " == NULL) { abort(); }\n";
+        prelude += class_header_access(
+            temporary, name, "toro_heap_allocated")
+            + (call.stack_storage ? " = false;\n" : " = true;\n");
+        if (call.stack_storage) {
+            prelude += weak_control + " = &" + stack_control + ";\n";
+        } else {
+            prelude += weak_control + " = malloc(sizeof(*" + weak_control + "));\n";
+            prelude += "if (" + weak_control + " == NULL) { abort(); }\n";
+        }
         prelude += weak_control + "->toro_object = " + temporary + ";\n";
         prelude += weak_control + "->toro_weak_count = 1;\n";
         prelude += finalizer + " = " + finalize_name(name) + ";\n";
@@ -4631,7 +4697,12 @@ private:
                 }
             }
         }
-        return {temporary, type, true, false, std::move(prelude), true};
+        GeneratedExpression result{
+            temporary, type, true, false, std::move(prelude), true};
+        result.stack_backed = call.stack_storage;
+        result.stack_object = temporary;
+        result.stack_type = type;
+        return result;
     }
 
     GeneratedExpression emit_initialized_class_construction(
@@ -4642,9 +4713,19 @@ private:
         const CValueType type{CValueKind::Class, name};
         const std::string temporary =
             "toro_new_class_" + std::to_string(temporary_index_++);
-        std::string prelude = c_type_name(type) + " " + temporary
-            + " = malloc(sizeof(*" + temporary + "));\n";
-        prelude += "if (" + temporary + " == NULL) { abort(); }\n";
+        const std::string stack_object = temporary + "_storage";
+        const std::string stack_control = temporary + "_control";
+        std::string prelude;
+        if (call.stack_storage) {
+            prelude += class_name(name) + " " + stack_object + ";\n";
+            prelude += "toro_weak_control " + stack_control + ";\n";
+            prelude += c_type_name(type) + " " + temporary + " = &"
+                + stack_object + ";\n";
+        } else {
+            prelude += c_type_name(type) + " " + temporary
+                + " = malloc(sizeof(*" + temporary + "));\n";
+            prelude += "if (" + temporary + " == NULL) { abort(); }\n";
+        }
         const std::string strong_count = class_header_access(
             temporary, name, "toro_strong_count");
         const std::string weak_control = class_header_access(
@@ -4652,8 +4733,15 @@ private:
         const std::string finalizer = class_header_access(
             temporary, name, "toro_finalize");
         prelude += strong_count + " = 1;\n";
-        prelude += weak_control + " = malloc(sizeof(*" + weak_control + "));\n";
-        prelude += "if (" + weak_control + " == NULL) { abort(); }\n";
+        prelude += class_header_access(
+            temporary, name, "toro_heap_allocated")
+            + (call.stack_storage ? " = false;\n" : " = true;\n");
+        if (call.stack_storage) {
+            prelude += weak_control + " = &" + stack_control + ";\n";
+        } else {
+            prelude += weak_control + " = malloc(sizeof(*" + weak_control + "));\n";
+            prelude += "if (" + weak_control + " == NULL) { abort(); }\n";
+        }
         prelude += weak_control + "->toro_object = " + temporary + ";\n";
         prelude += weak_control + "->toro_weak_count = 1;\n";
         prelude += finalizer + " = " + finalize_name(name) + ";\n";
@@ -4736,7 +4824,12 @@ private:
         invocation += ");\n";
         prelude += invocation;
         prelude += release_owned_values(owned_arguments);
-        return {temporary, type, true, false, std::move(prelude), true};
+        GeneratedExpression result{
+            temporary, type, true, false, std::move(prelude), true};
+        result.stack_backed = call.stack_storage;
+        result.stack_object = temporary;
+        result.stack_type = type;
+        return result;
     }
 
     std::string zero_value(CValueType type, SourceLocation location) const
@@ -5788,12 +5881,14 @@ private:
     {
         scopes_.emplace_back();
         owned_reference_values_.emplace_back();
+        stack_reference_values_.emplace_back();
     }
 
     void pop_scope()
     {
         scopes_.pop_back();
         owned_reference_values_.pop_back();
+        stack_reference_values_.pop_back();
     }
 
     void bind_parameters(
@@ -5849,6 +5944,12 @@ private:
         for (auto value = values.rbegin(); value != values.rend(); ++value) {
             output += indent(depth) + release_call(value->type, value->c_name)
                 + ";\n";
+        }
+        const auto& stack_values = stack_reference_values_.at(scope_index);
+        for (auto value = stack_values.rbegin();
+             value != stack_values.rend(); ++value) {
+            output += indent(depth) + finalize_name(value->type.nominal_name)
+                + "(" + value->c_name + ");\n";
         }
         return output;
     }
@@ -5924,6 +6025,7 @@ private:
     std::vector<std::string> function_order_;
     std::vector<std::unordered_map<std::string, ValueInfo>> scopes_;
     std::vector<std::vector<ValueInfo>> owned_reference_values_;
+    std::vector<std::vector<ValueInfo>> stack_reference_values_;
     std::size_t temporary_index_{0};
     std::optional<CValueType> current_return_type_;
     std::unordered_map<std::string, CValueType> current_substitutions_;

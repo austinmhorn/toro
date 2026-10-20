@@ -127,8 +127,9 @@ Long term:
 - ARC is a semantic fallback for shared reference lifetime, not the identity of the language.
 - Ownership/escape/borrow analysis belongs behind the toro IR layer, not as
   ad-hoc logic spread through the C generator. The current `EscapeAnalyzer`
-  annotates managed allocation sites only; the backend must not use those facts
-  to change storage until the roadmap reaches stack allocation.
+  annotates managed allocation sites, and `StorageDecisionAnalyzer` is the sole
+  authority that promotes proven direct local owners to stack storage. Backends
+  consume that IR decision and must not independently infer storage.
 - Avoid source-level ownership syntax unless real programs prove it necessary.
 - Do not prematurely implement arenas, atomic ARC, ownership annotations, or other advanced memory features before the roadmap reaches them.
 
@@ -140,7 +141,7 @@ Performance/memory decisions should eventually be observable and explainable thr
 
 Current pipeline:
 
-`source -> lexer -> parser/AST -> semantic analysis -> type checking -> typed toro IR -> effect analysis -> escape analysis -> ARC materialization -> ownership-transfer analysis -> ARC optimization -> C generator -> native compiler`
+`source -> lexer -> parser/AST -> semantic analysis -> type checking -> typed toro IR -> effect analysis -> escape analysis -> storage decisions -> ARC materialization -> ownership-transfer analysis -> ARC optimization -> C generator -> native compiler`
 
 `IRProgram` is the backend semantic boundary. Backends must not retain or read
 frontend AST nodes; frontend convenience entry points must lower to IR before
@@ -157,8 +158,8 @@ Future analyses should extend that pipeline with explicit borrow inference,
 storage selection, broader ARC elision, and performance validation before the
 backend. These remain IR passes rather than backend reasoning.
 
-Escape annotations are descriptive in Phase 9.3 and must not change allocation,
-object layout, or ARC behavior on their own.
+Escape annotations remain descriptive; only the explicit storage-decision pass
+may select stack storage. Heap remains the fallback whenever proof is uncertain.
 
 Do not tightly couple new language semantics to C-specific implementation details if a clean backend abstraction is practical.
 

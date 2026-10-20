@@ -10,6 +10,7 @@
 #include "toro/Parser.hpp"
 #include "toro/ProjectConfig.hpp"
 #include "toro/SemanticAnalyzer.hpp"
+#include "toro/StorageDecisionAnalyzer.hpp"
 #include "toro/SourceFile.hpp"
 #include "toro/Token.hpp"
 #include "toro/TypeChecker.hpp"
@@ -132,6 +133,7 @@ std::string generate_c(const CompilationInput& input)
     auto ir = toro::IRLowerer().lower(program);
     toro::EffectAnalyzer().analyze(ir);
     toro::EscapeAnalyzer().analyze(ir);
+    toro::StorageDecisionAnalyzer().analyze(ir);
     toro::ArcMaterializer().materialize(ir);
     toro::OwnershipTransferAnalyzer().analyze(ir);
     toro::ArcOptimizer().optimize(ir);
@@ -152,7 +154,10 @@ void print_ir(
     if (include_effects || include_arc || include_escape) {
         toro::EffectAnalyzer().analyze(ir);
     }
-    if (include_escape) toro::EscapeAnalyzer().analyze(ir);
+    if (include_escape || include_arc) toro::EscapeAnalyzer().analyze(ir);
+    if (include_escape || include_arc) {
+        toro::StorageDecisionAnalyzer().analyze(ir);
+    }
     if (include_arc) {
         toro::ArcMaterializer().materialize(ir);
         if (optimize_arc) {

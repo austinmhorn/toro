@@ -87,11 +87,18 @@ bool has_effect(const IRCallableEffectSummary& summary, IREffect effect)
     return std::ranges::find(summary.effects, effect) != summary.effects.end();
 }
 
+std::string method_suffix(std::string_view identity)
+{
+    const auto separator = identity.rfind("::");
+    return separator == std::string_view::npos
+        ? std::string(identity) : std::string(identity.substr(separator + 2));
+}
+
 class Analysis {
 public:
     explicit Analysis(IRProgram& program) : program_(program)
     {
-        for (const auto& declaration : program_.declarations) {
+        for (auto& declaration : program_.declarations) {
             declarations_.emplace(declaration.identity, &declaration);
         }
         for (const auto& summary : program_.effect_summaries) {
@@ -103,13 +110,13 @@ public:
     {
         program_.escape_allocations.clear();
         program_.escape_metrics = {};
-        for (const auto& declaration : program_.declarations) {
+        for (auto& declaration : program_.declarations) {
             if (!declaration.body) continue;
             AliasState aliases;
             analyze_block(*declaration.body, aliases, declaration.identity);
         }
         AliasState top_level;
-        for (const auto& operation : program_.top_level_operations) {
+        for (auto& operation : program_.top_level_operations) {
             analyze_statement(operation, top_level, "<top-level>");
             if (operation.kind == IROperationKind::Declare
                 || operation.kind == IROperationKind::Assign) {
@@ -125,7 +132,7 @@ public:
 
 private:
     std::size_t add_allocation(
-        const IROperation& operation,
+        IROperation& operation,
         std::string_view callable)
     {
         if (const auto existing = allocation_sites_.find(&operation);
@@ -139,14 +146,18 @@ private:
             + std::to_string(operation.origin.location.line) + ':'
             + std::to_string(operation.origin.location.column);
         const std::size_t occurrence = allocation_occurrences_[site]++;
+        const std::string identity = site + "#" + std::to_string(occurrence);
         program_.escape_allocations.push_back(IRAllocationEscape{
-            site + "#" + std::to_string(occurrence),
+            identity,
             std::string(callable),
             type,
             operation.origin,
             IREscapeState::DoesNotEscape,
             {},
+            IRStorageClass::Heap,
+            {},
         });
+        operation.allocation_identity = identity;
         allocation_sites_.emplace(&operation, index);
         return index;
     }
@@ -221,7 +232,7 @@ private:
     }
 
     void classify_call(
-        const IROperation& operation,
+        IROperation& operation,
         const AllocationSet& arguments)
     {
         if (arguments.empty() || operation.name == "print") return;
@@ -234,8 +245,11 @@ private:
         }
         if (operation.kind == IROperationKind::VirtualCall
             || operation.kind == IROperationKind::InterfaceCall) {
-            add_cause(arguments, IREscapeReason::DynamicCall, operation.origin,
-                operation.selected_declaration, true, true);
+            if (dynamic_call_may_escape(operation)) {
+                add_cause(arguments, IREscapeReason::DynamicCall,
+                    operation.origin, operation.selected_declaration,
+                    true, true);
+            }
             return;
         }
         if (operation.kind == IROperationKind::Conversion
@@ -259,18 +273,97 @@ private:
         }
     }
 
+    std::string class_base(std::string_view identity) const
+    {
+        const auto nominal = declarations_.find(std::string(identity));
+        if (nominal == declarations_.end()
+            || nominal->second->kind != IRDeclarationKind::Class) {
+            return {};
+        }
+        for (const auto& related : nominal->second->related_types) {
+            const auto candidate = declarations_.find(related.type.name);
+            if (candidate != declarations_.end()
+                && candidate->second->kind == IRDeclarationKind::Class) {
+                return related.type.name;
+            }
+        }
+        return {};
+    }
+
+    bool is_descendant(
+        std::string_view candidate,
+        std::string_view ancestor) const
+    {
+        std::string current(candidate);
+        while (!current.empty()) {
+            if (current == ancestor) return true;
+            current = class_base(current);
+        }
+        return false;
+    }
+
+    bool implements_interface(
+        std::string_view identity,
+        std::string_view interface_identity) const
+    {
+        const auto nominal = declarations_.find(std::string(identity));
+        if (nominal == declarations_.end()) return false;
+        for (const auto& related : nominal->second->related_types) {
+            if (related.type.name == interface_identity) return true;
+        }
+        const auto base = class_base(identity);
+        return !base.empty() && implements_interface(base, interface_identity);
+    }
+
+    bool summary_may_escape(std::string_view identity) const
+    {
+        const auto summary = summaries_.find(std::string(identity));
+        if (summary == summaries_.end()) return true;
+        return has_effect(*summary->second, IREffect::Escape)
+            || has_effect(*summary->second, IREffect::ForeignCall)
+            || has_effect(*summary->second, IREffect::UnknownExternal);
+    }
+
+    bool dynamic_call_may_escape(const IROperation& operation) const
+    {
+        const auto selected = declarations_.find(operation.selected_declaration);
+        if (selected == declarations_.end()) return true;
+        const std::string owner = selected->second->owner_identity;
+        const std::string suffix = method_suffix(operation.selected_declaration);
+        bool found = false;
+        for (const auto& candidate : program_.declarations) {
+            if (candidate.kind != IRDeclarationKind::Method || !candidate.body
+                || candidate.name != operation.name
+                || method_suffix(candidate.identity) != suffix) {
+                continue;
+            }
+            bool valid = operation.kind == IROperationKind::VirtualCall
+                ? is_descendant(candidate.owner_identity, owner)
+                : implements_interface(candidate.owner_identity, owner);
+            if (!valid) continue;
+            found = true;
+            if (summary_may_escape(candidate.identity)) return true;
+        }
+        return !found;
+    }
+
     AllocationSet evaluate(
-        const IROperation& operation,
+        IROperation& operation,
         AliasState& aliases,
         std::string_view callable)
     {
         if (operation.kind == IROperationKind::Load) {
             const auto found = aliases.values.find(operation.name);
-            return found == aliases.values.end() ? AllocationSet{} : found->second;
+            if (found == aliases.values.end()) return {};
+            if (found->second.size() == 1) {
+                operation.allocation_identity = program_.escape_allocations
+                    .at(*found->second.begin()).identity;
+            }
+            return found->second;
         }
 
         AllocationSet children;
-        for (const auto& child : operation.children) {
+        for (auto& child : operation.children) {
             merge_into(children, evaluate(child, aliases, callable));
         }
 
@@ -350,7 +443,7 @@ private:
     }
 
     void analyze_scoped_block(
-        const IROperation& block,
+        IROperation& block,
         AliasState& aliases,
         std::string_view callable)
     {
@@ -361,7 +454,7 @@ private:
     }
 
     void analyze_branch(
-        const IROperation& operation,
+        IROperation& operation,
         AliasState& aliases,
         std::string_view callable)
     {
@@ -380,7 +473,7 @@ private:
     }
 
     void analyze_loop(
-        const IROperation& operation,
+        IROperation& operation,
         AliasState& aliases,
         std::string_view callable)
     {
@@ -403,7 +496,7 @@ private:
     }
 
     void analyze_handle(
-        const IROperation& operation,
+        IROperation& operation,
         AliasState& aliases,
         std::string_view callable)
     {
@@ -414,7 +507,7 @@ private:
         AliasState merged = aliases;
         for (std::size_t index = 1; index < operation.children.size(); ++index) {
             AliasState branch = aliases;
-            const auto& block = operation.children[index];
+            auto& block = operation.children[index];
             const auto open = block.name.find('(');
             const auto close = block.name.rfind(')');
             if (open != std::string::npos && close > open + 1) {
@@ -429,7 +522,7 @@ private:
     }
 
     void analyze_statement(
-        const IROperation& operation,
+        IROperation& operation,
         AliasState& aliases,
         std::string_view callable)
     {
@@ -438,6 +531,10 @@ private:
         case IROperationKind::Assign:
             if (!operation.children.empty()) {
                 auto value = evaluate(operation.children.back(), aliases, callable);
+                if (value.size() == 1) {
+                    operation.allocation_identity = program_.escape_allocations
+                        .at(*value.begin()).identity;
+                }
                 if (operation.result_type
                     && operation.result_type->category
                         == IRValueCategory::InterfaceValue
@@ -509,11 +606,11 @@ private:
     }
 
     void analyze_block(
-        const IROperation& block,
+        IROperation& block,
         AliasState& aliases,
         std::string_view callable)
     {
-        for (const auto& operation : block.children) {
+        for (auto& operation : block.children) {
             analyze_statement(operation, aliases, callable);
         }
     }

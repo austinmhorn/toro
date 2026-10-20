@@ -103,6 +103,7 @@ struct CallExpr final : Expr {
     const MethodDeclaration* resolved_method{nullptr};
     const InterfaceMethod* resolved_interface_method{nullptr};
     std::optional<std::string> transfer_source;
+    bool stack_storage{false};
 };
 struct IndexExpr final : Expr {
     IndexExpr(std::unique_ptr<Expr> object, std::unique_ptr<Expr> index)

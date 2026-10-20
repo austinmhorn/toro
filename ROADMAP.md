@@ -525,15 +525,39 @@ Completed behavior:
 - differential coverage proving generated C, native behavior, effect summaries,
   and Phase 9.1/9.2 ARC decisions remain unchanged.
 
-The analysis is intentionally annotation-only. All class instances remain
-heap-backed and ARC-managed; Phase 9.4 will decide whether a proven local
-allocation can safely use different storage.
+Escape analysis itself remains annotation-only. Phase 9.4's separate storage
+decision now consumes those facts; without an explicit stack decision, class
+instances remain heap-backed and ARC-managed.
 
-## 9.4 Stack allocation of non-escaping class instances
+## 9.4 Stack allocation of non-escaping class instances — completed
 
 Allow class/reference semantics to use stack storage when the compiler proves it safe.
 
 Source semantics must remain unchanged.
+
+Completed behavior:
+
+- a deterministic storage-decision pass between escape analysis and ARC
+  materialization;
+- explicit heap/stack allocation-site facts and `toro ir --escape` metrics;
+- automatic C11 object and control-block storage using the established class
+  layout, pointer identity, initialization, dispatch, and lifecycle machinery;
+- stack-backed aliases remain references to one object rather than value copies;
+- exactly-once `destroy`, derived-to-base destruction, and strong-field cleanup;
+- stack promotion for direct local owners including init, local aliases,
+  inheritance/upcasts, proven-safe virtual/interface observations, concrete
+  generic classes, nullable aliases, and branch/loop-local declarations;
+- elimination of local ARC schedule/runtime traffic associated solely with a
+  promoted stack allocation;
+- conservative heap fallback for returns, globals, escaping fields and
+  collections, foreign/unknown or escaping dynamic calls, managed reassignment,
+  indirect construction ownership, and weak-observed targets;
+- a heap-only analysis mode used for differential native lifecycle testing.
+
+Weak-observed targets remain heap-backed because zeroing weak references require
+control-block lifetime that the current local proof does not extend. Stack
+promotion does not recursively promote strong fields; each construction must
+qualify independently.
 
 ## 9.5 Borrow inference
 

@@ -31,6 +31,7 @@ add_library(toro_core
     src/SemanticAnalyzer.cpp
     src/SourceFile.cpp
     src/StandardLibrary.cpp
+    src/StorageDecisionAnalyzer.cpp
     src/TestRunner.cpp
     src/TypeChecker.cpp
 )
@@ -95,6 +96,11 @@ if(BUILD_TESTING)
     target_link_libraries(toro_escape_analyzer_tests PRIVATE toro_core)
     toro_enable_warnings(toro_escape_analyzer_tests)
     add_test(NAME escape_analyzer COMMAND toro_escape_analyzer_tests)
+
+    add_executable(toro_storage_decision_tests tests/StorageDecisionTests.cpp)
+    target_link_libraries(toro_storage_decision_tests PRIVATE toro_core)
+    toro_enable_warnings(toro_storage_decision_tests)
+    add_test(NAME storage_decision COMMAND toro_storage_decision_tests)
 
     add_executable(toro_arc_optimizer_tests tests/ArcOptimizerTests.cpp)
     target_link_libraries(toro_arc_optimizer_tests PRIVATE toro_core)

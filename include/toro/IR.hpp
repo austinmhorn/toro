@@ -69,6 +69,11 @@ struct IROwnershipTransfer {
     IROrigin source_origin;
 };
 
+enum class IRStorageClass : std::uint8_t {
+    Heap,
+    Stack,
+};
+
 struct IROperation {
     IROperationKind kind{IROperationKind::Block};
     IROrigin origin;
@@ -79,6 +84,8 @@ struct IROperation {
     std::vector<std::string> argument_names;
     std::vector<IROperation> children;
     std::optional<IROwnershipTransfer> ownership_transfer;
+    std::string allocation_identity;
+    std::optional<IRStorageClass> storage;
 };
 
 struct IRGenericParameter {
@@ -258,6 +265,8 @@ struct IRAllocationEscape {
     IROrigin origin;
     IREscapeState state{IREscapeState::DoesNotEscape};
     std::vector<IREscapeCause> causes;
+    IRStorageClass storage{IRStorageClass::Heap};
+    std::string storage_reason;
 };
 
 struct IREscapeMetrics {
@@ -265,6 +274,8 @@ struct IREscapeMetrics {
     std::size_t non_escaping{0};
     std::size_t escaping{0};
     std::size_t unknown{0};
+    std::size_t stack_allocations{0};
+    std::size_t heap_allocations{0};
 };
 
 struct IRProgram {
@@ -284,6 +295,7 @@ struct IRProgram {
 [[nodiscard]] std::string_view ir_effect_name(IREffect effect);
 [[nodiscard]] std::string_view ir_escape_state_name(IREscapeState state);
 [[nodiscard]] std::string_view ir_escape_reason_name(IREscapeReason reason);
+[[nodiscard]] std::string_view ir_storage_class_name(IRStorageClass storage);
 [[nodiscard]] std::string dump_ir(
     const IRProgram& program,
     bool include_effects = false,

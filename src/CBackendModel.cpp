@@ -570,6 +570,7 @@ private:
         if (operation.ownership_transfer) {
             value->transfer_source = operation.ownership_transfer->source;
         }
+        value->stack_storage = operation.storage == IRStorageClass::Stack;
         if (operation.result_type) value->resolved_type = operation.result_type->type;
         for (const auto& [name, type] : operation.substitutions) {
             value->resolved_substitutions.emplace_back(name, type.type);

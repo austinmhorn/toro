@@ -1,8 +1,13 @@
 #include "toro/CGenerator.hpp"
+#include "toro/ArcOptimizer.hpp"
+#include "toro/EffectAnalyzer.hpp"
+#include "toro/EscapeAnalyzer.hpp"
+#include "toro/IRLowerer.hpp"
 #include "toro/Lexer.hpp"
 #include "toro/NativeCompiler.hpp"
 #include "toro/Parser.hpp"
 #include "toro/SemanticAnalyzer.hpp"
+#include "toro/StorageDecisionAnalyzer.hpp"
 #include "toro/TypeChecker.hpp"
 
 #include <cstdio>
@@ -29,6 +34,22 @@ std::string generate(std::string_view source)
     toro::SemanticAnalyzer().analyze(program);
     toro::TypeChecker().check(program);
     return toro::CGenerator().generate(program);
+}
+
+std::string generate_with_storage(std::string_view source, bool enable_stack)
+{
+    auto tokens = toro::Lexer(source).tokenize();
+    const auto program = toro::Parser(std::move(tokens)).parse_program();
+    toro::SemanticAnalyzer().analyze(program);
+    toro::TypeChecker().check(program);
+    auto ir = toro::IRLowerer().lower(program);
+    toro::EffectAnalyzer().analyze(ir);
+    toro::EscapeAnalyzer().analyze(ir);
+    toro::StorageDecisionAnalyzer().analyze(ir, enable_stack);
+    toro::ArcMaterializer().materialize(ir);
+    toro::OwnershipTransferAnalyzer().analyze(ir);
+    toro::ArcOptimizer().optimize(ir);
+    return toro::CGenerator().generate(ir);
 }
 
 void expect(bool condition, std::string_view message)
@@ -151,6 +172,46 @@ void test_run_output_and_control_flow()
     const auto [status, output] = capture_run(toro::NativeCompiler(), c_source);
     expect(status == 0, "generated program did not exit successfully");
     expect(output == "7\n8\ntrue\n", "generated program produced unexpected output");
+}
+
+void test_stack_storage_matches_heap_lifecycle_and_dispatch()
+{
+    constexpr std::string_view source =
+        "interface Named { function name() -> string }\n"
+        "class Base {\n"
+        "    public virtual function name() -> string { return \"base\" }\n"
+        "    destroy() { print(\"base destroyed\") }\n"
+        "}\n"
+        "class Child { destroy() { print(\"child destroyed\") } }\n"
+        "class Derived : Base implements Named {\n"
+        "    public child: Child?\n"
+        "    init(child: Child) { self.child = child }\n"
+        "    public override function name() -> string { return \"derived\" }\n"
+        "    destroy() { print(\"derived destroyed\") }\n"
+        "}\n"
+        "function main() {\n"
+        "    child := Child()\n"
+        "    value := Derived(child)\n"
+        "    alias := value\n"
+        "    base: Base = alias\n"
+        "    named: Named = value\n"
+        "    print(base.name())\n"
+        "    print(named.name())\n"
+        "}\n";
+    const auto stack_c = generate_with_storage(source, true);
+    const auto heap_c = generate_with_storage(source, false);
+    expect(stack_c.find("_storage;") != std::string::npos,
+        "stack-optimized C did not contain automatic class storage");
+    const toro::NativeCompiler compiler;
+    const auto [stack_status, stack_output] = capture_run(compiler, stack_c);
+    const auto [heap_status, heap_output] = capture_run(compiler, heap_c);
+    expect(stack_status == 0 && heap_status == 0,
+        "stack/heap differential program failed");
+    expect(stack_output == heap_output,
+        "stack promotion changed observable lifecycle or dispatch behavior");
+    expect(stack_output
+            == "derived\nderived\nderived destroyed\nbase destroyed\nchild destroyed\n",
+        "stack lifecycle order was incorrect");
 }
 
 void test_nonzero_exit_status()
@@ -949,6 +1010,7 @@ int main()
     try {
         test_build_executable();
         test_run_output_and_control_flow();
+        test_stack_storage_matches_heap_lifecycle_and_dispatch();
         test_nonzero_exit_status();
         test_struct_runtime_behavior();
         test_enum_runtime_behavior();

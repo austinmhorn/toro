@@ -66,8 +66,10 @@ void materialize_operation(
     switch (operation.kind) {
     case IROperationKind::Construction:
         if (operation.result_type && is_shared_reference(*operation.result_type)) {
-            append_operation(schedule, IRArcOperationKind::OwnedTemporary,
-                operation.name, operation.origin, "class construction result");
+            if (operation.storage != IRStorageClass::Stack) {
+                append_operation(schedule, IRArcOperationKind::OwnedTemporary,
+                    operation.name, operation.origin, "class construction result");
+            }
         }
         break;
     case IROperationKind::Declare:
@@ -77,7 +79,8 @@ void materialize_operation(
             : (!operation.children.empty() && operation.children.back().result_type
                     ? &*operation.children.back().result_type
                     : nullptr);
-        if (assigned_type && owns_runtime_storage(*assigned_type)) {
+        if (assigned_type && owns_runtime_storage(*assigned_type)
+            && operation.storage != IRStorageClass::Stack) {
             append_operation(schedule, IRArcOperationKind::ManagedAssignment,
                 operation.name, operation.origin,
                 operation.kind == IROperationKind::Declare
@@ -353,7 +356,8 @@ private:
                     source = direct_load(operation.children.front());
                     destination = operation.name;
                     eligible = source && operation.result_type
-                        && is_shared_reference(*operation.result_type);
+                        && is_shared_reference(*operation.result_type)
+                        && operation.storage != IRStorageClass::Stack;
                 }
                 break;
             case IROperationKind::Assign:

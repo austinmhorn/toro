@@ -151,10 +151,13 @@ suitable toro IR exist. Toro now materializes the current ARC schedule, removes
 locally proven redundant parameter retain/release pairs, and transfers an
 ownership obligation through straightforward block-local final uses. The
 compiler also classifies managed allocation sites as local, escaping, or unknown
-while propagating aliases and recording escape causes. That escape information
-is intentionally descriptive today: storage remains heap-backed and ARC-managed.
-Stack allocation, interprocedural ownership summaries, general borrow inference,
-and the broader optimization hierarchy remain future work.
+while propagating aliases and recording escape causes. A separate storage pass
+now promotes direct local owners to automatic storage when identity, dispatch,
+and lifecycle behavior remain provably bounded, while heap + ARC remains the
+conservative fallback. Weak-observed and uncertain lifetimes are intentionally
+not promoted. Broader stack placement, interprocedural ownership summaries,
+general borrow inference, and the rest of the optimization hierarchy remain
+future work.
 
 ## Why not expose ownership everywhere?
 

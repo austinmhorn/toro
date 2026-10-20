@@ -226,8 +226,8 @@ void test_nullable_upcast_interface_and_generic_aliases()
             == toro::IREscapeState::DoesNotEscape,
         "nullable local alias escaped");
     expect(allocation(ir, "upcast_alias()").state
-            == toro::IREscapeState::Unknown,
-        "virtual dispatch was not conservative");
+            == toro::IREscapeState::DoesNotEscape,
+        "proven observing virtual dispatch was treated as escaping");
     const auto& interface_value = allocation(ir, "interface_alias()");
     expect(interface_value.state == toro::IREscapeState::DoesNotEscape
             && has_reason(
@@ -283,8 +283,8 @@ void test_direct_dynamic_and_foreign_calls()
             == toro::IREscapeState::Unknown,
         "possibly escaping direct call was not conservative");
     expect(allocation(ir, "interface_call()").state
-            == toro::IREscapeState::Unknown,
-        "interface call was not conservative");
+            == toro::IREscapeState::DoesNotEscape,
+        "proven observing interface call was treated as escaping");
     expect(allocation(ir, "foreign_barrier()").state
             == toro::IREscapeState::Unknown,
         "foreign call did not conservatively classify live references");

@@ -78,7 +78,12 @@ aliases, merges branches and loops conservatively, records compact reasons and
 source origins, and treats weak observation as a storage constraint rather than
 an owning escape. `toro ir --escape` exposes the facts and allocation counts.
 The results are annotations only: objects still use the existing heap-backed ARC
-representation until the later stack-allocation milestone.
+representation unless the storage-decision pass can prove a direct local owner.
+Proven local class constructions now use automatic C storage while retaining
+Toro reference identity, inheritance and dispatch behavior, initialization, and
+exactly-once lifecycle cleanup. Escaping, uncertain, weak-observed, reassigned,
+or indirectly owned constructions remain heap-backed. The choice is shown by
+`toro ir --escape`; no source-level allocation syntax is added.
 Effect analysis remains descriptive rather than policy enforcement.
 The backend-independent effect pass summarizes allocation, lifetime relevance,
 I/O, native/foreign calls, dynamic dispatch, termination, and uncertainty across
@@ -192,8 +197,9 @@ Inspect the deterministic typed IR after semantic analysis and type checking:
 ./build/toro ir --arc --no-opt examples/backend_hardening.toro
 ```
 
-`--escape` shows deterministic managed-allocation classifications, reasons,
-origins, and non-escaping/escaping/unknown metrics. `--arc` shows deterministic
+`--escape` shows deterministic managed-allocation classifications, storage
+decisions, fallback reasons, origins, and non-escaping/escaping/unknown plus
+stack/heap metrics. `--arc` shows deterministic
 before/after lifetime operations and retain,
 release, and elided-pair counts. `--no-opt` exposes the materialized baseline.
 These are compiler-development inspection formats, not stable source or ABI
