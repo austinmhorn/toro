@@ -1,6 +1,7 @@
 #pragma once
 
 #include "toro/Diagnostic.hpp"
+#include "toro/PerformanceContract.hpp"
 #include "toro/SourceLocation.hpp"
 #include "toro/Type.hpp"
 
@@ -169,6 +170,7 @@ struct IRDeclaration {
     bool is_override{false};
     bool is_abstract{false};
     bool is_public{false};
+    PerformanceContract performance_contract{PerformanceContract::None};
 };
 
 struct IRModule {

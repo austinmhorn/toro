@@ -217,12 +217,14 @@ struct FunctionDeclarationStmt final : Stmt {
         std::vector<Parameter> parameters,
         std::optional<TypeReference> return_type,
         std::unique_ptr<BlockStmt> body, bool is_external = false,
-        std::string calling_convention = {})
+        std::string calling_convention = {},
+        PerformanceContract performance_contract = PerformanceContract::None)
         : Stmt(StmtKind::FunctionDeclaration, location), name(std::move(name)),
           generic_parameters(std::move(generic_parameters)),
           parameters(std::move(parameters)), return_type(std::move(return_type)),
           body(std::move(body)), is_external(is_external),
-          calling_convention(std::move(calling_convention)) {}
+          calling_convention(std::move(calling_convention)),
+          performance_contract(performance_contract) {}
     std::string name;
     std::vector<GenericParameter> generic_parameters;
     std::vector<Parameter> parameters;
@@ -230,6 +232,7 @@ struct FunctionDeclarationStmt final : Stmt {
     std::unique_ptr<BlockStmt> body;
     bool is_external;
     std::string calling_convention;
+    PerformanceContract performance_contract;
     std::string identity;
     std::vector<std::string> borrowed_parameters;
 };
@@ -315,11 +318,13 @@ struct MethodDeclaration final : ClassMember {
         std::string name, std::vector<GenericParameter> generic_parameters,
         std::vector<Parameter> parameters,
         std::optional<TypeReference> return_type, bool is_virtual,
-        bool is_override, std::unique_ptr<BlockStmt> body)
+        bool is_override, std::unique_ptr<BlockStmt> body,
+        PerformanceContract performance_contract = PerformanceContract::None)
         : ClassMember(ClassMemberKind::Method, visibility, location),
           name(std::move(name)), generic_parameters(std::move(generic_parameters)),
           parameters(std::move(parameters)), return_type(std::move(return_type)),
-          is_virtual(is_virtual), is_override(is_override), body(std::move(body)) {}
+          is_virtual(is_virtual), is_override(is_override), body(std::move(body)),
+          performance_contract(performance_contract) {}
     std::string name;
     std::vector<GenericParameter> generic_parameters;
     std::vector<Parameter> parameters;
@@ -327,6 +332,7 @@ struct MethodDeclaration final : ClassMember {
     bool is_virtual;
     bool is_override;
     std::unique_ptr<BlockStmt> body;
+    PerformanceContract performance_contract;
     std::string identity;
     std::vector<std::string> borrowed_parameters;
 };

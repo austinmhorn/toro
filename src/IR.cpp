@@ -324,6 +324,9 @@ std::string dump_ir(
         if (declaration.is_virtual) output += " virtual";
         if (declaration.is_override) output += " override";
         if (declaration.is_public) output += " public";
+        if (declaration.performance_contract == PerformanceContract::Performance) {
+            output += " performance";
+        }
         append_origin(declaration.origin, output);
         output += '\n';
         for (const auto& field : declaration.fields) {

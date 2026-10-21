@@ -133,7 +133,12 @@ Long term:
 - Avoid source-level ownership syntax unless real programs prove it necessary.
 - Do not prematurely implement arenas, atomic ARC, ownership annotations, or other advanced memory features before the roadmap reaches them.
 
-`performance function` is a future compiler-enforced execution contract, not merely an optimization hint. Its eventual implementation should be transitive through the call graph and capable of rejecting prohibited behavior such as general heap allocation, blocking I/O, hidden synchronization, escaping temporaries, or calls that violate the contract.
+`performance function` is the canonical compiler-enforced execution contract,
+not merely an optimization hint. Its syntax and typed IR marker are active.
+Contract enforcement must remain a dedicated IR policy pass, be transitive
+through the call graph, and reject prohibited behavior such as general heap
+allocation, blocking I/O, hidden synchronization, escaping temporaries, or
+calls that violate the contract. Do not place that policy in `EffectAnalyzer`.
 
 Performance/memory decisions should eventually be observable and explainable through Toro tooling.
 

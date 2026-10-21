@@ -1,0 +1,14 @@
+performance function increment(value: int) -> int {
+    return value + 1
+}
+
+class Counter {
+    public performance function next(value: int) -> int {
+        return increment(value)
+    }
+}
+
+function main() {
+    counter := Counter()
+    print(counter.next(41))
+}

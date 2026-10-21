@@ -1,6 +1,7 @@
 #pragma once
 
 #include "toro/Token.hpp"
+#include "toro/PerformanceContract.hpp"
 #include "toro/SourceLocation.hpp"
 #include "toro/Type.hpp"
 
@@ -404,7 +405,8 @@ struct FunctionDeclarationStmt final : Stmt {
         std::optional<TypeReference> return_type,
         std::unique_ptr<BlockStmt> body,
         bool is_external = false,
-        std::string calling_convention = {})
+        std::string calling_convention = {},
+        PerformanceContract performance_contract = PerformanceContract::None)
         : Stmt(StmtKind::FunctionDeclaration, location)
         , name(std::move(name))
         , generic_parameters(std::move(generic_parameters))
@@ -413,6 +415,7 @@ struct FunctionDeclarationStmt final : Stmt {
         , body(std::move(body))
         , is_external(is_external)
         , calling_convention(std::move(calling_convention))
+        , performance_contract(performance_contract)
     {
     }
 
@@ -423,6 +426,7 @@ struct FunctionDeclarationStmt final : Stmt {
     std::unique_ptr<BlockStmt> body;
     bool is_external;
     std::string calling_convention;
+    PerformanceContract performance_contract;
 };
 
 struct ReturnStmt final : Stmt {
@@ -650,7 +654,8 @@ struct MethodDeclaration final : ClassMember {
         std::optional<TypeReference> return_type,
         bool is_virtual,
         bool is_override,
-        std::unique_ptr<BlockStmt> body)
+        std::unique_ptr<BlockStmt> body,
+        PerformanceContract performance_contract = PerformanceContract::None)
         : ClassMember(ClassMemberKind::Method, visibility, location)
         , name(std::move(name))
         , generic_parameters(std::move(generic_parameters))
@@ -659,6 +664,7 @@ struct MethodDeclaration final : ClassMember {
         , is_virtual(is_virtual)
         , is_override(is_override)
         , body(std::move(body))
+        , performance_contract(performance_contract)
     {
     }
 
@@ -669,6 +675,7 @@ struct MethodDeclaration final : ClassMember {
     bool is_virtual;
     bool is_override;
     std::unique_ptr<BlockStmt> body;
+    PerformanceContract performance_contract;
 };
 
 struct ClassDeclarationStmt final : Stmt {

@@ -88,7 +88,7 @@ void test_current_language_constructs()
         "function get()->A{return self.first}\n}\n"
         "public class Worker{\npublic name:string\n"
         "init(name:string){self.name=name}\n"
-        "public function run<T: Comparable+Serializable>(value:T)->T{return value}\n"
+        "public performance function run<T: Comparable+Serializable>(value:T)->T{return value}\n"
         "overload as string{return self.name}\n"
         "destroy(){print(self.name)}\n}\n"
         "function inspect(result:Outcome){\nhandle result{\n"
@@ -101,6 +101,19 @@ void test_current_language_constructs()
         "lifecycle declaration was not formatted canonically");
     expect(formatted.find("overload as string {") != std::string::npos,
         "conversion overload was not formatted");
+    expect(formatted.find(
+            "public performance function run<T: Comparable + Serializable>(value: T) -> T {")
+            != std::string::npos,
+        "performance method was not formatted canonically");
+    const std::string performance = formatter.format(
+        "performance function tick(value:int)->int{return value}\n");
+    expect(performance
+            == "performance function tick(value: int) -> int {\n"
+               "    return value\n"
+               "}\n",
+        "performance function was not formatted canonically");
+    expect(formatter.format(performance) == performance,
+        "performance function formatting was not idempotent");
     const std::string expressions = formatter.format(
         "function use(values:List<int>,result:Result<int,string>)->dec{\n"
         "values[0]=values[0]+1\n"

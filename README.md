@@ -103,7 +103,10 @@ Effect analysis remains descriptive rather than policy enforcement.
 The backend-independent effect pass summarizes allocation, lifetime relevance,
 I/O, native/foreign calls, dynamic dispatch, termination, and uncertainty across
 the transitive call graph. These summaries are inspection metadata only; they do
-not optimize code or enforce performance contracts.
+not optimize code or enforce performance contracts. Phase 10.1 now accepts the
+canonical `performance function` spelling, preserves the contract through the
+formatter and typed IR, and leaves transitive policy enforcement to the next
+Phase 10 milestones.
 
 ## Build
 

@@ -205,9 +205,15 @@ void append_statement_dump(const Stmt& statement, std::size_t depth, std::string
     }
     case StmtKind::FunctionDeclaration: {
         const auto& function = static_cast<const FunctionDeclarationStmt&>(statement);
-        output += indentation
-            + (function.is_external ? "ExternalFunctionDeclaration(" : "FunctionDeclaration(")
-            + function.name + ")\n";
+        output += indentation;
+        if (function.is_external) {
+            output += "ExternalFunctionDeclaration(";
+        } else if (function.performance_contract == PerformanceContract::Performance) {
+            output += "PerformanceFunctionDeclaration(";
+        } else {
+            output += "FunctionDeclaration(";
+        }
+        output += function.name + ")\n";
         if (function.is_external) {
             output += std::string((depth + 1) * 2, ' ')
                 + "calling convention: " + function.calling_convention + "\n";
@@ -328,8 +334,12 @@ void append_statement_dump(const Stmt& statement, std::size_t depth, std::string
         }
         for (const auto& method : declaration.methods) {
             const auto& method_declaration = static_cast<const MethodDeclaration&>(*method);
-            output += std::string((depth + 1) * 2, ' ') + "public Method("
-                + method_declaration.name + ")\n";
+            output += std::string((depth + 1) * 2, ' ') + "public ";
+            if (method_declaration.performance_contract
+                == PerformanceContract::Performance) {
+                output += "performance ";
+            }
+            output += "Method(" + method_declaration.name + ")\n";
             append_generic_parameters(
                 method_declaration.generic_parameters, depth + 2, output);
             output += std::string((depth + 2) * 2, ' ') + "Parameters\n";
@@ -397,6 +407,9 @@ void append_statement_dump(const Stmt& statement, std::size_t depth, std::string
                 output += "virtual ";
             } else if (method.is_override) {
                 output += "override ";
+            }
+            if (method.performance_contract == PerformanceContract::Performance) {
+                output += "performance ";
             }
             output += (method.name == "init" || method.name == "destroy"
                     ? "Lifecycle("
@@ -503,7 +516,8 @@ std::unique_ptr<Stmt> Parser::parse_import_declaration()
 
 std::unique_ptr<Stmt> Parser::parse_top_level_declaration(bool is_public)
 {
-    if (!check(TokenType::Function) && !check(TokenType::Extern)
+    if (!check(TokenType::Function) && !check(TokenType::Performance)
+        && !check(TokenType::Extern)
         && !check(TokenType::Enum)
         && !check(TokenType::Struct) && !check(TokenType::Class)
         && !check(TokenType::Abstract) && !check(TokenType::Interface)) {
@@ -528,7 +542,7 @@ std::unique_ptr<Stmt> Parser::parse_statement()
     if (check(TokenType::Public) || check(TokenType::Private)) {
         throw_parse_error(peek(), "visibility modifiers are only valid on module or class declarations");
     }
-    if (check(TokenType::Function)) {
+    if (check(TokenType::Function) || check(TokenType::Performance)) {
         return parse_function_declaration();
     }
     if (check(TokenType::Enum)) {
@@ -638,7 +652,11 @@ std::unique_ptr<Stmt> Parser::parse_variable_declaration()
 
 std::unique_ptr<Stmt> Parser::parse_function_declaration()
 {
-    Token function_token = advance();
+    const Token declaration_token = peek();
+    const bool is_performance = match({TokenType::Performance});
+    const Token function_token = is_performance
+        ? consume(TokenType::Function, "expected 'function' after 'performance'")
+        : consume(TokenType::Function, "expected 'function'");
     const Token& name = consume(TokenType::Identifier, "expected function name");
     const std::string function_name = name.lexeme;
     auto generic_parameters = parse_generic_parameters();
@@ -676,12 +694,17 @@ std::unique_ptr<Stmt> Parser::parse_function_declaration()
     require_statement_end();
 
     return std::make_unique<FunctionDeclarationStmt>(
-        SourceLocation{function_token.line, function_token.column},
+        SourceLocation{declaration_token.line, declaration_token.column},
         function_name,
         std::move(generic_parameters),
         std::move(parameters),
         std::move(return_type),
-        std::move(body));
+        std::move(body),
+        false,
+        std::string{},
+        is_performance
+            ? PerformanceContract::Performance
+            : PerformanceContract::None);
 }
 
 std::unique_ptr<Stmt> Parser::parse_external_function_declaration()
@@ -983,9 +1006,15 @@ std::unique_ptr<Stmt> Parser::parse_struct_declaration()
     bool saw_destroy = false;
     while (!at_end() && peek().type != TokenType::RightBrace) {
         statement_line_ = peek().line;
-        if (check(TokenType::Function)) {
+        const bool is_performance = match({TokenType::Performance});
+        if (is_performance || check(TokenType::Function)) {
             methods.push_back(parse_method_declaration(
-                Visibility::Public, false, false, saw_destroy));
+                Visibility::Public,
+                false,
+                false,
+                is_performance ? PerformanceContract::Performance
+                               : PerformanceContract::None,
+                saw_destroy));
             continue;
         }
         if (check(TokenType::Overload)) {
@@ -1085,12 +1114,13 @@ std::unique_ptr<Stmt> Parser::parse_class_declaration(bool is_abstract)
         if (check(TokenType::Virtual) || check(TokenType::Override)) {
             throw_parse_error(peek(), "method may have only one virtual or override modifier");
         }
+        const bool is_performance = match({TokenType::Performance});
         if (is_weak && !check(TokenType::Identifier)) {
             throw_parse_error(peek(), "weak may only modify a class field");
         }
 
         if (check(TokenType::Overload)) {
-            if (explicit_visibility || is_virtual || is_override) {
+            if (explicit_visibility || is_virtual || is_override || is_performance) {
                 throw_parse_error(
                     peek(), "conversion overload syntax is exactly 'overload as Type'");
             }
@@ -1101,7 +1131,10 @@ std::unique_ptr<Stmt> Parser::parse_class_declaration(bool is_abstract)
                     overload_token, "duplicate conversion overload target");
             }
             members.push_back(std::move(conversion));
-        } else if (check(TokenType::Function)) {
+        } else if (is_performance || check(TokenType::Function)) {
+            if (is_performance && !check(TokenType::Function)) {
+                throw_parse_error(peek(), "expected 'function' after 'performance'");
+            }
             if (check_next(TokenType::Identifier)
                 && (tokens_[current_ + 1].lexeme == "init"
                     || tokens_[current_ + 1].lexeme == "destroy")) {
@@ -1116,13 +1149,26 @@ std::unique_ptr<Stmt> Parser::parse_class_declaration(bool is_abstract)
                     "class lifecycle syntax is 'destroy(...)', not 'function destroy(...)'");
             }
             members.push_back(parse_method_declaration(
-                visibility, is_virtual, is_override, saw_destroy, &saw_init));
-        } else if (!is_weak && !is_virtual && !is_override
+                visibility,
+                is_virtual,
+                is_override,
+                is_performance ? PerformanceContract::Performance
+                               : PerformanceContract::None,
+                saw_destroy,
+                &saw_init));
+        } else if (!is_weak && !is_virtual && !is_override && !is_performance
             && check(TokenType::Identifier)
             && (peek().lexeme == "init" || peek().lexeme == "destroy")) {
             members.push_back(parse_method_declaration(
-                visibility, false, false, saw_destroy, &saw_init, true));
-        } else if (!is_virtual && !is_override && check(TokenType::Identifier)) {
+                visibility,
+                false,
+                false,
+                PerformanceContract::None,
+                saw_destroy,
+                &saw_init,
+                true));
+        } else if (!is_virtual && !is_override && !is_performance
+            && check(TokenType::Identifier)) {
             members.push_back(parse_class_field(visibility, is_weak));
         } else {
             throw_parse_error(peek(), "expected class field or method");
@@ -1183,6 +1229,10 @@ std::unique_ptr<Stmt> Parser::parse_interface_declaration()
     std::vector<InterfaceMethod> methods;
     while (!at_end() && peek().type != TokenType::RightBrace) {
         statement_line_ = peek().line;
+        if (check(TokenType::Performance)) {
+            throw_parse_error(
+                peek(), "performance contracts require a function body");
+        }
         Token function_token = consume(
             TokenType::Function, "interfaces may contain only function signatures");
         const Token& method_name = consume(
@@ -1326,6 +1376,7 @@ std::unique_ptr<ClassMember> Parser::parse_method_declaration(
     Visibility visibility,
     bool is_virtual,
     bool is_override,
+    PerformanceContract performance_contract,
     bool& saw_destroy,
     bool* saw_init,
     bool shorthand_lifecycle)
@@ -1395,7 +1446,8 @@ std::unique_ptr<ClassMember> Parser::parse_method_declaration(
         loop_depth_ = 0;
         body = parse_block_statement();
         loop_depth_ = enclosing_loop_depth;
-    } else if (!is_virtual || is_destroy) {
+    } else if (performance_contract == PerformanceContract::Performance
+        || !is_virtual || is_destroy) {
         throw_parse_error(peek(), "expected '{' before method body");
     }
     require_statement_end();
@@ -1409,7 +1461,8 @@ std::unique_ptr<ClassMember> Parser::parse_method_declaration(
         std::move(return_type),
         is_virtual,
         is_override,
-        std::move(body));
+        std::move(body),
+        performance_contract);
 }
 
 std::unique_ptr<BlockStmt> Parser::parse_block_statement()

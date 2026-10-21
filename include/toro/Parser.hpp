@@ -45,6 +45,7 @@ private:
         Visibility visibility,
         bool is_virtual,
         bool is_override,
+        PerformanceContract performance_contract,
         bool& saw_destroy,
         bool* saw_init = nullptr,
         bool shorthand_lifecycle = false);

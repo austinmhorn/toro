@@ -414,6 +414,56 @@ void test_function_parameters_and_return_type()
         "parameter location was not retained");
 }
 
+void test_performance_functions_and_methods()
+{
+    expect_program_dump(
+        "public performance function update(value: int) -> int {\n"
+        "    return value + 1\n"
+        "}\n",
+        "PerformanceFunctionDeclaration(update)\n"
+        "  Parameters\n"
+        "    Parameter(value: int)\n"
+        "  return type: int\n"
+        "  Block\n"
+        "    Return\n"
+        "      Binary(+)\n"
+        "        Identifier(value)\n"
+        "        Integer(1)\n");
+
+    const auto program = parse_program(
+        "struct Counter {\n"
+        "    performance function next(value: int) -> int { return value + 1 }\n"
+        "}\n"
+        "class Worker {\n"
+        "    public virtual performance function run(value: int) -> int {\n"
+        "        return value\n"
+        "    }\n"
+        "}\n");
+    const auto& structure = static_cast<const toro::StructDeclarationStmt&>(
+        *program.statements[0]);
+    const auto& struct_method = static_cast<const toro::MethodDeclaration&>(
+        *structure.methods.front());
+    expect(struct_method.performance_contract
+            == toro::PerformanceContract::Performance,
+        "struct performance method marker was not retained");
+    const auto& class_ = static_cast<const toro::ClassDeclarationStmt&>(
+        *program.statements[1]);
+    const auto& class_method = static_cast<const toro::MethodDeclaration&>(
+        *class_.members.front());
+    expect(class_method.is_virtual, "virtual modifier was not retained");
+    expect(class_method.performance_contract
+            == toro::PerformanceContract::Performance,
+        "class performance method marker was not retained");
+
+    const auto ordinary = parse_program("function ordinary() {}\n");
+    const auto& ordinary_function =
+        static_cast<const toro::FunctionDeclarationStmt&>(
+            *ordinary.statements.front());
+    expect(ordinary_function.performance_contract
+            == toro::PerformanceContract::None,
+        "ordinary function unexpectedly gained a performance contract");
+}
+
 void test_return_without_value()
 {
     expect_program_dump(
@@ -1750,6 +1800,22 @@ void test_external_c_declarations()
         "cannot have a body");
 }
 
+void test_performance_function_failures()
+{
+    expect_program_error(
+        "performance class Wrong {}\n",
+        "expected 'function' after 'performance'");
+    expect_program_error(
+        "class Wrong { performance init() {} }\n",
+        "expected 'function' after 'performance'");
+    expect_program_error(
+        "interface Wrong { performance function run() }\n",
+        "performance contracts require a function body");
+    expect_program_error(
+        "class Wrong { virtual performance function run() }\n",
+        "expected '{' before method body");
+}
+
 } // namespace
 
 int main()
@@ -1779,6 +1845,7 @@ int main()
         test_nested_multiline_construction();
         test_empty_function();
         test_function_parameters_and_return_type();
+        test_performance_functions_and_methods();
         test_return_without_value();
         test_nested_function_statements();
         test_multiple_functions();
@@ -1835,6 +1902,7 @@ int main()
         test_generic_failures();
         test_conversion_failures();
         test_external_c_declarations();
+        test_performance_function_failures();
     } catch (const std::exception& error) {
         std::cerr << "parser test failure: " << error.what() << '\n';
         return 1;

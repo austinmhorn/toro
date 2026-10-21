@@ -169,7 +169,8 @@ private:
                             std::vector<std::unique_ptr<Stmt>>{})
                         : nullptr,
                     declaration.kind == IRDeclarationKind::ForeignFunction,
-                    declaration.calling_convention);
+                    declaration.calling_convention,
+                    declaration.performance_contract);
                 value->identity = declaration.identity;
                 value->borrowed_parameters = borrowed_parameters(
                     declaration.identity);
@@ -338,7 +339,8 @@ private:
             return_type(declaration),
             declaration.is_virtual,
             declaration.is_override,
-            nullptr);
+            nullptr,
+            declaration.performance_contract);
         value->identity = declaration.identity;
         value->borrowed_parameters = borrowed_parameters(declaration.identity);
         auto* pointer = value.get();

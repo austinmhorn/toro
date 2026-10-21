@@ -658,7 +658,19 @@ performance function update(world: World, dt: dec) {
 
 ## 10.1 Syntax/semantic activation
 
-Promote the existing language design to executable compiler semantics.
+Completed:
+
+- canonical `performance function` syntax for ordinary functions and
+  body-bearing struct/class methods;
+- one explicit performance-contract representation retained through parsing,
+  semantic/type checking, typed IR lowering, and detached backend modeling;
+- formatter preservation and deterministic IR inspection;
+- malformed-placement diagnostics without alternate spellings or lifecycle,
+  interface-signature, or FFI contract annotations;
+- no backend code-shape change merely because a callable carries the marker.
+
+Contract policy enforcement remains in 10.2 and 10.3; 10.1 records the
+contract without prematurely duplicating effect or ownership analysis.
 
 ## 10.2 Transitive effect checking
 

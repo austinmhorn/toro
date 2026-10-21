@@ -220,6 +220,46 @@ void test_backend_uses_detached_ir_only()
         "C generation changed effect summaries");
 }
 
+void test_performance_contract_marker()
+{
+    auto program = parse_and_check(
+        "performance function calculate(value: int) -> int {\n"
+        "    return value + 1\n"
+        "}\n"
+        "struct Counter {\n"
+        "    performance function next(value: int) -> int {\n"
+        "        return value + 1\n"
+        "    }\n"
+        "}\n"
+        "function ordinary() {}\n"
+        "performance function identity<T>(value: T) -> T { return value }\n");
+    const auto ir = toro::IRLowerer().lower(program);
+    expect(ir.declarations.size() == 5, "unexpected performance IR declaration count");
+    expect(ir.declarations[0].performance_contract
+            == toro::PerformanceContract::Performance,
+        "performance function contract did not reach IR");
+    expect(ir.declarations[2].performance_contract
+            == toro::PerformanceContract::Performance,
+        "performance method contract did not reach IR");
+    expect(ir.declarations[3].performance_contract
+            == toro::PerformanceContract::None,
+        "ordinary function unexpectedly gained an IR contract");
+    expect(ir.declarations[4].performance_contract
+            == toro::PerformanceContract::Performance,
+        "generic performance function contract did not reach IR");
+    const auto dump = toro::dump_ir(ir);
+    expect_contains(dump, "calculate(int)", "performance function identity");
+    expect_contains(dump, "performance", "performance contract marker");
+
+    auto detached = lower_detached(
+        "performance function main() { print(1) }\n");
+    const auto generated = toro::CGenerator().generate(detached);
+    expect_contains(generated, "int main(void)", "performance function C lowering");
+    auto ordinary = lower_detached("function main() { print(1) }\n");
+    expect(generated == toro::CGenerator().generate(ordinary),
+        "performance marker unexpectedly changed generated C");
+}
+
 } // namespace
 
 int main()
@@ -232,6 +272,7 @@ int main()
         test_modules_and_foreign_calls();
         test_standard_library_calls();
         test_backend_uses_detached_ir_only();
+        test_performance_contract_marker();
     } catch (const std::exception& error) {
         std::cerr << "IR test failure: " << error.what() << '\n';
         return 1;

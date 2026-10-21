@@ -39,6 +39,28 @@ function main() {
 }
 ```
 
+### Performance contracts
+
+The canonical performance-contract spelling is:
+
+```toro
+performance function update(value: int) -> int {
+    return value + 1
+}
+```
+
+`performance function` is a compiler contract, not an optimization hint,
+inlining request, or separate ownership mode. Ordinary `function`
+declarations remain unchanged. The modifier is retained explicitly through
+the AST and typed toro IR for ordinary functions and body-bearing struct/class
+methods; lifecycle declarations, interface signatures, and external C
+declarations are not performance-contracted callables.
+
+Phase 10.1 activates the syntax and semantic marker. Transitive effect-policy
+validation and ownership-aware contract proof are the following Phase 10
+milestones, so this activation alone does not yet reject prohibited runtime
+effects. No source ownership or lifetime syntax is introduced.
+
 ### Modules and imports
 
 Imports are module-root based and may appear only at module scope:

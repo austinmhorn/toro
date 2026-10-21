@@ -56,7 +56,10 @@ A class remains a reference type with identity even when a future optimizer prov
 
 Normal functions ask the compiler to produce correct native code and optimize it where possible.
 
-A future `performance function` additionally asks the compiler to **prove that the transitive call tree obeys a predictable execution contract**.
+`performance function` asks the compiler to **prove that the transitive call
+tree obeys a predictable execution contract**. The canonical syntax and typed
+IR marker are active; effect-policy and ownership-aware proof are staged in the
+remaining Phase 10 milestones.
 
 Potential prohibited behavior includes:
 

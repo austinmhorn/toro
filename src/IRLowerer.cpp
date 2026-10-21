@@ -674,6 +674,7 @@ private:
             function.return_type, declaration_origin);
         result.is_public = function.is_public;
         result.calling_convention = function.calling_convention;
+        result.performance_contract = function.performance_contract;
         if (!function.is_external) {
             result.body = lower_block(*function.body, module);
         }
@@ -700,6 +701,7 @@ private:
         result.is_override = method.is_override;
         result.is_abstract = !method.body;
         result.is_public = method.visibility == Visibility::Public;
+        result.performance_contract = method.performance_contract;
         if (method.body) result.body = lower_block(*method.body, module);
         return result;
     }

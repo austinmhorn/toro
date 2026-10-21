@@ -333,7 +333,10 @@ dump. Effect analysis runs before ARC materialization and normal C generation.
 It does not itself alter ARC, allocation, ownership, or native behavior.
 Ownership-sensitive passes use the dedicated summaries below rather than
 treating a callable-wide effect as a parameter contract. Effect analysis does
-not implement or validate the future `performance function` contract.
+not validate performance policy. Phase 10.1 carries the explicit
+`performance function` marker through the AST and typed IR; the dedicated
+policy pass in the following Phase 10 milestones consumes effect summaries
+rather than changing `EffectAnalyzer`.
 
 ### Interprocedural ownership summaries
 
@@ -834,11 +837,15 @@ class/reference semantics at the source level.
 
 ## performance function architecture
 
-`performance function` is planned as a compiler-enforced execution contract.
+`performance function` is a compiler-enforced execution contract. Phase 10.1
+activates its canonical syntax and preserves a dedicated contract marker
+through typed IR and the detached backend model. The C backend intentionally
+does not alter generated code merely because the marker is present.
 
 It is not merely an optimization level.
 
-The compiler should eventually validate the transitive call graph and reject prohibited behavior such as:
+The subsequent contract-analysis milestones validate the transitive call graph
+and reject prohibited behavior such as:
 
 - general heap allocation;
 - blocking I/O;

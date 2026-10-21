@@ -261,6 +261,9 @@ private:
         if (in_class && method.visibility == Visibility::Public) output_ << "public ";
         if (method.is_virtual) output_ << "virtual ";
         if (method.is_override) output_ << "override ";
+        if (method.performance_contract == PerformanceContract::Performance) {
+            output_ << "performance ";
+        }
         const bool lifecycle = in_class
             && (method.name == "init" || method.name == "destroy");
         write_function_signature(
@@ -330,6 +333,9 @@ private:
             if (statement.is_public) output_ << "public ";
             if (function.is_external) {
                 output_ << "extern \"" << function.calling_convention << "\" ";
+            }
+            if (function.performance_contract == PerformanceContract::Performance) {
+                output_ << "performance ";
             }
             write_function_signature(
                 "function ", function.name, function.generic_parameters,
