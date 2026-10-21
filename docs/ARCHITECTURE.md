@@ -35,6 +35,8 @@ annotated toro IR
     ↓
 OwnershipSummaryAnalyzer
     ↓
+StrongCycleAnalyzer
+    ↓
 EscapeAnalyzer
     ↓
 StorageDecisionAnalyzer
@@ -365,6 +367,29 @@ block-local until explicit cross-call consumption can be represented safely.
 
 `toro ir --ownership` appends stable callable summaries, parameter causes, and
 return relationships to the normal IR dump.
+
+### Strong-reference cycle diagnostics
+
+`StrongCycleAnalyzer` runs after interprocedural ownership summaries and before
+escape/storage analysis. It builds a deterministic persistent-ownership graph
+from concrete class instances and their strong fields. Inherited fields retain
+their declaration origins; concrete generic specializations remain distinct;
+and supported `Array`, `List`, `Map` value storage plus persistent enum/Result
+payload paths contribute contained class-reference edges. Explicit `weak`
+fields, interface views, call parameters, temporary aliases, borrows, and other
+non-persistent summary facts do not create graph edges.
+
+Deterministic strongly connected components identify self-cycles and longer
+cycles. Each ownership component produces at most one canonical diagnostic,
+with the participating field declarations, an ordered cycle path, the ARC
+lifetime consequence, and an advisory suggestion to consider a non-owning
+`weak` back-reference. The analysis is deliberately type/storage based and
+labels findings as possible cycles; it does not claim concrete heap-shape proof.
+Obviously unconstructible all-required, non-null field rings are suppressed.
+
+Cycle warnings do not reject a valid program, rewrite an edge, change generated
+C, or alter ARC/weak behavior. Strong cycles remain legal and may leak. Toro
+does not have a tracing or cycle-collecting runtime.
 
 ### Escape analysis
 
@@ -730,6 +755,8 @@ effect analysis
     ↓
 ownership-summary analysis
     ↓
+strong-cycle diagnostics
+    ↓
 escape analysis
     ↓
 storage decisions
@@ -857,7 +884,7 @@ Later phases may explore:
 
 - arenas/scoped bulk allocation;
 - local vs shared/thread-safe ARC;
-- cycle diagnostics;
+- deeper instance/path cycle proofs and optional ownership-graph inspection;
 - broader consumers of the current interprocedural ownership summaries;
 - LLVM or another backend after the IR is mature;
 - CMake integration for mixed native projects;

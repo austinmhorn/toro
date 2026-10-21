@@ -141,7 +141,7 @@ Performance/memory decisions should eventually be observable and explainable thr
 
 Current pipeline:
 
-`source -> lexer -> parser/AST -> semantic analysis -> type checking -> typed toro IR -> effect analysis -> ownership-summary analysis -> escape analysis -> storage decisions -> ARC materialization -> ownership-transfer analysis -> borrow inference -> ARC optimization -> C generator -> native compiler`
+`source -> lexer -> parser/AST -> semantic analysis -> type checking -> typed toro IR -> effect analysis -> ownership-summary analysis -> strong-cycle diagnostics -> escape analysis -> storage decisions -> ARC materialization -> ownership-transfer analysis -> borrow inference -> ARC optimization -> C generator -> native compiler`
 
 `IRProgram` is the backend semantic boundary. Backends must not retain or read
 frontend AST nodes; frontend convenience entry points must lower to IR before
@@ -149,7 +149,10 @@ invoking backend code.
 
 The canonical `OwnershipSummaryAnalyzer` computes deterministic,
 specialization-specific parameter and managed-return behavior before escape
-analysis. Escape and borrow analysis consume those summaries rather than
+analysis. `StrongCycleAnalyzer` uses the persistent typed storage graph after
+those summaries to issue advisory possible-cycle warnings; it never rewrites
+ownership or changes runtime behavior. Escape and borrow analysis consume the
+summaries rather than
 re-reading callee bodies. The C backend requires materialized lifetime IR.
 Ownership-transfer analysis records proven final-use transfers, then borrow
 inference records proven operation-bounded non-owning uses before ARC

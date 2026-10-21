@@ -638,7 +638,10 @@ without touching freed storage. Weak slots keep the control block alive until
 they are reassigned, cleared, or their owner is destroyed.
 
 ARC does not collect strong reference cycles. A strong parent-to-child edge plus
-a weak child-to-parent edge cleans up, while two strong edges may leak.
+a weak child-to-parent edge cleans up, while two strong edges may leak. The
+compiler emits advisory warnings for statically meaningful possible strong
+cycles, but the program remains valid and ownership is never rewritten. Use
+`weak` explicitly when a relationship is observational rather than owning.
 
 Single-inheritance class hierarchies share one ARC/weak/finalizer header in the
 embedded root object. When a hierarchy declares virtual methods, that header

@@ -19,6 +19,7 @@ add_library(toro_core
     src/CBackendModel.cpp
     src/CGenerator.cpp
     src/CGeneratorFrontend.cpp
+    src/Diagnostic.cpp
     src/EffectAnalyzer.cpp
     src/EscapeAnalyzer.cpp
     src/Formatter.cpp
@@ -34,6 +35,7 @@ add_library(toro_core
     src/SourceFile.cpp
     src/StandardLibrary.cpp
     src/StorageDecisionAnalyzer.cpp
+    src/StrongCycleAnalyzer.cpp
     src/TestRunner.cpp
     src/TypeChecker.cpp
 )
@@ -113,6 +115,16 @@ if(BUILD_TESTING)
     target_link_libraries(toro_ownership_summary_tests PRIVATE toro_core)
     toro_enable_warnings(toro_ownership_summary_tests)
     add_test(NAME ownership_summary COMMAND toro_ownership_summary_tests)
+
+    add_executable(toro_strong_cycle_tests tests/StrongCycleAnalyzerTests.cpp)
+    target_link_libraries(toro_strong_cycle_tests PRIVATE toro_core)
+    toro_enable_warnings(toro_strong_cycle_tests)
+    add_test(NAME strong_cycle COMMAND toro_strong_cycle_tests)
+    add_test(NAME strong_cycle_cli
+        COMMAND ${CMAKE_COMMAND}
+            -DTORO_EXECUTABLE=$<TARGET_FILE:toro>
+            -DTORO_BINARY_DIR=${PROJECT_BINARY_DIR}
+            -P ${PROJECT_SOURCE_DIR}/tests/StrongCycleCliTest.cmake)
 
     add_executable(toro_arc_optimizer_tests tests/ArcOptimizerTests.cpp)
     target_link_libraries(toro_arc_optimizer_tests PRIVATE toro_core)

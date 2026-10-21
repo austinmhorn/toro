@@ -623,11 +623,24 @@ leaks or double releases.
 
 ## 9.7 Strong-cycle diagnostics
 
-Detect obvious or likely ARC cycles where practical.
+Completed:
 
-Provide actionable diagnostics suggesting `weak` relationships.
+- a deterministic persistent strong-ownership graph over concrete class types;
+- self-, two-type, and longer-cycle detection using strongly connected
+  components with canonical ordering and duplicate suppression;
+- inherited strong fields and concrete generic specialization identity;
+- supported Array/List/Map element/value storage and persistent enum/Result
+  payload relationships;
+- explicit weak edges breaking cycles, while parameters, temporary aliases,
+  borrows, interface views, and observation-only ownership summaries remain
+  outside the graph;
+- advisory, source-located warnings that show the field path, explain why ARC
+  cannot reclaim the cycle, and suggest considering a weak back-reference;
+- no ownership rewrite, compile rejection, generated-code change, or runtime
+  semantic change.
 
-Do not introduce a tracing collector merely to avoid designing ownership relationships.
+The current pass is type/storage based and conservatively labels findings as
+possible. General heap-shape proof and tracing cycle collection remain deferred.
 
 ---
 

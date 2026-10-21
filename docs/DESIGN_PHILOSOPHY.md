@@ -88,6 +88,12 @@ The desired experience is:
 
 > **You should not have to manage it manually, but you should be able to understand it precisely.**
 
+Toro now applies that principle to persistent strong-reference topology: the
+compiler warns about deterministic possible ARC cycles, identifies the owning
+field path, and points to `weak` as the explicit non-owning escape hatch. These
+diagnostics are advisory. The compiler neither silently weakens references nor
+pretends that ARC includes cycle collection.
+
 ## Value and reference semantics
 
 Toro keeps a strong conceptual distinction.

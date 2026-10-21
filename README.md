@@ -81,6 +81,12 @@ transfers, borrows, and deterministic before/after metrics. Escaping stores,
 weak access, uncertain control flow, and unknown/foreign ownership boundaries
 remain conservative.
 This is compiler-internal analysis and adds no source-level ownership syntax.
+After ownership summaries, a deterministic strong-cycle pass inspects only
+persistent owning storage. It reports advisory, source-located warnings for
+possible self or multi-type ARC cycles across strong fields, inheritance,
+concrete generics, supported collections, and persistent enum/Result payloads.
+Weak fields and temporary/borrow/interface relationships do not form ownership
+edges. Warnings neither reject the program nor rewrite ownership.
 An allocation-site escape pass now follows effect analysis and classifies each
 managed construction as non-escaping, escaping, or unknown. It propagates local
 aliases, merges branches and loops conservatively, records compact reasons and
@@ -502,7 +508,10 @@ fields must have a nullable class type; they use zeroing control-block reference
 their target, and safely read as `null` after target destruction. Parent-strong
 to child / child-weak to parent graphs therefore clean up normally. Strong
 reference cycles can still leak because Toro does not yet include a cycle
-collector. When a class declares `init`, constructor arguments bind to its
+collector. The compiler warns about statically meaningful possible strong
+cycles and suggests considering whether a non-owning back-reference should be
+`weak`; this remains advisory, and runtime behavior is unchanged. When a class
+declares `init`, constructor arguments bind to its
 parameters instead of fields. The backend initializes explicit defaults, Toro
 zero values, and nullable fields before invoking `init` exactly once. Required
 non-null fields without defaults must be assigned by `init` on every reachable

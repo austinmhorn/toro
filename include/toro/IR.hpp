@@ -1,5 +1,6 @@
 #pragma once
 
+#include "toro/Diagnostic.hpp"
 #include "toro/SourceLocation.hpp"
 #include "toro/Type.hpp"
 
@@ -273,6 +274,20 @@ struct IRCallableOwnershipSummary {
     IRReturnOwnershipSummary return_value;
 };
 
+struct IRStrongOwnershipEdge {
+    std::string owner_type;
+    std::string owner_display;
+    std::string field_path;
+    std::string target_type;
+    std::string target_display;
+    IROrigin origin;
+    bool target_may_be_deferred{false};
+};
+
+struct IRStrongReferenceCycle {
+    std::vector<IRStrongOwnershipEdge> edges;
+};
+
 enum class IREffect : std::uint8_t {
     Allocate,
     Retain,
@@ -367,6 +382,9 @@ struct IRProgram {
     std::vector<IRCallableArcSchedule> arc_schedules;
     IRArcMetrics arc_metrics;
     std::vector<IRCallableOwnershipSummary> ownership_summaries;
+    std::vector<IRStrongOwnershipEdge> strong_ownership_edges;
+    std::vector<IRStrongReferenceCycle> strong_reference_cycles;
+    std::vector<Diagnostic> diagnostics;
     bool borrowing_enabled{true};
 };
 

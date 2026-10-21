@@ -1,6 +1,7 @@
 #include "toro/ArcOptimizer.hpp"
 #include "toro/BorrowInferenceAnalyzer.hpp"
 #include "toro/CGenerator.hpp"
+#include "toro/Diagnostic.hpp"
 #include "toro/EffectAnalyzer.hpp"
 #include "toro/EscapeAnalyzer.hpp"
 #include "toro/Formatter.hpp"
@@ -13,6 +14,7 @@
 #include "toro/ProjectConfig.hpp"
 #include "toro/SemanticAnalyzer.hpp"
 #include "toro/StorageDecisionAnalyzer.hpp"
+#include "toro/StrongCycleAnalyzer.hpp"
 #include "toro/SourceFile.hpp"
 #include "toro/Token.hpp"
 #include "toro/TypeChecker.hpp"
@@ -119,11 +121,28 @@ void print_ast(std::string_view source)
     std::cout << toro::dump_program(program);
 }
 
+void analyze_ownership_and_cycles(toro::IRProgram& ir)
+{
+    toro::EffectAnalyzer().analyze(ir);
+    toro::OwnershipSummaryAnalyzer().analyze(ir);
+    toro::StrongCycleAnalyzer().analyze(ir);
+}
+
+void print_diagnostics(const toro::IRProgram& ir)
+{
+    for (const auto& diagnostic : ir.diagnostics) {
+        std::cerr << toro::format_diagnostic(diagnostic);
+    }
+}
+
 void check_source(const CompilationInput& input)
 {
     const auto program = load_program(input);
     toro::SemanticAnalyzer().analyze(program);
     toro::TypeChecker().check(program);
+    auto ir = toro::IRLowerer().lower(program);
+    analyze_ownership_and_cycles(ir);
+    print_diagnostics(ir);
     std::cout << "check passed\n";
 }
 
@@ -133,8 +152,8 @@ std::string generate_c(const CompilationInput& input)
     toro::SemanticAnalyzer().analyze(program);
     toro::TypeChecker().check(program);
     auto ir = toro::IRLowerer().lower(program);
-    toro::EffectAnalyzer().analyze(ir);
-    toro::OwnershipSummaryAnalyzer().analyze(ir);
+    analyze_ownership_and_cycles(ir);
+    print_diagnostics(ir);
     toro::EscapeAnalyzer().analyze(ir);
     toro::StorageDecisionAnalyzer().analyze(ir);
     toro::ArcMaterializer().materialize(ir);
@@ -156,12 +175,8 @@ void print_ir(
     toro::SemanticAnalyzer().analyze(program);
     toro::TypeChecker().check(program);
     auto ir = toro::IRLowerer().lower(program);
-    if (include_effects || include_arc || include_escape || include_ownership) {
-        toro::EffectAnalyzer().analyze(ir);
-    }
-    if (include_arc || include_escape || include_ownership) {
-        toro::OwnershipSummaryAnalyzer().analyze(ir);
-    }
+    analyze_ownership_and_cycles(ir);
+    print_diagnostics(ir);
     if (include_escape || include_arc) toro::EscapeAnalyzer().analyze(ir);
     if (include_escape || include_arc) {
         toro::StorageDecisionAnalyzer().analyze(ir);

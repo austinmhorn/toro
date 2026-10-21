@@ -7,6 +7,7 @@
 #include "toro/IRLowerer.hpp"
 #include "toro/OwnershipSummaryAnalyzer.hpp"
 #include "toro/StorageDecisionAnalyzer.hpp"
+#include "toro/StrongCycleAnalyzer.hpp"
 
 namespace toro {
 
@@ -15,6 +16,7 @@ std::string CGenerator::generate(const Program& program)
     auto ir = IRLowerer{}.lower(program);
     EffectAnalyzer{}.analyze(ir);
     OwnershipSummaryAnalyzer{}.analyze(ir);
+    StrongCycleAnalyzer{}.analyze(ir);
     EscapeAnalyzer{}.analyze(ir);
     StorageDecisionAnalyzer{}.analyze(ir);
     ArcMaterializer{}.materialize(ir);
