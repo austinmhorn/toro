@@ -6,6 +6,7 @@
 #include "toro/IRLowerer.hpp"
 #include "toro/Lexer.hpp"
 #include "toro/NativeCompiler.hpp"
+#include "toro/OwnershipSummaryAnalyzer.hpp"
 #include "toro/Parser.hpp"
 #include "toro/SemanticAnalyzer.hpp"
 #include "toro/StorageDecisionAnalyzer.hpp"
@@ -43,6 +44,7 @@ toro::IRProgram analyze_ir(
     bool enable_borrowing = true)
 {
     toro::EffectAnalyzer().analyze(ir);
+    toro::OwnershipSummaryAnalyzer().analyze(ir);
     toro::EscapeAnalyzer().analyze(ir);
     toro::StorageDecisionAnalyzer().analyze(ir);
     toro::ArcMaterializer().materialize(ir);
@@ -57,15 +59,15 @@ toro::IRProgram analyze(std::string_view source, bool enable_borrowing = true)
     return analyze_ir(lower(source), enable_borrowing);
 }
 
-const toro::IRParameterBorrowSummary& summary(
+const toro::IRParameterOwnershipSummary& summary(
     const toro::IRProgram& program,
     std::string_view callable_suffix,
     std::string_view parameter)
 {
-    for (const auto& candidate : program.borrow_summaries) {
-        if (candidate.callable_identity.ends_with(callable_suffix)
-            && candidate.parameter_name == parameter) {
-            return candidate;
+    for (const auto& callable : program.ownership_summaries) {
+        if (!callable.callable_identity.ends_with(callable_suffix)) continue;
+        for (const auto& candidate : callable.parameters) {
+            if (candidate.parameter_name == parameter) return candidate;
         }
     }
     throw std::runtime_error("missing borrow summary");
@@ -152,17 +154,17 @@ void test_parameter_specific_direct_and_forwarded_borrows()
         "    print(observe(value))\n"
         "    print(value.value)\n"
         "}\n");
-    expect(summary(ir, "observe(Box)", "value").use
-            == toro::IRParameterUse::ObservedOnly,
+    expect(toro::ownership_is_observed_only(
+            summary(ir, "observe(Box)", "value")),
         "unrelated foreign effect blocked a parameter-specific borrow");
-    expect(summary(ir, "retain(Box,Sink)", "value").use
-            != toro::IRParameterUse::ObservedOnly,
+    expect(!toro::ownership_is_observed_only(
+            summary(ir, "retain(Box,Sink)", "value")),
         "strong-field storage was treated as observation-only");
-    expect(summary(ir, "forward(Box,Sink)", "value").use
-            != toro::IRParameterUse::ObservedOnly,
+    expect(!toro::ownership_is_observed_only(
+            summary(ir, "forward(Box,Sink)", "value")),
         "forwarding to an escaping parameter was borrowed");
-    expect(summary(ir, "collect(Box,List<Box>)", "value").use
-            != toro::IRParameterUse::ObservedOnly,
+    expect(!toro::ownership_is_observed_only(
+            summary(ir, "collect(Box,List<Box>)", "value")),
         "collection insertion was treated as observation-only");
     expect(has_borrow(schedule(ir, "caller()"), "value -> observe.value"),
         "direct observing call did not record its argument borrow");
@@ -224,9 +226,9 @@ void test_unsafe_dynamic_and_weak_cases_remain_owning()
         "function weak_call(watcher: Watcher) { inspect(watcher.value) }\n");
     expect(!has_borrow(schedule(ir, "dynamic(Base,Sink)"), "visit.self"),
         "unsafe virtual target was treated as a receiver borrow");
-    expect(summary(ir, "inspect(Base?)", "value").use
-            == toro::IRParameterUse::Unknown,
-        "weak-reference call site did not preserve the owning call guard");
+    expect(!has_borrow(schedule(ir, "weak_call(Watcher)"),
+            "member value -> inspect.value"),
+        "weak-reference access was modeled as an ordinary borrow");
 }
 
 void test_foreign_and_unknown_call_boundaries_remain_owning()
@@ -239,16 +241,18 @@ void test_foreign_and_unknown_call_boundaries_remain_owning()
     auto& foreign_call = foreign.declarations.back().body->children.front();
     foreign_call.kind = toro::IROperationKind::ForeignCall;
     foreign = analyze_ir(std::move(foreign));
-    expect(summary(foreign, "forward(Box)", "value").use
-            == toro::IRParameterUse::Unknown,
+    expect(std::ranges::find(summary(foreign, "forward(Box)", "value").behaviors,
+            toro::IROwnershipBehavior::Unknown)
+            != summary(foreign, "forward(Box)", "value").behaviors.end(),
         "foreign boundary was treated as borrow-safe");
 
     auto unknown = lower(source);
     auto& unknown_call = unknown.declarations.back().body->children.front();
     unknown_call.selected_declaration.clear();
     unknown = analyze_ir(std::move(unknown));
-    expect(summary(unknown, "forward(Box)", "value").use
-            == toro::IRParameterUse::Unknown,
+    expect(std::ranges::find(summary(unknown, "forward(Box)", "value").behaviors,
+            toro::IROwnershipBehavior::Unknown)
+            != summary(unknown, "forward(Box)", "value").behaviors.end(),
         "unresolved call boundary was treated as borrow-safe");
 }
 

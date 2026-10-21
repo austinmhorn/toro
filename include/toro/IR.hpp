@@ -223,20 +223,54 @@ struct IRArcMetrics {
     std::size_t borrows_inferred{0};
 };
 
-enum class IRParameterUse : std::uint8_t {
-    ObservedOnly,
-    RetainedOrEscaped,
+enum class IROwnershipBehavior : std::uint8_t {
+    Observe,
+    Retain,
+    Store,
+    Return,
+    Consume,
+    Escape,
+    WeakStore,
     Unknown,
 };
 
-struct IRParameterBorrowSummary {
-    std::string callable_identity;
+struct IROwnershipCause {
+    IROwnershipBehavior behavior{IROwnershipBehavior::Observe};
+    IROrigin origin;
+    std::string via_callable;
+    std::string reason;
+    bool transitive{false};
+};
+
+struct IRParameterOwnershipSummary {
     std::string parameter_name;
     std::size_t parameter_index{0};
-    IRParameterUse use{IRParameterUse::Unknown};
+    IROrigin origin;
+    bool receiver{false};
+    std::vector<IROwnershipBehavior> behaviors;
+    std::vector<IROwnershipCause> causes;
+};
+
+enum class IRReturnOwnership : std::uint8_t {
+    None,
+    NewOwned,
+    ParameterAlias,
+    ReceiverAlias,
+    FieldAlias,
+    Unknown,
+};
+
+struct IRReturnOwnershipSummary {
+    IRReturnOwnership ownership{IRReturnOwnership::None};
+    std::optional<std::size_t> parameter_index;
     IROrigin origin;
     std::string reason;
-    bool receiver{false};
+};
+
+struct IRCallableOwnershipSummary {
+    std::string callable_identity;
+    std::vector<IRParameterOwnershipSummary> parameters;
+    IRReturnOwnershipSummary return_value;
 };
 
 enum class IREffect : std::uint8_t {
@@ -332,7 +366,8 @@ struct IRProgram {
     IRArcStage arc_stage{IRArcStage::Semantic};
     std::vector<IRCallableArcSchedule> arc_schedules;
     IRArcMetrics arc_metrics;
-    std::vector<IRParameterBorrowSummary> borrow_summaries;
+    std::vector<IRCallableOwnershipSummary> ownership_summaries;
+    bool borrowing_enabled{true};
 };
 
 [[nodiscard]] std::string_view ir_effect_name(IREffect effect);
@@ -341,11 +376,15 @@ struct IRProgram {
 [[nodiscard]] std::string_view ir_storage_class_name(IRStorageClass storage);
 [[nodiscard]] std::string_view ir_reference_mode_name(IRReferenceMode mode);
 [[nodiscard]] std::string_view ir_borrow_kind_name(IRBorrowKind kind);
-[[nodiscard]] std::string_view ir_parameter_use_name(IRParameterUse use);
+[[nodiscard]] std::string_view ir_ownership_behavior_name(
+    IROwnershipBehavior behavior);
+[[nodiscard]] std::string_view ir_return_ownership_name(
+    IRReturnOwnership ownership);
 [[nodiscard]] std::string dump_ir(
     const IRProgram& program,
     bool include_effects = false,
     bool include_arc = false,
-    bool include_escape = false);
+    bool include_escape = false,
+    bool include_ownership = false);
 
 } // namespace toro

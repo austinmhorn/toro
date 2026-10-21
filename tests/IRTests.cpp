@@ -5,6 +5,7 @@
 #include "toro/IR.hpp"
 #include "toro/IRLowerer.hpp"
 #include "toro/Lexer.hpp"
+#include "toro/OwnershipSummaryAnalyzer.hpp"
 #include "toro/ModuleLoader.hpp"
 #include "toro/Parser.hpp"
 #include "toro/SemanticAnalyzer.hpp"
@@ -63,6 +64,7 @@ toro::IRProgram lower_detached(std::string_view source)
     auto program = parse_and_check(source);
     auto ir = toro::IRLowerer().lower(program);
     toro::EffectAnalyzer().analyze(ir);
+    toro::OwnershipSummaryAnalyzer().analyze(ir);
     toro::ArcMaterializer().materialize(ir);
     toro::OwnershipTransferAnalyzer().analyze(ir);
     toro::BorrowInferenceAnalyzer().analyze(ir);
@@ -144,11 +146,13 @@ void test_representative_feature_inventory_and_determinism()
         "declared interface type");
 
     toro::EffectAnalyzer().analyze(first_ir);
+    toro::OwnershipSummaryAnalyzer().analyze(first_ir);
     toro::ArcMaterializer().materialize(first_ir);
     toro::OwnershipTransferAnalyzer().analyze(first_ir);
     toro::BorrowInferenceAnalyzer().analyze(first_ir);
     toro::ArcOptimizer().optimize(first_ir);
     toro::EffectAnalyzer().analyze(second_ir);
+    toro::OwnershipSummaryAnalyzer().analyze(second_ir);
     toro::ArcMaterializer().materialize(second_ir);
     toro::OwnershipTransferAnalyzer().analyze(second_ir);
     toro::BorrowInferenceAnalyzer().analyze(second_ir);

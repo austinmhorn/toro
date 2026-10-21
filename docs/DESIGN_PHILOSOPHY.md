@@ -155,11 +155,14 @@ while propagating aliases and recording escape causes. A separate storage pass
 now promotes direct local owners to automatic storage when identity, dispatch,
 and lifecycle behavior remain provably bounded, while heap + ARC remains the
 conservative fallback. Weak-observed and uncertain lifetimes are intentionally
-not promoted. A following borrow pass now identifies operation-bounded
-non-owning parameters, receivers, call arguments, and straightforward local
-aliases, removing ARC traffic without changing the source model. Broader stack
-placement, general interprocedural ownership summaries, longer-lived borrow
-reasoning, and the rest of the optimization hierarchy remain future work.
+not promoted. A canonical interprocedural ownership-summary pass now describes
+each managed parameter independently, records managed-return relationships,
+reaches a deterministic fixed point through recursion, and conservatively joins
+dynamic dispatch targets. Escape analysis and the following borrow pass consume
+those facts, so wrapper chains can preserve locality and operation-bounded
+non-owning calls can remove ARC traffic without changing the source model.
+Broader stack placement, longer-lived borrow reasoning, cross-call ownership
+handoff, and the rest of the optimization hierarchy remain future work.
 
 ## Why not expose ownership everywhere?
 

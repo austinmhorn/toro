@@ -4,6 +4,7 @@
 #include "toro/EffectAnalyzer.hpp"
 #include "toro/IRLowerer.hpp"
 #include "toro/Lexer.hpp"
+#include "toro/OwnershipSummaryAnalyzer.hpp"
 #include "toro/NativeCompiler.hpp"
 #include "toro/Parser.hpp"
 #include "toro/SemanticAnalyzer.hpp"
@@ -36,6 +37,7 @@ toro::IRProgram lower(std::string_view source, bool optimize)
     toro::TypeChecker().check(program);
     auto ir = toro::IRLowerer().lower(program);
     toro::EffectAnalyzer().analyze(ir);
+    toro::OwnershipSummaryAnalyzer().analyze(ir);
     toro::ArcMaterializer().materialize(ir);
     if (optimize) {
         toro::OwnershipTransferAnalyzer().analyze(ir);

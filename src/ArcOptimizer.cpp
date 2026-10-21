@@ -1,5 +1,7 @@
 #include "toro/ArcOptimizer.hpp"
 
+#include "toro/OwnershipSummaryAnalyzer.hpp"
+
 #include <algorithm>
 #include <stdexcept>
 #include <string>
@@ -613,6 +615,11 @@ void OwnershipTransferAnalyzer::analyze(IRProgram& program) const
         throw std::runtime_error(
             "ownership-transfer analysis requires materialized lifetime IR");
     }
+    if (std::ranges::any_of(program.declarations, is_callable)
+        && program.ownership_summaries.empty()) {
+        throw std::runtime_error(
+            "ownership-transfer analysis requires ownership summaries");
+    }
     TransferAnalysis(program).run();
     program.arc_stage = IRArcStage::TransfersAnalyzed;
 }
@@ -625,9 +632,9 @@ void ArcOptimizer::optimize(IRProgram& program) const
     }
     const bool has_callable = std::ranges::any_of(
         program.declarations, is_callable);
-    if (has_callable && program.effect_summaries.empty()) {
+    if (has_callable && program.ownership_summaries.empty()) {
         throw std::runtime_error(
-            "ARC optimizer requires existing effect summaries");
+            "ARC optimizer requires existing ownership summaries");
     }
 
     std::unordered_map<std::string, const IRDeclaration*> declarations;
@@ -646,32 +653,37 @@ void ArcOptimizer::optimize(IRProgram& program) const
         }
         apply_transfer_operations(
             *declaration->second->body, schedule, transfer_count);
-        for (const auto& summary : program.borrow_summaries) {
-            if (summary.callable_identity != schedule.callable_identity
-                || summary.use != IRParameterUse::ObservedOnly) {
-                continue;
-            }
-            std::size_t pair = 0;
-            for (const auto& operation : schedule.optimized_operations) {
-                if (operation.kind == IRArcOperationKind::Retain
-                    && operation.value == summary.parameter_name
-                    && operation.reason == "owned parameter entry") {
-                    pair = operation.pair_id;
-                    break;
-                }
-            }
-            elide_pair(schedule, pair, elided_pairs);
-            schedule.optimized_operations.push_back(IRArcOperation{
-                IRArcOperationKind::BorrowedTemporary,
-                summary.parameter_name,
-                summary.origin,
-                summary.receiver
-                    ? "inferred operation-bounded receiver borrow"
-                    : "inferred operation-bounded parameter borrow",
-                pair,
-                false,
+        const auto callable_summary = std::ranges::find_if(
+            program.ownership_summaries,
+            [&](const auto& summary) {
+                return summary.callable_identity == schedule.callable_identity;
             });
-            ++borrow_count;
+        if (program.borrowing_enabled
+            && callable_summary != program.ownership_summaries.end()) {
+            for (const auto& summary : callable_summary->parameters) {
+                if (!ownership_is_observed_only(summary)) continue;
+                std::size_t pair = 0;
+                for (const auto& operation : schedule.optimized_operations) {
+                    if (operation.kind == IRArcOperationKind::Retain
+                        && operation.value == summary.parameter_name
+                        && operation.reason == "owned parameter entry") {
+                        pair = operation.pair_id;
+                        break;
+                    }
+                }
+                elide_pair(schedule, pair, elided_pairs);
+                schedule.optimized_operations.push_back(IRArcOperation{
+                    IRArcOperationKind::BorrowedTemporary,
+                    summary.parameter_name,
+                    summary.origin,
+                    summary.receiver
+                        ? "inferred operation-bounded receiver borrow"
+                        : "inferred operation-bounded parameter borrow",
+                    pair,
+                    false,
+                });
+                ++borrow_count;
+            }
         }
         apply_borrow_operations(*declaration->second->body, schedule,
             borrow_count, elided_pairs);

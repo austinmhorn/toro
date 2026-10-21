@@ -65,14 +65,21 @@ before C generation. The IR retains stable declaration choices, concrete generic
 substitutions, dispatch kinds, runtime-value categories, and source origins. The
 C backend consumes that IR without retaining or reading the originating AST;
 current correctness-first ARC and runtime-helper behavior are preserved. A
-separate ARC materialization pass records the lifetime schedule. A block-local
+canonical interprocedural ownership-summary pass records parameter-specific
+observation, retain, store, return, escape, weak-store, and unknown behavior,
+plus managed-return relationships. It propagates those facts through direct,
+recursive, virtual, and interface calls with specialization-specific generic
+identities. Escape analysis and borrow inference consume this shared contract;
+foreign or unresolved calls remain conservative. A separate ARC materialization
+pass records the lifetime schedule. A block-local
 ownership-transfer pass recognizes final-use moves through locals, returns,
 strong fields, and supported class-valued collections. Borrow inference then
 records operation-bounded receiver, parameter, call-argument, and local-alias
 observations and removes only the corresponding proven ARC pairs. `toro ir
---arc` exposes transfers, borrows, per-parameter facts, and deterministic
-before/after metrics. Escaping stores, weak access, uncertain control flow, and
-unknown/foreign ownership boundaries remain conservative.
+--ownership` exposes callable contracts and causes; `toro ir --arc` exposes
+transfers, borrows, and deterministic before/after metrics. Escaping stores,
+weak access, uncertain control flow, and unknown/foreign ownership boundaries
+remain conservative.
 This is compiler-internal analysis and adds no source-level ownership syntax.
 An allocation-site escape pass now follows effect analysis and classifies each
 managed construction as non-escaping, escaping, or unknown. It propagates local
@@ -194,12 +201,14 @@ Inspect the deterministic typed IR after semantic analysis and type checking:
 ```bash
 ./build/toro ir examples/backend_hardening.toro
 ./build/toro ir --effects examples/backend_hardening.toro
+./build/toro ir --ownership examples/backend_hardening.toro
 ./build/toro ir --escape examples/backend_hardening.toro
 ./build/toro ir --arc examples/backend_hardening.toro
 ./build/toro ir --arc --no-opt examples/backend_hardening.toro
 ```
 
-`--escape` shows deterministic managed-allocation classifications, storage
+`--ownership` shows deterministic parameter behavior, compact transitive
+causes, and managed-return relationships. `--escape` shows deterministic managed-allocation classifications, storage
 decisions, fallback reasons, origins, and non-escaping/escaping/unknown plus
 stack/heap metrics. `--arc` shows deterministic
 before/after lifetime operations and retain,

@@ -5,6 +5,7 @@
 #include "toro/EscapeAnalyzer.hpp"
 #include "toro/IRLowerer.hpp"
 #include "toro/Lexer.hpp"
+#include "toro/OwnershipSummaryAnalyzer.hpp"
 #include "toro/Parser.hpp"
 #include "toro/SemanticAnalyzer.hpp"
 #include "toro/TypeChecker.hpp"
@@ -31,6 +32,7 @@ toro::IRProgram analyze(std::string_view source)
     toro::TypeChecker().check(program);
     auto ir = toro::IRLowerer().lower(program);
     toro::EffectAnalyzer().analyze(ir);
+    toro::OwnershipSummaryAnalyzer().analyze(ir);
     toro::EscapeAnalyzer().analyze(ir);
     return ir;
 }
@@ -281,8 +283,8 @@ void test_direct_dynamic_and_foreign_calls()
             == toro::IREscapeState::DoesNotEscape,
         "known observing call was treated as escaping");
     expect(allocation(ir, "maybe_escape(Sink)").state
-            == toro::IREscapeState::Unknown,
-        "possibly escaping direct call was not conservative");
+            == toro::IREscapeState::Escapes,
+        "summary-proven escaping direct call was not classified precisely");
     expect(allocation(ir, "interface_call()").state
             == toro::IREscapeState::DoesNotEscape,
         "proven observing interface call was treated as escaping");

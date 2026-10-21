@@ -27,6 +27,7 @@ add_library(toro_core
     src/Lexer.cpp
     src/ModuleLoader.cpp
     src/NativeCompiler.cpp
+    src/OwnershipSummaryAnalyzer.cpp
     src/Parser.cpp
     src/ProjectConfig.cpp
     src/SemanticAnalyzer.cpp
@@ -108,6 +109,11 @@ if(BUILD_TESTING)
     toro_enable_warnings(toro_borrow_inference_tests)
     add_test(NAME borrow_inference COMMAND toro_borrow_inference_tests)
 
+    add_executable(toro_ownership_summary_tests tests/OwnershipSummaryTests.cpp)
+    target_link_libraries(toro_ownership_summary_tests PRIVATE toro_core)
+    toro_enable_warnings(toro_ownership_summary_tests)
+    add_test(NAME ownership_summary COMMAND toro_ownership_summary_tests)
+
     add_executable(toro_arc_optimizer_tests tests/ArcOptimizerTests.cpp)
     target_link_libraries(toro_arc_optimizer_tests PRIVATE toro_core)
     target_compile_definitions(toro_arc_optimizer_tests PRIVATE
@@ -170,6 +176,9 @@ if(BUILD_TESTING)
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/project)
     add_test(NAME project_cli_ir_effects COMMAND toro ir --effects)
     set_tests_properties(project_cli_ir_effects PROPERTIES
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/project)
+    add_test(NAME project_cli_ir_ownership COMMAND toro ir --ownership)
+    set_tests_properties(project_cli_ir_ownership PROPERTIES
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/project)
     add_test(NAME project_cli_ir_escape COMMAND toro ir --escape)
     set_tests_properties(project_cli_ir_escape PROPERTIES

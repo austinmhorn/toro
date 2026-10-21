@@ -1,7 +1,10 @@
 #include "toro/EscapeAnalyzer.hpp"
 
+#include "toro/OwnershipSummaryAnalyzer.hpp"
+
 #include <algorithm>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -27,6 +30,14 @@ bool is_reference_wrapper(const IRType& type)
         || type.category == IRValueCategory::InterfaceValue;
 }
 
+bool is_callable(const IRDeclaration& declaration)
+{
+    return declaration.kind == IRDeclarationKind::Function
+        || declaration.kind == IRDeclarationKind::ForeignFunction
+        || declaration.kind == IRDeclarationKind::Method
+        || declaration.kind == IRDeclarationKind::Conversion;
+}
+
 void merge_into(AllocationSet& destination, const AllocationSet& source)
 {
     destination.insert(source.begin(), source.end());
@@ -39,70 +50,12 @@ bool same_origin(const IROrigin& left, const IROrigin& right)
         && left.location.column == right.location.column;
 }
 
-std::string type_key(const Type& type)
-{
-    std::string result = type.kind == TypeKind::Unknown && !type.name.empty()
-        ? type.name : std::string(base_type_name(type));
-    if (!type.arguments.empty()) {
-        result += '<';
-        for (std::size_t index = 0; index < type.arguments.size(); ++index) {
-            if (index != 0) result += ',';
-            result += type_key(type.arguments[index]);
-        }
-        result += '>';
-    }
-    if (type.nullable) result += '?';
-    return result;
-}
-
-const IRType& substitute_type(
-    const IRType& type,
-    const std::vector<std::pair<std::string, IRType>>& substitutions)
-{
-    if (type.type.kind != TypeKind::Unknown) return type;
-    for (const auto& [name, concrete] : substitutions) {
-        if (type.type.name == name) return concrete;
-    }
-    return type;
-}
-
-std::string specialization_identity(const IROperation& operation)
-{
-    std::string result = operation.selected_declaration;
-    if (operation.substitutions.empty()) return result;
-    result += '<';
-    for (std::size_t index = 0; index < operation.substitutions.size(); ++index) {
-        if (index != 0) result += ',';
-        result += operation.substitutions[index].first + '='
-            + type_key(substitute_type(
-                operation.substitutions[index].second,
-                operation.substitutions).type);
-    }
-    result += '>';
-    return result;
-}
-
-bool has_effect(const IRCallableEffectSummary& summary, IREffect effect)
-{
-    return std::ranges::find(summary.effects, effect) != summary.effects.end();
-}
-
-std::string method_suffix(std::string_view identity)
-{
-    const auto separator = identity.rfind("::");
-    return separator == std::string_view::npos
-        ? std::string(identity) : std::string(identity.substr(separator + 2));
-}
-
 class Analysis {
 public:
     explicit Analysis(IRProgram& program) : program_(program)
     {
         for (auto& declaration : program_.declarations) {
             declarations_.emplace(declaration.identity, &declaration);
-        }
-        for (const auto& summary : program_.effect_summaries) {
-            summaries_.emplace(summary.callable_identity, &summary);
         }
     }
 
@@ -218,133 +171,86 @@ private:
         return std::nullopt;
     }
 
-    const IRCallableEffectSummary* call_summary(
-        const IROperation& operation) const
-    {
-        if (operation.selected_declaration.empty()) return nullptr;
-        if (!operation.substitutions.empty()) {
-            const auto specialized = summaries_.find(
-                specialization_identity(operation));
-            if (specialized != summaries_.end()) return specialized->second;
-        }
-        const auto direct = summaries_.find(operation.selected_declaration);
-        return direct == summaries_.end() ? nullptr : direct->second;
-    }
-
     void classify_call(
         IROperation& operation,
-        const AllocationSet& arguments)
+        const std::vector<AllocationSet>& arguments)
     {
-        if (arguments.empty() || operation.name == "print") return;
-        if (operation.kind == IROperationKind::ForeignCall) {
-            add_cause(arguments, IREscapeReason::ForeignCall, operation.origin,
-                operation.selected_declaration.empty()
-                    ? operation.name : operation.selected_declaration,
-                true, true);
-            return;
-        }
-        if (operation.kind == IROperationKind::VirtualCall
-            || operation.kind == IROperationKind::InterfaceCall) {
-            if (dynamic_call_may_escape(operation)) {
-                add_cause(arguments, IREscapeReason::DynamicCall,
-                    operation.origin, operation.selected_declaration,
+        if (operation.name == "print") return;
+        for (std::size_t index = 0; index < arguments.size(); ++index) {
+            if (arguments[index].empty()) continue;
+            if (operation.kind == IROperationKind::ForeignCall) {
+                add_cause(arguments[index], IREscapeReason::ForeignCall,
+                    operation.origin,
+                    operation.selected_declaration.empty()
+                        ? operation.name : operation.selected_declaration,
                     true, true);
-            }
-            return;
-        }
-        if (operation.kind == IROperationKind::Conversion
-            && operation.selected_declaration.empty()) {
-            return;
-        }
-        const auto* summary = call_summary(operation);
-        if (!summary) {
-            add_cause(arguments, IREscapeReason::UnknownCall, operation.origin,
-                operation.selected_declaration.empty()
-                    ? operation.name : operation.selected_declaration,
-                true, true);
-            return;
-        }
-        if (has_effect(*summary, IREffect::Escape)
-            || has_effect(*summary, IREffect::ForeignCall)
-            || has_effect(*summary, IREffect::UnknownExternal)
-            || has_effect(*summary, IREffect::DynamicDispatch)) {
-            add_cause(arguments, IREscapeReason::CallArgument, operation.origin,
-                summary->callable_identity, true, true);
-        }
-    }
-
-    std::string class_base(std::string_view identity) const
-    {
-        const auto nominal = declarations_.find(std::string(identity));
-        if (nominal == declarations_.end()
-            || nominal->second->kind != IRDeclarationKind::Class) {
-            return {};
-        }
-        for (const auto& related : nominal->second->related_types) {
-            const auto candidate = declarations_.find(related.type.name);
-            if (candidate != declarations_.end()
-                && candidate->second->kind == IRDeclarationKind::Class) {
-                return related.type.name;
-            }
-        }
-        return {};
-    }
-
-    bool is_descendant(
-        std::string_view candidate,
-        std::string_view ancestor) const
-    {
-        std::string current(candidate);
-        while (!current.empty()) {
-            if (current == ancestor) return true;
-            current = class_base(current);
-        }
-        return false;
-    }
-
-    bool implements_interface(
-        std::string_view identity,
-        std::string_view interface_identity) const
-    {
-        const auto nominal = declarations_.find(std::string(identity));
-        if (nominal == declarations_.end()) return false;
-        for (const auto& related : nominal->second->related_types) {
-            if (related.type.name == interface_identity) return true;
-        }
-        const auto base = class_base(identity);
-        return !base.empty() && implements_interface(base, interface_identity);
-    }
-
-    bool summary_may_escape(std::string_view identity) const
-    {
-        const auto summary = summaries_.find(std::string(identity));
-        if (summary == summaries_.end()) return true;
-        return has_effect(*summary->second, IREffect::Escape)
-            || has_effect(*summary->second, IREffect::ForeignCall)
-            || has_effect(*summary->second, IREffect::UnknownExternal);
-    }
-
-    bool dynamic_call_may_escape(const IROperation& operation) const
-    {
-        const auto selected = declarations_.find(operation.selected_declaration);
-        if (selected == declarations_.end()) return true;
-        const std::string owner = selected->second->owner_identity;
-        const std::string suffix = method_suffix(operation.selected_declaration);
-        bool found = false;
-        for (const auto& candidate : program_.declarations) {
-            if (candidate.kind != IRDeclarationKind::Method || !candidate.body
-                || candidate.name != operation.name
-                || method_suffix(candidate.identity) != suffix) {
                 continue;
             }
-            bool valid = operation.kind == IROperationKind::VirtualCall
-                ? is_descendant(candidate.owner_identity, owner)
-                : implements_interface(candidate.owner_identity, owner);
-            if (!valid) continue;
-            found = true;
-            if (summary_may_escape(candidate.identity)) return true;
+            const auto ownership = ownership_for_call_operand(
+                program_, operation, index);
+            if (!ownership) {
+                add_cause(arguments[index], IREscapeReason::UnknownCall,
+                    operation.origin,
+                    operation.selected_declaration.empty()
+                        ? operation.name : operation.selected_declaration,
+                    true, true);
+                continue;
+            }
+            if (std::ranges::find(ownership->behaviors,
+                    IROwnershipBehavior::WeakStore)
+                != ownership->behaviors.end()) {
+                add_cause(arguments[index], IREscapeReason::WeakObservation,
+                    operation.origin, operation.selected_declaration, false);
+            }
+            if (ownership_may_escape(*ownership)) {
+                const bool uncertain = operation.kind
+                        == IROperationKind::VirtualCall
+                    || operation.kind == IROperationKind::InterfaceCall
+                    || std::ranges::find(
+                    ownership->behaviors, IROwnershipBehavior::Unknown)
+                    != ownership->behaviors.end();
+                add_cause(arguments[index],
+                    operation.kind == IROperationKind::VirtualCall
+                            || operation.kind == IROperationKind::InterfaceCall
+                        ? IREscapeReason::DynamicCall
+                        : IREscapeReason::CallArgument,
+                    operation.origin, operation.selected_declaration,
+                    true, uncertain);
+            }
         }
-        return !found;
+    }
+
+    AllocationSet call_result(
+        const IROperation& operation,
+        const std::vector<AllocationSet>& arguments,
+        const AllocationSet& conservative) const
+    {
+        const auto summary = ownership_for_call_result(program_, operation);
+        if (!summary) return conservative;
+        switch (summary->ownership) {
+        case IRReturnOwnership::ParameterAlias:
+            if (summary->parameter_index) {
+                const auto index = *summary->parameter_index
+                    + (operation.kind == IROperationKind::VirtualCall
+                        || operation.kind == IROperationKind::InterfaceCall
+                        || (!operation.children.empty()
+                            && operation.children.front().result_type
+                            && operation.selected_declaration.find("::")
+                                != std::string::npos)
+                        ? 1 : 0);
+                if (index < arguments.size()) return arguments[index];
+            }
+            return conservative;
+        case IRReturnOwnership::ReceiverAlias:
+            return arguments.empty() ? AllocationSet{} : arguments.front();
+        case IRReturnOwnership::FieldAlias:
+        case IRReturnOwnership::NewOwned:
+        case IRReturnOwnership::None:
+            return {};
+        case IRReturnOwnership::Unknown:
+            return conservative;
+        }
+        return conservative;
     }
 
     AllocationSet evaluate(
@@ -363,8 +269,11 @@ private:
         }
 
         AllocationSet children;
+        std::vector<AllocationSet> child_values;
         for (auto& child : operation.children) {
-            merge_into(children, evaluate(child, aliases, callable));
+            auto value = evaluate(child, aliases, callable);
+            merge_into(children, value);
+            child_values.push_back(std::move(value));
         }
 
         if (operation.kind == IROperationKind::Construction
@@ -384,17 +293,23 @@ private:
         case IROperationKind::InterfaceCall:
         case IROperationKind::Conversion:
             if (operation.kind == IROperationKind::ForeignCall) {
+                AllocationSet live_references;
                 for (const auto& [name, allocations] : aliases.values) {
                     static_cast<void>(name);
-                    merge_into(children, allocations);
+                    merge_into(live_references, allocations);
                 }
+                add_cause(live_references, IREscapeReason::ForeignCall,
+                    operation.origin,
+                    operation.selected_declaration.empty()
+                        ? operation.name : operation.selected_declaration,
+                    true, true);
             }
-            classify_call(operation, children);
+            classify_call(operation, child_values);
             if (operation.result_type
                 && (is_reference_wrapper(*operation.result_type)
                     || operation.result_type->category
                         == IRValueCategory::ResultValue)) {
-                return children;
+                return call_result(operation, child_values, children);
             }
             return {};
         case IROperationKind::CollectionOperation:
@@ -636,7 +551,6 @@ private:
 
     IRProgram& program_;
     std::unordered_map<std::string, const IRDeclaration*> declarations_;
-    std::unordered_map<std::string, const IRCallableEffectSummary*> summaries_;
     std::unordered_map<std::string, std::size_t> allocation_occurrences_;
     std::unordered_map<const IROperation*, std::size_t> allocation_sites_;
 };
@@ -645,6 +559,11 @@ private:
 
 void EscapeAnalyzer::analyze(IRProgram& program) const
 {
+    if (std::ranges::any_of(program.declarations, is_callable)
+        && program.ownership_summaries.empty()) {
+        throw std::runtime_error(
+            "escape analysis requires ownership summaries");
+    }
     Analysis(program).run();
 }
 

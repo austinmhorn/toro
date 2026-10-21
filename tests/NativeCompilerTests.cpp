@@ -6,6 +6,7 @@
 #include "toro/IRLowerer.hpp"
 #include "toro/Lexer.hpp"
 #include "toro/NativeCompiler.hpp"
+#include "toro/OwnershipSummaryAnalyzer.hpp"
 #include "toro/Parser.hpp"
 #include "toro/SemanticAnalyzer.hpp"
 #include "toro/StorageDecisionAnalyzer.hpp"
@@ -45,6 +46,7 @@ std::string generate_with_storage(std::string_view source, bool enable_stack)
     toro::TypeChecker().check(program);
     auto ir = toro::IRLowerer().lower(program);
     toro::EffectAnalyzer().analyze(ir);
+    toro::OwnershipSummaryAnalyzer().analyze(ir);
     toro::EscapeAnalyzer().analyze(ir);
     toro::StorageDecisionAnalyzer().analyze(ir, enable_stack);
     toro::ArcMaterializer().materialize(ir);

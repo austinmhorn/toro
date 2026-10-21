@@ -589,20 +589,37 @@ Completed behavior:
 - borrow-enabled/disabled native differential coverage preserving identity,
   mutation, storage decisions, weak behavior, and destruction order.
 
-This is deliberately not the general interprocedural ownership-summary system
-planned for Phase 9.6.
+This milestone's local proof machinery remains deliberately bounded; Phase 9.6
+now supplies its canonical interprocedural callee contracts.
 
 ## 9.6 Interprocedural ownership summaries
 
-Summarize function behavior:
+Completed:
 
-- borrows;
-- consumes/transfers;
-- retains;
-- returns ownership;
-- causes escape.
+- deterministic per-callable, per-parameter ownership summaries for observe,
+  retain, persistent store, return/forward, consume, escape, weak store, and
+  unknown behavior;
+- managed return relationships for parameter aliases, receiver aliases,
+  stored-field aliases, newly owned values, and unknown results;
+- monotonic deterministic fixed-point propagation across direct, recursive,
+  and mutually recursive call graphs;
+- conservative joins across all reachable virtual and interface targets,
+  including inherited implementations;
+- concrete generic specialization identities, preserving managed versus
+  non-managed behavior;
+- conservative foreign and unresolved-call boundaries plus compiler-known
+  observing runtime/standard-library calls;
+- `EscapeAnalyzer`, `BorrowInferenceAnalyzer`, and ARC parameter-pair elision
+  consuming the canonical summaries instead of duplicating callee-body
+  ownership reasoning;
+- stable `toro ir --ownership` inspection with compact causes and origins;
+- focused fixed-point, dispatch, generic, return-relationship, cross-pass, and
+  determinism regression coverage.
 
-Use summaries to improve analysis across call boundaries.
+Ownership transfer remains deliberately conservative. Existing block-local
+final-use moves continue to be materialized; cross-call consume handoff is
+deferred until the IR/backend calling convention can represent it without
+leaks or double releases.
 
 ## 9.7 Strong-cycle diagnostics
 

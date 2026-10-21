@@ -33,6 +33,8 @@ EffectAnalyzer
     ↓
 annotated toro IR
     ↓
+OwnershipSummaryAnalyzer
+    ↓
 EscapeAnalyzer
     ↓
 StorageDecisionAnalyzer
@@ -254,13 +256,14 @@ strong class field, or inserted into currently supported managed collection
 storage and the source has no later use in that block. Nullable class values,
 derived-to-base upcasts, class-backed interfaces, and concrete generic classes
 use the same rule. The analysis deliberately does not transfer outer ownership
-inside nested control flow, across loops, through weak fields, or into ordinary,
-virtual, interface, foreign, or otherwise unknown calls. Those cases await
-interprocedural ownership summaries and broader lifetime analysis.
+inside nested control flow, across loops, through weak fields, or across calls.
+The ownership summary layer can describe a callee's store/consume behavior, but
+a cross-call handoff remains disabled until the IR/backend calling convention
+can preserve that ownership edge explicitly.
 
-`BorrowInferenceAnalyzer` follows transfer analysis. It computes deterministic,
-parameter-specific `observed-only`, `retained-or-escaped`, or `unknown` facts
-and annotates operation-bounded receiver, argument, and local-alias borrows.
+`BorrowInferenceAnalyzer` follows transfer analysis. It consumes canonical,
+parameter-specific ownership summaries and annotates operation-bounded
+receiver, argument, and local-alias borrows.
 IR reference modes distinguish `own`, `transfer`, `borrow`, and `weak`; borrow
 uses carry their operand, source, destination, origin, kind, and proof reason.
 The current borrow lifetime is one call/immediate expression or the last proven
@@ -281,9 +284,10 @@ by borrow inference, while preserving the final owning lifetime edge. Transfer
 and borrow metadata are disjoint. The C backend consumes those explicit IR
 decisions; it does not independently infer moves, borrows, or lifetimes.
 
-`toro ir --arc` prints both schedules, marks elided operations, reports
-parameter facts, and includes before/after, ownership-transfer, and inferred
-borrow totals. `toro ir --arc --no-opt` keeps the baseline active for
+`toro ir --arc` prints both schedules, marks elided operations, and includes
+before/after, ownership-transfer, and inferred-borrow totals. Parameter
+contracts are inspected separately with `toro ir --ownership`. `toro ir --arc
+--no-opt` keeps the baseline active for
 differential runtime testing. This is internal ownership analysis: Toro adds no
 source-level `move`, `borrow`, `owned`, reference, or lifetime syntax.
 
@@ -324,9 +328,43 @@ graph but preserves the information needed for future explainability work.
 
 `toro ir --effects` appends these summaries to the ordinary deterministic IR
 dump. Effect analysis runs before ARC materialization and normal C generation.
-It does not itself alter ARC, allocation, ownership, or native behavior, though
-the later ARC optimizer consumes its escape/dynamic/foreign/unknown barriers.
-It does not implement or validate the future `performance function` contract.
+It does not itself alter ARC, allocation, ownership, or native behavior.
+Ownership-sensitive passes use the dedicated summaries below rather than
+treating a callable-wide effect as a parameter contract. Effect analysis does
+not implement or validate the future `performance function` contract.
+
+### Interprocedural ownership summaries
+
+`OwnershipSummaryAnalyzer` is the canonical callee-contract pass. For each
+managed receiver or parameter it records a deterministic set drawn from
+observe, retain, persistent store, return/forward, consume, escape, weak store,
+and unknown. Compact causes retain the originating source location, the direct
+or transitive callable, and the proof reason. Managed return summaries
+distinguish newly owned values, parameter and receiver aliases, stored-field
+aliases, and unknown ownership.
+
+The pass derives local facts from typed IR, then propagates call facts with a
+monotonic fixed point over a finite behavior lattice. Direct and mutually
+recursive call graphs therefore terminate without an iteration limit. Virtual
+calls join every reachable override; interface calls join every relevant
+implementation, including inherited implementations. Borrow safety requires
+every possible target to remain observation-only. Missing targets and public C
+FFI calls produce conservative unknown/escape behavior.
+
+Generic summaries use the selected declaration plus deterministic concrete
+substitutions as their identity. This keeps, for example, a non-managed
+`identity<int>` distinct from `identity<Player>`. The pass does not introduce a
+runtime calling convention or source ownership annotations.
+
+`EscapeAnalyzer` uses parameter behavior and return-alias facts to propagate
+allocation identities across calls. `BorrowInferenceAnalyzer` uses the same
+summaries for call and receiver borrows, retaining only local alias lifetime
+proof of its own. ARC optimization uses observation-only summaries to remove
+the corresponding parameter entry/exit pair. Existing transfer analysis stays
+block-local until explicit cross-call consumption can be represented safely.
+
+`toro ir --ownership` appends stable callable summaries, parameter causes, and
+return relationships to the normal IR dump.
 
 ### Escape analysis
 
@@ -346,11 +384,11 @@ bodies are joined with the pre-loop state so analysis remains deterministic and
 terminating.
 
 Direct calls use the exact declaration identity, generic substitutions, and
-existing effect summaries. Proven observing calls preserve locality. Calls with
-escape/foreign/unknown/dynamic effects, virtual or interface dispatch, and C
-FFI boundaries produce an `unknown` result when the current summaries cannot
-identify parameter-specific behavior. This is deliberately conservative and
-does not attempt interprocedural ownership summaries.
+ownership summaries. Proven observing parameters preserve locality; stored,
+returned, escaping, or unknown parameters propagate escape. Virtual and
+interface dispatch join all reachable targets and remain conservatively
+`unknown` at allocation sites when any target can escape. C FFI and unresolved
+ownership boundaries are always conservative.
 
 `toro ir --escape` prints allocation classifications, causes, origins, and
 managed/non-escaping/escaping/unknown counts. Escape annotations do not directly
@@ -671,12 +709,12 @@ Correct runtime behavior is the priority.
 
 ## Typed toro IR and future analyses
 
-Toro now has a typed intermediate representation, deterministic effect
-summaries, allocation-site escape annotations, explicit storage decisions,
-block-local ownership transfers, operation-bounded borrow facts, and
-baseline/optimized ARC schedules between static semantics and an IR-only C
-backend. Broader stack allocation, interprocedural ownership summaries,
-longer-lived borrow reasoning, and performance work remain layered on that
+Toro now has a typed intermediate representation, deterministic effect and
+interprocedural ownership summaries, allocation-site escape annotations,
+explicit storage decisions, block-local ownership transfers, operation-bounded
+borrow facts, and baseline/optimized ARC schedules between static semantics and
+an IR-only C backend. Broader stack allocation, longer-lived borrow reasoning,
+cross-call consume handoff, and performance work remain layered on that
 foundation.
 
 Target pipeline:
@@ -690,6 +728,8 @@ typed toro IR
     ↓
 effect analysis
     ↓
+ownership-summary analysis
+    ↓
 escape analysis
     ↓
 storage decisions
@@ -702,7 +742,7 @@ borrow inference
     ↓
 ARC optimization/elision
     ↓
-future ownership summaries and broader storage/borrow analysis
+broader storage/borrow analysis
     ↓
 performance-contract validation
     ↓
@@ -818,7 +858,7 @@ Later phases may explore:
 - arenas/scoped bulk allocation;
 - local vs shared/thread-safe ARC;
 - cycle diagnostics;
-- stronger interprocedural ownership summaries;
+- broader consumers of the current interprocedural ownership summaries;
 - LLVM or another backend after the IR is mature;
 - CMake integration for mixed native projects;
 - first-class CMake language support only much later if justified.

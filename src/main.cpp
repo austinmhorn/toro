@@ -8,6 +8,7 @@
 #include "toro/Lexer.hpp"
 #include "toro/ModuleLoader.hpp"
 #include "toro/NativeCompiler.hpp"
+#include "toro/OwnershipSummaryAnalyzer.hpp"
 #include "toro/Parser.hpp"
 #include "toro/ProjectConfig.hpp"
 #include "toro/SemanticAnalyzer.hpp"
@@ -37,7 +38,7 @@ void print_usage(std::ostream& output)
               "       toro tokens <source.toro>\n"
               "       toro ast-expression <source.toro>\n"
               "       toro ast <source.toro>\n"
-              "       toro ir [--effects | --escape | --arc [--no-opt]] [source.toro]\n"
+              "       toro ir [--effects | --ownership | --escape | --arc [--no-opt]] [source.toro]\n"
               "       toro check [source.toro]\n"
               "       toro emit-c [source.toro] [-o <output.c>]\n"
               "       toro build [source.toro] [-o <output>]\n"
@@ -133,6 +134,7 @@ std::string generate_c(const CompilationInput& input)
     toro::TypeChecker().check(program);
     auto ir = toro::IRLowerer().lower(program);
     toro::EffectAnalyzer().analyze(ir);
+    toro::OwnershipSummaryAnalyzer().analyze(ir);
     toro::EscapeAnalyzer().analyze(ir);
     toro::StorageDecisionAnalyzer().analyze(ir);
     toro::ArcMaterializer().materialize(ir);
@@ -147,14 +149,18 @@ void print_ir(
     bool include_effects = false,
     bool include_arc = false,
     bool optimize_arc = true,
-    bool include_escape = false)
+    bool include_escape = false,
+    bool include_ownership = false)
 {
     auto program = load_program(input);
     toro::SemanticAnalyzer().analyze(program);
     toro::TypeChecker().check(program);
     auto ir = toro::IRLowerer().lower(program);
-    if (include_effects || include_arc || include_escape) {
+    if (include_effects || include_arc || include_escape || include_ownership) {
         toro::EffectAnalyzer().analyze(ir);
+    }
+    if (include_arc || include_escape || include_ownership) {
+        toro::OwnershipSummaryAnalyzer().analyze(ir);
     }
     if (include_escape || include_arc) toro::EscapeAnalyzer().analyze(ir);
     if (include_escape || include_arc) {
@@ -169,7 +175,7 @@ void print_ir(
         }
     }
     std::cout << toro::dump_ir(
-        ir, include_effects, include_arc, include_escape);
+        ir, include_effects, include_arc, include_escape, include_ownership);
 }
 
 void emit_c(
@@ -363,6 +369,12 @@ int main(int argc, char* argv[])
     const bool file_ir_effects = argc == 4
         && std::string_view(argv[1]) == "ir"
         && std::string_view(argv[2]) == "--effects";
+    const bool project_ir_ownership = argc == 3
+        && std::string_view(argv[1]) == "ir"
+        && std::string_view(argv[2]) == "--ownership";
+    const bool file_ir_ownership = argc == 4
+        && std::string_view(argv[1]) == "ir"
+        && std::string_view(argv[2]) == "--ownership";
     const bool project_ir_escape = argc == 3
         && std::string_view(argv[1]) == "ir"
         && std::string_view(argv[2]) == "--escape";
@@ -396,7 +408,8 @@ int main(int argc, char* argv[])
         && std::string_view(argv[1]) == "emit-c"
         && std::string_view(argv[3]) == "-o";
     if (argc != 2 && !standard_source_command && !project_ir_effects
-        && !file_ir_effects && !project_ir_arc && !file_ir_arc
+        && !file_ir_effects && !project_ir_ownership && !file_ir_ownership
+        && !project_ir_arc && !file_ir_arc
         && !project_ir_escape && !file_ir_escape
         && !project_ir_arc_unoptimized && !file_ir_arc_unoptimized
         && !project_build_with_output
@@ -420,6 +433,10 @@ int main(int argc, char* argv[])
             print_ir(direct_input(argv[3]), true);
         } else if (project_ir_effects) {
             print_ir(project_input(), true);
+        } else if (file_ir_ownership) {
+            print_ir(direct_input(argv[3]), false, false, true, false, true);
+        } else if (project_ir_ownership) {
+            print_ir(project_input(), false, false, true, false, true);
         } else if (file_ir_escape) {
             print_ir(direct_input(argv[3]), false, false, true, true);
         } else if (project_ir_escape) {

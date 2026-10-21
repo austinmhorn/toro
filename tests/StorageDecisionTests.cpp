@@ -5,6 +5,7 @@
 #include "toro/EscapeAnalyzer.hpp"
 #include "toro/IRLowerer.hpp"
 #include "toro/Lexer.hpp"
+#include "toro/OwnershipSummaryAnalyzer.hpp"
 #include "toro/Parser.hpp"
 #include "toro/SemanticAnalyzer.hpp"
 #include "toro/StorageDecisionAnalyzer.hpp"
@@ -30,6 +31,7 @@ toro::IRProgram analyze(std::string_view source, bool enable_stack = true)
     toro::TypeChecker().check(program);
     auto ir = toro::IRLowerer().lower(program);
     toro::EffectAnalyzer().analyze(ir);
+    toro::OwnershipSummaryAnalyzer().analyze(ir);
     toro::EscapeAnalyzer().analyze(ir);
     toro::StorageDecisionAnalyzer().analyze(ir, enable_stack);
     return ir;
@@ -253,6 +255,7 @@ void test_storage_decisions_do_not_change_effect_output()
     toro::TypeChecker().check(program);
     auto ir = toro::IRLowerer().lower(program);
     toro::EffectAnalyzer().analyze(ir);
+    toro::OwnershipSummaryAnalyzer().analyze(ir);
     const auto before = toro::dump_ir(ir, true, false, false);
     toro::EscapeAnalyzer().analyze(ir);
     toro::StorageDecisionAnalyzer().analyze(ir);

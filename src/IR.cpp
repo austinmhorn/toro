@@ -1,5 +1,7 @@
 #include "toro/IR.hpp"
 
+#include <algorithm>
+#include <limits>
 #include <string>
 #include <string_view>
 
@@ -228,12 +230,30 @@ std::string_view ir_borrow_kind_name(IRBorrowKind kind)
     return "argument";
 }
 
-std::string_view ir_parameter_use_name(IRParameterUse use)
+std::string_view ir_ownership_behavior_name(IROwnershipBehavior behavior)
 {
-    switch (use) {
-    case IRParameterUse::ObservedOnly: return "observed-only";
-    case IRParameterUse::RetainedOrEscaped: return "retained-or-escaped";
-    case IRParameterUse::Unknown: return "unknown";
+    switch (behavior) {
+    case IROwnershipBehavior::Observe: return "borrow/no-escape";
+    case IROwnershipBehavior::Retain: return "retained";
+    case IROwnershipBehavior::Store: return "stored";
+    case IROwnershipBehavior::Return: return "returned";
+    case IROwnershipBehavior::Consume: return "consumed";
+    case IROwnershipBehavior::Escape: return "escapes";
+    case IROwnershipBehavior::WeakStore: return "weak-stored";
+    case IROwnershipBehavior::Unknown: return "unknown";
+    }
+    return "unknown";
+}
+
+std::string_view ir_return_ownership_name(IRReturnOwnership ownership)
+{
+    switch (ownership) {
+    case IRReturnOwnership::None: return "none";
+    case IRReturnOwnership::NewOwned: return "new-owned";
+    case IRReturnOwnership::ParameterAlias: return "parameter-alias";
+    case IRReturnOwnership::ReceiverAlias: return "receiver-alias";
+    case IRReturnOwnership::FieldAlias: return "field-alias";
+    case IRReturnOwnership::Unknown: return "unknown";
     }
     return "unknown";
 }
@@ -242,7 +262,8 @@ std::string dump_ir(
     const IRProgram& program,
     bool include_effects,
     bool include_arc,
-    bool include_escape)
+    bool include_escape,
+    bool include_ownership)
 {
     std::string output = "toro-ir 1\n";
     output += "entry " + program.entry_module + "\n";
@@ -353,6 +374,54 @@ std::string dump_ir(
             }
         }
     }
+    if (include_ownership) {
+        output += "ownership\n";
+        for (const auto& summary : program.ownership_summaries) {
+            output += "  callable " + summary.callable_identity + '\n';
+            if (summary.parameters.empty()) output += "    parameters none\n";
+            for (const auto& parameter : summary.parameters) {
+                output += "    "
+                    + std::string(parameter.receiver ? "receiver " : "param ")
+                    + parameter.parameter_name + '\n';
+                for (const auto behavior : parameter.behaviors) {
+                    output += "      "
+                        + std::string(ir_ownership_behavior_name(behavior));
+                    const auto cause = std::ranges::find_if(
+                        parameter.causes,
+                        [&](const auto& candidate) {
+                            return candidate.behavior == behavior;
+                        });
+                    if (cause != parameter.causes.end()) {
+                        if (cause->transitive && !cause->via_callable.empty()) {
+                            output += " via " + cause->via_callable;
+                        }
+                        if (!cause->reason.empty()) {
+                            output += " ; " + cause->reason;
+                        }
+                        append_origin(cause->origin, output);
+                    }
+                    output += '\n';
+                }
+            }
+            output += "    return "
+                + std::string(ir_return_ownership_name(
+                    summary.return_value.ownership));
+            if (summary.return_value.parameter_index) {
+                if (*summary.return_value.parameter_index
+                    == std::numeric_limits<std::size_t>::max()) {
+                    output += " from receiver";
+                } else {
+                    output += " from-index "
+                        + std::to_string(*summary.return_value.parameter_index);
+                }
+            }
+            if (!summary.return_value.reason.empty()) {
+                output += " ; " + summary.return_value.reason;
+                append_origin(summary.return_value.origin, output);
+            }
+            output += '\n';
+        }
+    }
     if (include_escape) {
         output += "escape\n";
         output += "  metrics managed-allocations "
@@ -414,19 +483,6 @@ std::string dump_ir(
             + std::to_string(program.arc_metrics.ownership_transfers)
             + " borrows-inferred "
             + std::to_string(program.arc_metrics.borrows_inferred) + "\n";
-        if (!program.borrow_summaries.empty()) {
-            output += "  borrow-summaries\n";
-            for (const auto& summary : program.borrow_summaries) {
-                output += "    " + summary.callable_identity + "."
-                    + summary.parameter_name + " "
-                    + std::string(ir_parameter_use_name(summary.use));
-                if (!summary.reason.empty()) {
-                    output += " ; " + summary.reason;
-                }
-                append_origin(summary.origin, output);
-                output += '\n';
-            }
-        }
         for (const auto& schedule : program.arc_schedules) {
             output += "  callable " + schedule.callable_identity + "\n";
             output += "    before\n";
