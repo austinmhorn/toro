@@ -327,17 +327,22 @@ Each summary retains one deterministic cause per effect. A local cause points to
 the originating IR operation; a transitive cause points to the call origin and
 direct callee identity. This is deliberately smaller than a complete diagnostic
 graph but preserves the information needed for future explainability work.
+The pass also publishes deterministic direct local effect sites and resolved
+call edges for policy consumers that must reason per runtime site; these do not
+change the public effect set or `--effects` dump.
 
 `toro ir --effects` appends these summaries to the ordinary deterministic IR
 dump. Effect analysis runs before ARC materialization and normal C generation.
 It does not itself alter ARC, allocation, ownership, or native behavior.
 Ownership-sensitive passes use the dedicated summaries below rather than
 treating a callable-wide effect as a parameter contract. Effect analysis does
-does not validate performance policy. Phase 10.1 carries the explicit
+not validate performance policy. Phase 10.1 carries the explicit
 `performance function` marker through the AST and typed IR. Phase 10.2 adds a
-dedicated `PerformanceContractAnalyzer` immediately after effect analysis. It
-consumes the published summaries and their causes rather than changing
-`EffectAnalyzer` or rebuilding transitive call/dispatch analysis.
+dedicated `PerformanceContractAnalyzer`; Phase 10.3 places it after storage
+selection and optimized lifetime planning. It consumes published effect
+sites/call edges plus ownership, escape, storage, transfer, borrow, and ARC
+results rather than changing `EffectAnalyzer`, rebuilding transitive
+call/dispatch analysis, or deriving backend-specific facts.
 
 ### Interprocedural ownership summaries
 
@@ -721,8 +726,8 @@ Important unsupported or deferred runtime features include:
   beyond the current operation-bounded parameter, receiver, argument, and
   straight-line local-alias facts, direct-local stack promotion,
   allocation-site escape annotations, and block-local final-use transfer;
-- storage- and optimized-ownership-aware `performance function` contract
-  refinement beyond the current transitive effect-policy validation.
+- richer `performance function` cause-chain inspection and policy categories
+  beyond the current final-plan-aware allocation/escape contract.
 
 The type system may understand some concepts before the C backend can execute them. The backend should reject unsupported constructs clearly rather than emit incorrect C.
 
@@ -758,8 +763,6 @@ typed toro IR
     ↓
 effect analysis
     ↓
-performance effect-contract validation
-    ↓
 ownership-summary analysis
     ↓
 strong-cycle diagnostics
@@ -775,8 +778,6 @@ ownership-transfer analysis
 borrow inference
     ↓
 ARC optimization/elision
-    ↓
-broader storage/borrow analysis
     ↓
 performance-contract validation
     ↓
@@ -845,8 +846,9 @@ class/reference semantics at the source level.
 activates its canonical syntax and preserves a dedicated contract marker
 through typed IR and the detached backend model. Phase 10.2 evaluates marked
 callables against existing transitive effect summaries, producing distinct
-satisfied, violated, and unproven results. The C backend intentionally does not
-alter generated code merely because the marker is present.
+satisfied, violated, and unproven results. Phase 10.3 evaluates those rules
+after the canonical runtime plan is complete. The C backend intentionally does
+not alter generated code merely because the marker is present.
 
 It is not merely an optimization level.
 
@@ -861,9 +863,14 @@ The current effect-policy pass rejects:
 - calls whose effects violate the contract.
 
 Unknown external or foreign behavior is reported as unproven rather than as a
-known prohibited operation. Storage-aware allocation exemptions and optimized
-ownership/ARC reasoning remain Phase 10.3. Richer multi-hop diagnostic
-explanations remain Phase 10.4.
+known prohibited operation. Each managed construction is matched to its escape
+and storage decision. A stack-backed site discharges only its own allocation
+effect; heap-backed sites and non-class runtime allocations remain prohibited.
+Transitive helper, recursive, virtual/interface, and concrete generic behavior
+is refined through direct edges already published by effect analysis.
+Ownership transfer, inferred borrowing, and the optimized ARC schedule are
+final inputs rather than new policy rules—retain/release are not independently
+forbidden today. Richer multi-hop diagnostic explanations remain Phase 10.4.
 
 Dynamic dispatch need not automatically be forbidden, but its cost/effect should be visible to analysis and inspection.
 

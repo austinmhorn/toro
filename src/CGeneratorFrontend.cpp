@@ -19,6 +19,14 @@ std::string CGenerator::generate(const Program& program)
 {
     auto ir = IRLowerer{}.lower(program);
     EffectAnalyzer{}.analyze(ir);
+    OwnershipSummaryAnalyzer{}.analyze(ir);
+    StrongCycleAnalyzer{}.analyze(ir);
+    EscapeAnalyzer{}.analyze(ir);
+    StorageDecisionAnalyzer{}.analyze(ir);
+    ArcMaterializer{}.materialize(ir);
+    OwnershipTransferAnalyzer{}.analyze(ir);
+    BorrowInferenceAnalyzer{}.analyze(ir);
+    ArcOptimizer{}.optimize(ir);
     PerformanceContractAnalyzer{}.analyze(ir);
     if (has_error_diagnostics(ir.diagnostics)) {
         std::string message;
@@ -29,14 +37,6 @@ std::string CGenerator::generate(const Program& program)
         }
         throw std::runtime_error(message);
     }
-    OwnershipSummaryAnalyzer{}.analyze(ir);
-    StrongCycleAnalyzer{}.analyze(ir);
-    EscapeAnalyzer{}.analyze(ir);
-    StorageDecisionAnalyzer{}.analyze(ir);
-    ArcMaterializer{}.materialize(ir);
-    OwnershipTransferAnalyzer{}.analyze(ir);
-    BorrowInferenceAnalyzer{}.analyze(ir);
-    ArcOptimizer{}.optimize(ir);
     return generate(ir);
 }
 

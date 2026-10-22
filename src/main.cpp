@@ -125,12 +125,18 @@ void print_ast(std::string_view source)
     std::cout << toro::dump_program(program);
 }
 
-void analyze_ownership_and_cycles(toro::IRProgram& ir)
+void analyze_runtime_plan(toro::IRProgram& ir)
 {
     toro::EffectAnalyzer().analyze(ir);
-    toro::PerformanceContractAnalyzer().analyze(ir);
     toro::OwnershipSummaryAnalyzer().analyze(ir);
     toro::StrongCycleAnalyzer().analyze(ir);
+    toro::EscapeAnalyzer().analyze(ir);
+    toro::StorageDecisionAnalyzer().analyze(ir);
+    toro::ArcMaterializer().materialize(ir);
+    toro::OwnershipTransferAnalyzer().analyze(ir);
+    toro::BorrowInferenceAnalyzer().analyze(ir);
+    toro::ArcOptimizer().optimize(ir);
+    toro::PerformanceContractAnalyzer().analyze(ir);
 }
 
 void print_diagnostics(const toro::IRProgram& ir)
@@ -154,7 +160,7 @@ void check_source(const CompilationInput& input)
     toro::SemanticAnalyzer().analyze(program);
     toro::TypeChecker().check(program);
     auto ir = toro::IRLowerer().lower(program);
-    analyze_ownership_and_cycles(ir);
+    analyze_runtime_plan(ir);
     enforce_diagnostics(ir);
     std::cout << "check passed\n";
 }
@@ -165,14 +171,8 @@ std::string generate_c(const CompilationInput& input)
     toro::SemanticAnalyzer().analyze(program);
     toro::TypeChecker().check(program);
     auto ir = toro::IRLowerer().lower(program);
-    analyze_ownership_and_cycles(ir);
+    analyze_runtime_plan(ir);
     enforce_diagnostics(ir);
-    toro::EscapeAnalyzer().analyze(ir);
-    toro::StorageDecisionAnalyzer().analyze(ir);
-    toro::ArcMaterializer().materialize(ir);
-    toro::OwnershipTransferAnalyzer().analyze(ir);
-    toro::BorrowInferenceAnalyzer().analyze(ir);
-    toro::ArcOptimizer().optimize(ir);
     return toro::CGenerator().generate(ir);
 }
 
@@ -188,19 +188,10 @@ void print_ir(
     toro::SemanticAnalyzer().analyze(program);
     toro::TypeChecker().check(program);
     auto ir = toro::IRLowerer().lower(program);
-    analyze_ownership_and_cycles(ir);
+    analyze_runtime_plan(ir);
     enforce_diagnostics(ir);
-    if (include_escape || include_arc) toro::EscapeAnalyzer().analyze(ir);
-    if (include_escape || include_arc) {
-        toro::StorageDecisionAnalyzer().analyze(ir);
-    }
-    if (include_arc) {
+    if (include_arc && !optimize_arc) {
         toro::ArcMaterializer().materialize(ir);
-        if (optimize_arc) {
-            toro::OwnershipTransferAnalyzer().analyze(ir);
-            toro::BorrowInferenceAnalyzer().analyze(ir);
-            toro::ArcOptimizer().optimize(ir);
-        }
     }
     std::cout << toro::dump_ir(
         ir, include_effects, include_arc, include_escape, include_ownership);

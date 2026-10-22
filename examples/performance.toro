@@ -8,7 +8,21 @@ class Counter {
     }
 }
 
+class Particle {
+    public value: int = 0
+
+    public function tick() {
+        self.value = self.value + 1
+    }
+}
+
+performance function update() {
+    particle := Particle()
+    particle.tick()
+}
+
 function main() {
+    update()
     counter := Counter()
     print(counter.next(41))
 }

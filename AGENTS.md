@@ -139,8 +139,10 @@ Contract enforcement is a dedicated IR policy pass after effect analysis. It
 is transitive through existing effect summaries and rejects general allocation,
 blocking/filesystem I/O, hidden synchronization, escaping temporaries, and
 unknown/prohibited callees. Do not place that policy in `EffectAnalyzer` or
-rebuild its call graph. Storage- and optimized-ownership-aware refinement
-belongs to the following milestone.
+rebuild its call graph. The policy pass runs after storage decisions and final
+ARC optimization so it can discharge semantic allocation effects only for
+allocation sites proven stack-backed. It consumes ownership, escape, storage,
+transfer, borrow, and ARC facts without recomputing or mutating them.
 
 Performance/memory decisions should eventually be observable and explainable through Toro tooling.
 
@@ -148,7 +150,7 @@ Performance/memory decisions should eventually be observable and explainable thr
 
 Current pipeline:
 
-`source -> lexer -> parser/AST -> semantic analysis -> type checking -> typed toro IR -> effect analysis -> performance effect-contract validation -> ownership-summary analysis -> strong-cycle diagnostics -> escape analysis -> storage decisions -> ARC materialization -> ownership-transfer analysis -> borrow inference -> ARC optimization -> C generator -> native compiler`
+`source -> lexer -> parser/AST -> semantic analysis -> type checking -> typed toro IR -> effect analysis -> ownership-summary analysis -> strong-cycle diagnostics -> escape analysis -> storage decisions -> ARC materialization -> ownership-transfer analysis -> borrow inference -> ARC optimization -> performance contract validation -> C generator -> native compiler`
 
 `IRProgram` is the backend semantic boundary. Backends must not retain or read
 frontend AST nodes; frontend convenience entry points must lower to IR before
@@ -170,7 +172,7 @@ recomputing them or introducing source ownership syntax.
 
 Future analyses should extend that pipeline with broader borrow/storage
 reasoning, cross-call ownership handoff where the ABI can represent it, broader
-ARC elision, and performance validation before the backend. These remain IR
+ARC elision, and richer performance-contract inspection. These remain IR
 passes rather than backend reasoning.
 
 Escape annotations remain descriptive; only the explicit storage-decision pass

@@ -108,8 +108,13 @@ canonical `performance function` spelling and preserves the contract through
 the formatter and typed IR. Phase 10.2 now applies a dedicated transitive
 effect-policy pass: marked callables reject allocation, escaping values,
 blocking/filesystem I/O, synchronization, and unknown external behavior while
-ordinary functions remain unrestricted. Storage/optimized-ownership proof is
-still deferred to Phase 10.3.
+ordinary functions remain unrestricted. Phase 10.3 now applies that policy to
+the proven final runtime plan: exact class allocation sites selected for stack
+storage no longer count as general heap allocation, while heap-backed sites,
+collections, allocating runtime helpers, and genuine escapes remain invalid.
+Effect summaries stay descriptive and unchanged; the contract pass consumes
+storage, transfer, borrow, and optimized ARC facts after their canonical
+analyses complete.
 
 ## Build
 

@@ -316,10 +316,24 @@ struct IREffectCause {
     bool transitive{false};
 };
 
+struct IRLocalEffectSite {
+    IREffect effect{IREffect::Allocate};
+    IROrigin origin;
+    std::optional<IROperationKind> operation_kind;
+    std::string operation_name;
+};
+
+struct IREffectCallEdge {
+    std::string callable_identity;
+    IROrigin origin;
+};
+
 struct IRCallableEffectSummary {
     std::string callable_identity;
     std::vector<IREffect> effects;
     std::vector<IREffectCause> causes;
+    std::vector<IRLocalEffectSite> local_effect_sites;
+    std::vector<IREffectCallEdge> call_edges;
 };
 
 enum class IRPerformanceContractStatus : std::uint8_t {
@@ -334,12 +348,24 @@ struct IRPerformanceContractCause {
     IROrigin origin;
     std::string via_callable;
     bool transitive{false};
+    std::string detail;
+};
+
+struct IRPerformanceContractRefinement {
+    IREffect effect{IREffect::Allocate};
+    IROrigin origin;
+    std::string allocation_identity;
+    IRStorageClass storage{IRStorageClass::Heap};
+    std::string detail;
+    std::string via_callable;
+    bool transitive{false};
 };
 
 struct IRPerformanceContractResult {
     std::string callable_identity;
     IRPerformanceContractStatus status{IRPerformanceContractStatus::Satisfied};
     std::vector<IRPerformanceContractCause> causes;
+    std::vector<IRPerformanceContractRefinement> refinements;
 };
 
 enum class IREscapeState : std::uint8_t {

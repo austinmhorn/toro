@@ -128,6 +128,7 @@ struct EffectNode {
     EffectBits local_effects;
     EffectBits effects;
     std::array<std::optional<IROrigin>, effect_count> local_origins;
+    std::vector<IRLocalEffectSite> local_effect_sites;
     std::vector<EffectEdge> edges;
     std::vector<std::pair<std::string, IRType>> substitutions;
 };
@@ -210,11 +211,31 @@ private:
         nodes_.push_back(std::move(node));
     }
 
-    void add_local(EffectNode& node, IREffect effect, const IROrigin& origin)
+    void add_local(
+        EffectNode& node,
+        IREffect effect,
+        const IROrigin& origin,
+        std::optional<IROperationKind> operation_kind = std::nullopt,
+        std::string operation_name = {})
     {
         const auto index = effect_index(effect);
         node.local_effects.set(index);
         if (!node.local_origins[index]) node.local_origins[index] = origin;
+        node.local_effect_sites.push_back(IRLocalEffectSite{
+            effect,
+            origin,
+            operation_kind,
+            std::move(operation_name),
+        });
+    }
+
+    void add_operation_effect(
+        EffectNode& node,
+        IREffect effect,
+        const IROperation& operation)
+    {
+        add_local(node, effect, operation.origin,
+            operation.kind, operation.name);
     }
 
     void add_edge(
@@ -261,47 +282,47 @@ private:
 
     void add_intrinsic_effects(
         RuntimeIntrinsic intrinsic,
-        const IROrigin& origin,
+        const IROperation& operation,
         EffectNode& node)
     {
-        add_local(node, IREffect::NativeCall, origin);
+        add_operation_effect(node, IREffect::NativeCall, operation);
         switch (intrinsic) {
         case RuntimeIntrinsic::IoWriteLine:
-            add_local(node, IREffect::Block, origin);
-            add_local(node, IREffect::ProcessIO, origin);
+            add_operation_effect(node, IREffect::Block, operation);
+            add_operation_effect(node, IREffect::ProcessIO, operation);
             return;
         case RuntimeIntrinsic::FsExists:
-            add_local(node, IREffect::Block, origin);
-            add_local(node, IREffect::FilesystemIO, origin);
+            add_operation_effect(node, IREffect::Block, operation);
+            add_operation_effect(node, IREffect::FilesystemIO, operation);
             return;
         case RuntimeIntrinsic::FsWriteText:
         case RuntimeIntrinsic::FsRemoveFile:
-            add_local(node, IREffect::Allocate, origin);
-            add_local(node, IREffect::Block, origin);
-            add_local(node, IREffect::FilesystemIO, origin);
+            add_operation_effect(node, IREffect::Allocate, operation);
+            add_operation_effect(node, IREffect::Block, operation);
+            add_operation_effect(node, IREffect::FilesystemIO, operation);
             return;
         case RuntimeIntrinsic::FsReadText:
-            add_local(node, IREffect::Allocate, origin);
-            add_local(node, IREffect::Block, origin);
-            add_local(node, IREffect::FilesystemIO, origin);
+            add_operation_effect(node, IREffect::Allocate, operation);
+            add_operation_effect(node, IREffect::Block, operation);
+            add_operation_effect(node, IREffect::FilesystemIO, operation);
             return;
         case RuntimeIntrinsic::EnvHas:
-            add_local(node, IREffect::EnvironmentAccess, origin);
+            add_operation_effect(node, IREffect::EnvironmentAccess, operation);
             return;
         case RuntimeIntrinsic::EnvGet:
-            add_local(node, IREffect::Allocate, origin);
-            add_local(node, IREffect::EnvironmentAccess, origin);
+            add_operation_effect(node, IREffect::Allocate, operation);
+            add_operation_effect(node, IREffect::EnvironmentAccess, operation);
             return;
         case RuntimeIntrinsic::ProcessExit:
-            add_local(node, IREffect::ProcessIO, origin);
-            add_local(node, IREffect::Terminate, origin);
+            add_operation_effect(node, IREffect::ProcessIO, operation);
+            add_operation_effect(node, IREffect::Terminate, operation);
             return;
         case RuntimeIntrinsic::TimeWallMillis:
-            add_local(node, IREffect::TimeQuery, origin);
+            add_operation_effect(node, IREffect::TimeQuery, operation);
             return;
         case RuntimeIntrinsic::StringConcat:
         case RuntimeIntrinsic::StringSubstring:
-            add_local(node, IREffect::Allocate, origin);
+            add_operation_effect(node, IREffect::Allocate, operation);
             return;
         case RuntimeIntrinsic::StringLength:
         case RuntimeIntrinsic::StringContains:
@@ -318,9 +339,9 @@ private:
             if (operation.result_type
                 && concrete_type(*operation.result_type, node).category
                     == IRValueCategory::ManagedReference) {
-                add_local(node, IREffect::Allocate, operation.origin);
-                add_local(node, IREffect::Retain, operation.origin);
-                add_local(node, IREffect::ReleaseDestroy, operation.origin);
+                add_operation_effect(node, IREffect::Allocate, operation);
+                add_operation_effect(node, IREffect::Retain, operation);
+                add_operation_effect(node, IREffect::ReleaseDestroy, operation);
             }
             break;
         case IROperationKind::CollectionOperation:
@@ -328,15 +349,15 @@ private:
                 || operation.name == "Map" || operation.name == "add"
                 || operation.name == "append" || operation.name == "clone"
                 || operation.name == "insert") {
-                add_local(node, IREffect::Allocate, operation.origin);
+                add_operation_effect(node, IREffect::Allocate, operation);
             }
             if (operation.result_type
                 && owns_runtime_storage(
                     concrete_type(*operation.result_type, node))) {
-                add_local(node, IREffect::ReleaseDestroy, operation.origin);
+                add_operation_effect(node, IREffect::ReleaseDestroy, operation);
                 if (is_shared_reference(
                         concrete_type(*operation.result_type, node))) {
-                    add_local(node, IREffect::Retain, operation.origin);
+                    add_operation_effect(node, IREffect::Retain, operation);
                 }
             }
             if (operation.name == "Array" || operation.name == "List"
@@ -346,9 +367,10 @@ private:
                     if (child.result_type
                         && is_shared_reference(
                             concrete_type(*child.result_type, node))) {
-                        add_local(node, IREffect::Retain, operation.origin);
-                        add_local(node, IREffect::ReleaseDestroy, operation.origin);
-                        add_local(node, IREffect::Escape, operation.origin);
+                        add_operation_effect(node, IREffect::Retain, operation);
+                        add_operation_effect(
+                            node, IREffect::ReleaseDestroy, operation);
+                        add_operation_effect(node, IREffect::Escape, operation);
                         break;
                     }
                 }
@@ -364,9 +386,9 @@ private:
             }
             if (stored_type
                 && owns_runtime_storage(concrete_type(*stored_type, node))) {
-                add_local(node, IREffect::ReleaseDestroy, operation.origin);
+                add_operation_effect(node, IREffect::ReleaseDestroy, operation);
                 if (is_shared_reference(concrete_type(*stored_type, node))) {
-                    add_local(node, IREffect::Retain, operation.origin);
+                    add_operation_effect(node, IREffect::Retain, operation);
                 }
             }
             break;
@@ -378,16 +400,17 @@ private:
                 if (value.result_type
                     && is_shared_reference(
                         concrete_type(*value.result_type, node))) {
-                    add_local(node, IREffect::Retain, operation.origin);
-                    add_local(node, IREffect::ReleaseDestroy, operation.origin);
-                    add_local(node, IREffect::Escape, operation.origin);
+                    add_operation_effect(node, IREffect::Retain, operation);
+                    add_operation_effect(
+                        node, IREffect::ReleaseDestroy, operation);
+                    add_operation_effect(node, IREffect::Escape, operation);
                 }
             }
             if (operation.kind == IROperationKind::IndexAssign
                 && !operation.children.empty()
                 && operation.children.front().result_type
                 && operation.children.front().result_type->type.name == "Map") {
-                add_local(node, IREffect::Allocate, operation.origin);
+                add_operation_effect(node, IREffect::Allocate, operation);
             }
             break;
         case IROperationKind::Return:
@@ -395,7 +418,7 @@ private:
                 && operation.children.front().result_type
                 && is_shared_reference(concrete_type(
                     *operation.children.front().result_type, node))) {
-                add_local(node, IREffect::Escape, operation.origin);
+                add_operation_effect(node, IREffect::Escape, operation);
             }
             break;
         case IROperationKind::ForeignCall:
@@ -405,7 +428,7 @@ private:
             break;
         case IROperationKind::VirtualCall:
         case IROperationKind::InterfaceCall:
-            add_local(node, IREffect::DynamicDispatch, operation.origin);
+            add_operation_effect(node, IREffect::DynamicDispatch, operation);
             analyze_dynamic_call(operation, node);
             break;
         case IROperationKind::EnumConstruction:
@@ -414,8 +437,9 @@ private:
                 if (child.result_type
                     && is_shared_reference(
                         concrete_type(*child.result_type, node))) {
-                    add_local(node, IREffect::Retain, operation.origin);
-                    add_local(node, IREffect::ReleaseDestroy, operation.origin);
+                    add_operation_effect(node, IREffect::Retain, operation);
+                    add_operation_effect(
+                        node, IREffect::ReleaseDestroy, operation);
                     break;
                 }
             }
@@ -460,20 +484,20 @@ private:
                 }
             }
         } else if (const auto intrinsic = runtime_intrinsic(operation.name)) {
-            add_intrinsic_effects(*intrinsic, operation.origin, node);
+            add_intrinsic_effects(*intrinsic, operation, node);
         } else if (operation.name == "print") {
-            add_local(node, IREffect::NativeCall, operation.origin);
-            add_local(node, IREffect::Block, operation.origin);
-            add_local(node, IREffect::ProcessIO, operation.origin);
+            add_operation_effect(node, IREffect::NativeCall, operation);
+            add_operation_effect(node, IREffect::Block, operation);
+            add_operation_effect(node, IREffect::ProcessIO, operation);
         } else {
-            add_local(node, IREffect::UnknownExternal, operation.origin);
+            add_operation_effect(node, IREffect::UnknownExternal, operation);
         }
 
         for (const auto& child : operation.children) {
             if (child.result_type
                 && is_shared_reference(concrete_type(*child.result_type, node))) {
-                add_local(node, IREffect::Retain, operation.origin);
-                add_local(node, IREffect::ReleaseDestroy, operation.origin);
+                add_operation_effect(node, IREffect::Retain, operation);
+                add_operation_effect(node, IREffect::ReleaseDestroy, operation);
                 break;
             }
         }
@@ -511,12 +535,14 @@ private:
             add_edge(node, candidate.identity, operation.origin);
             found = true;
         }
-        if (!found) add_local(node, IREffect::UnknownExternal, operation.origin);
+        if (!found) {
+            add_operation_effect(node, IREffect::UnknownExternal, operation);
+        }
         for (const auto& child : operation.children) {
             if (child.result_type
                 && is_shared_reference(concrete_type(*child.result_type, node))) {
-                add_local(node, IREffect::Retain, operation.origin);
-                add_local(node, IREffect::ReleaseDestroy, operation.origin);
+                add_operation_effect(node, IREffect::Retain, operation);
+                add_operation_effect(node, IREffect::ReleaseDestroy, operation);
                 break;
             }
         }
@@ -590,6 +616,11 @@ private:
         for (const auto& node : nodes_) {
             IRCallableEffectSummary summary;
             summary.callable_identity = node.identity;
+            summary.local_effect_sites = node.local_effect_sites;
+            for (const auto& edge : node.edges) {
+                summary.call_edges.push_back(
+                    IREffectCallEdge{edge.target, edge.origin});
+            }
             for (const auto effect : effects_in_order) {
                 const auto index = effect_index(effect);
                 if (!node.effects.test(index)) continue;

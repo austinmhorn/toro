@@ -701,12 +701,29 @@ Initial prohibited effects should include, where practical:
 - hidden allocating conversions;
 - calls with unknown/prohibited effects.
 
-Storage decisions and optimized ownership/ARC facts are deliberately not
-consulted yet; that is the Phase 10.3 boundary.
+Phase 10.2 deliberately stopped before storage and optimized ownership/ARC
+facts; Phase 10.3 completes that integration below.
 
 ## 10.3 Ownership-aware contract satisfaction
 
-Allow ownership optimization to prove that code satisfies the contract.
+Completed:
+
+- performance validation moved after escape analysis, storage selection,
+  lifetime materialization, ownership transfer, borrow inference, and final ARC
+  optimization;
+- deterministic local effect-site and direct call-edge metadata published by
+  `EffectAnalyzer` without changing existing effect summaries or inspection;
+- per-allocation-site refinement, allowing only exact managed constructions
+  proven stack-backed to discharge their general-allocation effect;
+- heap fallback, collections, allocating runtime helpers, persistent storage,
+  genuine escape, and unknown behavior remaining prohibited;
+- transitive fixed-point refinement across ordinary helpers, recursion,
+  virtual/interface target sets, and concrete generic identities using the
+  effect pass's existing declaration/dispatch edges;
+- stack-storage proof retained in contract results for later explanation while
+  Phase 10.4's richer inspection and cause-chain UI remains deferred;
+- ownership-transfer, borrow, and optimized ARC schedules consumed as final
+  runtime facts without adding a new no-ARC rule or changing those analyses.
 
 Example:
 

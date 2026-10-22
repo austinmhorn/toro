@@ -59,8 +59,10 @@ Normal functions ask the compiler to produce correct native code and optimize it
 `performance function` asks the compiler to **prove that the transitive call
 tree obeys a predictable execution contract**. The canonical syntax and typed
 IR marker are active, and transitive effect-policy validation now rejects known
-prohibited or unprovable behavior. Ownership/storage-aware proof and richer
-explanations remain staged in the following Phase 10 milestones.
+prohibited or unprovable behavior. Contract satisfaction is evaluated against
+the proven final runtime plan: stack-promoted construction is not treated as a
+heap allocation, while fallback heap storage and real escapes remain visible.
+Richer explanations remain staged in Phase 10.4.
 
 Potential prohibited behavior includes:
 

@@ -65,13 +65,22 @@ not need the keyword: their summarized behavior, including all known
 virtual/interface targets and concrete generic specializations, determines
 whether the caller is valid.
 
-This effect-policy stage does not yet apply storage or optimized ownership
-proofs. In particular, source class construction still carries an allocation
-effect at this stage even when later storage analysis can stack-promote it;
-Phase 10.3 owns that refinement. Retain/release, time queries, environment
-access, native calls, dynamic dispatch with fully known safe targets, process
-I/O, and termination are not independently prohibited by the Phase 10.2
-policy. No source ownership or lifetime syntax is introduced.
+Phase 10.3 evaluates that policy against the proven final runtime plan. A class
+construction continues to appear as an allocation capability in effect
+inspection, but it does not count as general heap allocation when escape and
+storage analysis prove that exact site stack-backed. Heap-backed construction,
+growable collections, allocating string/runtime helpers, and genuine escapes
+remain prohibited. Sites are evaluated independently, so one stack-promoted
+construction cannot hide another heap allocation.
+
+The contract pass runs after ownership transfer, borrow inference, and final
+ARC optimization and consumes those decisions without reimplementing them.
+Retain/release remain represented in lifetime IR but are not independently
+prohibited by the current policy. Time queries, environment access, native
+calls, dynamic dispatch with fully known safe targets, process I/O, and
+termination likewise remain allowed unless their reachable behavior includes a
+prohibited or unknown effect. No source ownership or lifetime syntax is
+introduced. Richer contract explanations remain deferred to Phase 10.4.
 
 ### Modules and imports
 
