@@ -29,6 +29,7 @@ add_library(toro_core
     src/ModuleLoader.cpp
     src/NativeCompiler.cpp
     src/OwnershipSummaryAnalyzer.cpp
+    src/PerformanceContractAnalyzer.cpp
     src/Parser.cpp
     src/ProjectConfig.cpp
     src/SemanticAnalyzer.cpp
@@ -95,6 +96,17 @@ if(BUILD_TESTING)
     )
     toro_enable_warnings(toro_effect_analyzer_tests)
     add_test(NAME effect_analyzer COMMAND toro_effect_analyzer_tests)
+
+    add_executable(toro_performance_contract_tests
+        tests/PerformanceContractAnalyzerTests.cpp)
+    target_link_libraries(toro_performance_contract_tests PRIVATE toro_core)
+    toro_enable_warnings(toro_performance_contract_tests)
+    add_test(NAME performance_contract COMMAND toro_performance_contract_tests)
+    add_test(NAME performance_contract_cli
+        COMMAND ${CMAKE_COMMAND}
+            -DTORO_EXECUTABLE=$<TARGET_FILE:toro>
+            -DTORO_BINARY_DIR=${PROJECT_BINARY_DIR}
+            -P ${PROJECT_SOURCE_DIR}/tests/PerformanceContractCliTest.cmake)
 
     add_executable(toro_escape_analyzer_tests tests/EscapeAnalyzerTests.cpp)
     target_link_libraries(toro_escape_analyzer_tests PRIVATE toro_core)

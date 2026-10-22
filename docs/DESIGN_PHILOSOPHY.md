@@ -58,8 +58,9 @@ Normal functions ask the compiler to produce correct native code and optimize it
 
 `performance function` asks the compiler to **prove that the transitive call
 tree obeys a predictable execution contract**. The canonical syntax and typed
-IR marker are active; effect-policy and ownership-aware proof are staged in the
-remaining Phase 10 milestones.
+IR marker are active, and transitive effect-policy validation now rejects known
+prohibited or unprovable behavior. Ownership/storage-aware proof and richer
+explanations remain staged in the following Phase 10 milestones.
 
 Potential prohibited behavior includes:
 

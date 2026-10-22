@@ -10,6 +10,7 @@
 #include "toro/ModuleLoader.hpp"
 #include "toro/NativeCompiler.hpp"
 #include "toro/OwnershipSummaryAnalyzer.hpp"
+#include "toro/PerformanceContractAnalyzer.hpp"
 #include "toro/Parser.hpp"
 #include "toro/ProjectConfig.hpp"
 #include "toro/SemanticAnalyzer.hpp"
@@ -33,6 +34,9 @@
 #include <vector>
 
 namespace {
+
+struct ReportedDiagnostics {
+};
 
 void print_usage(std::ostream& output)
 {
@@ -124,6 +128,7 @@ void print_ast(std::string_view source)
 void analyze_ownership_and_cycles(toro::IRProgram& ir)
 {
     toro::EffectAnalyzer().analyze(ir);
+    toro::PerformanceContractAnalyzer().analyze(ir);
     toro::OwnershipSummaryAnalyzer().analyze(ir);
     toro::StrongCycleAnalyzer().analyze(ir);
 }
@@ -135,6 +140,14 @@ void print_diagnostics(const toro::IRProgram& ir)
     }
 }
 
+void enforce_diagnostics(const toro::IRProgram& ir)
+{
+    print_diagnostics(ir);
+    if (toro::has_error_diagnostics(ir.diagnostics)) {
+        throw ReportedDiagnostics{};
+    }
+}
+
 void check_source(const CompilationInput& input)
 {
     const auto program = load_program(input);
@@ -142,7 +155,7 @@ void check_source(const CompilationInput& input)
     toro::TypeChecker().check(program);
     auto ir = toro::IRLowerer().lower(program);
     analyze_ownership_and_cycles(ir);
-    print_diagnostics(ir);
+    enforce_diagnostics(ir);
     std::cout << "check passed\n";
 }
 
@@ -153,7 +166,7 @@ std::string generate_c(const CompilationInput& input)
     toro::TypeChecker().check(program);
     auto ir = toro::IRLowerer().lower(program);
     analyze_ownership_and_cycles(ir);
-    print_diagnostics(ir);
+    enforce_diagnostics(ir);
     toro::EscapeAnalyzer().analyze(ir);
     toro::StorageDecisionAnalyzer().analyze(ir);
     toro::ArcMaterializer().materialize(ir);
@@ -176,7 +189,7 @@ void print_ir(
     toro::TypeChecker().check(program);
     auto ir = toro::IRLowerer().lower(program);
     analyze_ownership_and_cycles(ir);
-    print_diagnostics(ir);
+    enforce_diagnostics(ir);
     if (include_escape || include_arc) toro::EscapeAnalyzer().analyze(ir);
     if (include_escape || include_arc) {
         toro::StorageDecisionAnalyzer().analyze(ir);
@@ -503,6 +516,8 @@ int main(int argc, char* argv[])
             const auto source = toro::load_source_file(argv[1]);
             std::cout << source.contents;
         }
+    } catch (const ReportedDiagnostics&) {
+        return 1;
     } catch (const std::exception& error) {
         std::cerr << "error: " << error.what() << '\n';
         return 1;

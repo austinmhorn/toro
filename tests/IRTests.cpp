@@ -252,10 +252,10 @@ void test_performance_contract_marker()
     expect_contains(dump, "performance", "performance contract marker");
 
     auto detached = lower_detached(
-        "performance function main() { print(1) }\n");
+        "performance function main() { value := 1 + 1 }\n");
     const auto generated = toro::CGenerator().generate(detached);
     expect_contains(generated, "int main(void)", "performance function C lowering");
-    auto ordinary = lower_detached("function main() { print(1) }\n");
+    auto ordinary = lower_detached("function main() { value := 1 + 1 }\n");
     expect(generated == toro::CGenerator().generate(ordinary),
         "performance marker unexpectedly changed generated C");
 }

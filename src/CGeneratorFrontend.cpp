@@ -6,8 +6,12 @@
 #include "toro/EscapeAnalyzer.hpp"
 #include "toro/IRLowerer.hpp"
 #include "toro/OwnershipSummaryAnalyzer.hpp"
+#include "toro/PerformanceContractAnalyzer.hpp"
 #include "toro/StorageDecisionAnalyzer.hpp"
 #include "toro/StrongCycleAnalyzer.hpp"
+
+#include <stdexcept>
+#include <string>
 
 namespace toro {
 
@@ -15,6 +19,16 @@ std::string CGenerator::generate(const Program& program)
 {
     auto ir = IRLowerer{}.lower(program);
     EffectAnalyzer{}.analyze(ir);
+    PerformanceContractAnalyzer{}.analyze(ir);
+    if (has_error_diagnostics(ir.diagnostics)) {
+        std::string message;
+        for (const auto& diagnostic : ir.diagnostics) {
+            if (diagnostic.severity == DiagnosticSeverity::Error) {
+                message += format_diagnostic(diagnostic);
+            }
+        }
+        throw std::runtime_error(message);
+    }
     OwnershipSummaryAnalyzer{}.analyze(ir);
     StrongCycleAnalyzer{}.analyze(ir);
     EscapeAnalyzer{}.analyze(ir);

@@ -21,6 +21,7 @@ std::string source_text(const DiagnosticSource& source)
 std::string_view diagnostic_severity_name(DiagnosticSeverity severity)
 {
     switch (severity) {
+    case DiagnosticSeverity::Error: return "error";
     case DiagnosticSeverity::Warning: return "warning";
     }
     return "diagnostic";
@@ -44,6 +45,14 @@ std::string format_diagnostic(const Diagnostic& diagnostic)
     }
     result += '\n';
     return result;
+}
+
+bool has_error_diagnostics(const std::vector<Diagnostic>& diagnostics)
+{
+    for (const auto& diagnostic : diagnostics) {
+        if (diagnostic.severity == DiagnosticSeverity::Error) return true;
+    }
+    return false;
 }
 
 } // namespace toro

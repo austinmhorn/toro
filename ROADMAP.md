@@ -674,7 +674,22 @@ contract without prematurely duplicating effect or ownership analysis.
 
 ## 10.2 Transitive effect checking
 
-Validate the complete reachable call tree.
+Completed:
+
+- a dedicated `PerformanceContractAnalyzer` consuming existing deterministic
+  effect summaries without rebuilding call-graph or dispatch analysis;
+- deterministic `Satisfied`, `Violated`, and `Unproven` results for marked
+  ordinary, method, and concrete generic callables;
+- transitive validation through direct, recursive, virtual, interface, generic,
+  standard-library, and foreign-call summaries already computed by
+  `EffectAnalyzer`;
+- initial rejection of general allocation, escaping temporaries/references,
+  blocking/filesystem I/O, and synchronization;
+- conservative rejection as unproven for unknown external/foreign behavior;
+- source-located error diagnostics with stable direct/transitive causes while
+  leaving richer cause-chain presentation to 10.4;
+- ordinary functions remaining unrestricted and generated code remaining
+  unchanged for accepted programs.
 
 Initial prohibited effects should include, where practical:
 
@@ -685,6 +700,9 @@ Initial prohibited effects should include, where practical:
 - escaping temporaries;
 - hidden allocating conversions;
 - calls with unknown/prohibited effects.
+
+Storage decisions and optimized ownership/ARC facts are deliberately not
+consulted yet; that is the Phase 10.3 boundary.
 
 ## 10.3 Ownership-aware contract satisfaction
 

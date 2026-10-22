@@ -322,6 +322,26 @@ struct IRCallableEffectSummary {
     std::vector<IREffectCause> causes;
 };
 
+enum class IRPerformanceContractStatus : std::uint8_t {
+    Satisfied,
+    Violated,
+    Unproven,
+};
+
+struct IRPerformanceContractCause {
+    IRPerformanceContractStatus status{IRPerformanceContractStatus::Satisfied};
+    IREffect effect{IREffect::Allocate};
+    IROrigin origin;
+    std::string via_callable;
+    bool transitive{false};
+};
+
+struct IRPerformanceContractResult {
+    std::string callable_identity;
+    IRPerformanceContractStatus status{IRPerformanceContractStatus::Satisfied};
+    std::vector<IRPerformanceContractCause> causes;
+};
+
 enum class IREscapeState : std::uint8_t {
     DoesNotEscape,
     Escapes,
@@ -378,6 +398,7 @@ struct IRProgram {
     std::string entry_module;
     IRLifetimeModel lifetime_model{IRLifetimeModel::LegacyArc};
     std::vector<IRCallableEffectSummary> effect_summaries;
+    std::vector<IRPerformanceContractResult> performance_contract_results;
     std::vector<IRAllocationEscape> escape_allocations;
     IREscapeMetrics escape_metrics;
     IRArcStage arc_stage{IRArcStage::Semantic};

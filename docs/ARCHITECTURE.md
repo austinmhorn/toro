@@ -333,10 +333,11 @@ dump. Effect analysis runs before ARC materialization and normal C generation.
 It does not itself alter ARC, allocation, ownership, or native behavior.
 Ownership-sensitive passes use the dedicated summaries below rather than
 treating a callable-wide effect as a parameter contract. Effect analysis does
-not validate performance policy. Phase 10.1 carries the explicit
-`performance function` marker through the AST and typed IR; the dedicated
-policy pass in the following Phase 10 milestones consumes effect summaries
-rather than changing `EffectAnalyzer`.
+does not validate performance policy. Phase 10.1 carries the explicit
+`performance function` marker through the AST and typed IR. Phase 10.2 adds a
+dedicated `PerformanceContractAnalyzer` immediately after effect analysis. It
+consumes the published summaries and their causes rather than changing
+`EffectAnalyzer` or rebuilding transitive call/dispatch analysis.
 
 ### Interprocedural ownership summaries
 
@@ -720,7 +721,8 @@ Important unsupported or deferred runtime features include:
   beyond the current operation-bounded parameter, receiver, argument, and
   straight-line local-alias facts, direct-local stack promotion,
   allocation-site escape annotations, and block-local final-use transfer;
-- `performance function` enforcement.
+- storage- and optimized-ownership-aware `performance function` contract
+  refinement beyond the current transitive effect-policy validation.
 
 The type system may understand some concepts before the C backend can execute them. The backend should reject unsupported constructs clearly rather than emit incorrect C.
 
@@ -755,6 +757,8 @@ frontend
 typed toro IR
     ↓
 effect analysis
+    ↓
+performance effect-contract validation
     ↓
 ownership-summary analysis
     ↓
@@ -839,13 +843,14 @@ class/reference semantics at the source level.
 
 `performance function` is a compiler-enforced execution contract. Phase 10.1
 activates its canonical syntax and preserves a dedicated contract marker
-through typed IR and the detached backend model. The C backend intentionally
-does not alter generated code merely because the marker is present.
+through typed IR and the detached backend model. Phase 10.2 evaluates marked
+callables against existing transitive effect summaries, producing distinct
+satisfied, violated, and unproven results. The C backend intentionally does not
+alter generated code merely because the marker is present.
 
 It is not merely an optimization level.
 
-The subsequent contract-analysis milestones validate the transitive call graph
-and reject prohibited behavior such as:
+The current effect-policy pass rejects:
 
 - general heap allocation;
 - blocking I/O;
@@ -854,6 +859,11 @@ and reject prohibited behavior such as:
 - escaping temporaries;
 - allocating conversions;
 - calls whose effects violate the contract.
+
+Unknown external or foreign behavior is reported as unproven rather than as a
+known prohibited operation. Storage-aware allocation exemptions and optimized
+ownership/ARC reasoning remain Phase 10.3. Richer multi-hop diagnostic
+explanations remain Phase 10.4.
 
 Dynamic dispatch need not automatically be forbidden, but its cost/effect should be visible to analysis and inspection.
 

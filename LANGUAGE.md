@@ -56,10 +56,22 @@ the AST and typed toro IR for ordinary functions and body-bearing struct/class
 methods; lifecycle declarations, interface signatures, and external C
 declarations are not performance-contracted callables.
 
-Phase 10.1 activates the syntax and semantic marker. Transitive effect-policy
-validation and ownership-aware contract proof are the following Phase 10
-milestones, so this activation alone does not yet reject prohibited runtime
-effects. No source ownership or lifetime syntax is introduced.
+Phase 10.1 activated the syntax and semantic marker. Phase 10.2 now validates
+the marker against deterministic transitive effect summaries. General
+allocation, escaping temporaries/references, blocking or filesystem I/O, and
+hidden synchronization violate the initial contract. Unknown external or
+foreign behavior makes the contract unproven and is also rejected. Callees do
+not need the keyword: their summarized behavior, including all known
+virtual/interface targets and concrete generic specializations, determines
+whether the caller is valid.
+
+This effect-policy stage does not yet apply storage or optimized ownership
+proofs. In particular, source class construction still carries an allocation
+effect at this stage even when later storage analysis can stack-promote it;
+Phase 10.3 owns that refinement. Retain/release, time queries, environment
+access, native calls, dynamic dispatch with fully known safe targets, process
+I/O, and termination are not independently prohibited by the Phase 10.2
+policy. No source ownership or lifetime syntax is introduced.
 
 ### Modules and imports
 

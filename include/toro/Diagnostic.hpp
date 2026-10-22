@@ -10,6 +10,7 @@
 namespace toro {
 
 enum class DiagnosticSeverity {
+    Error,
     Warning,
 };
 
@@ -34,5 +35,7 @@ struct Diagnostic {
 [[nodiscard]] std::string_view diagnostic_severity_name(
     DiagnosticSeverity severity);
 [[nodiscard]] std::string format_diagnostic(const Diagnostic& diagnostic);
+[[nodiscard]] bool has_error_diagnostics(
+    const std::vector<Diagnostic>& diagnostics);
 
 } // namespace toro

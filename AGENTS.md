@@ -135,10 +135,12 @@ Long term:
 
 `performance function` is the canonical compiler-enforced execution contract,
 not merely an optimization hint. Its syntax and typed IR marker are active.
-Contract enforcement must remain a dedicated IR policy pass, be transitive
-through the call graph, and reject prohibited behavior such as general heap
-allocation, blocking I/O, hidden synchronization, escaping temporaries, or
-calls that violate the contract. Do not place that policy in `EffectAnalyzer`.
+Contract enforcement is a dedicated IR policy pass after effect analysis. It
+is transitive through existing effect summaries and rejects general allocation,
+blocking/filesystem I/O, hidden synchronization, escaping temporaries, and
+unknown/prohibited callees. Do not place that policy in `EffectAnalyzer` or
+rebuild its call graph. Storage- and optimized-ownership-aware refinement
+belongs to the following milestone.
 
 Performance/memory decisions should eventually be observable and explainable through Toro tooling.
 
@@ -146,7 +148,7 @@ Performance/memory decisions should eventually be observable and explainable thr
 
 Current pipeline:
 
-`source -> lexer -> parser/AST -> semantic analysis -> type checking -> typed toro IR -> effect analysis -> ownership-summary analysis -> strong-cycle diagnostics -> escape analysis -> storage decisions -> ARC materialization -> ownership-transfer analysis -> borrow inference -> ARC optimization -> C generator -> native compiler`
+`source -> lexer -> parser/AST -> semantic analysis -> type checking -> typed toro IR -> effect analysis -> performance effect-contract validation -> ownership-summary analysis -> strong-cycle diagnostics -> escape analysis -> storage decisions -> ARC materialization -> ownership-transfer analysis -> borrow inference -> ARC optimization -> C generator -> native compiler`
 
 `IRProgram` is the backend semantic boundary. Backends must not retain or read
 frontend AST nodes; frontend convenience entry points must lower to IR before
