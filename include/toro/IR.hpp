@@ -326,6 +326,8 @@ struct IRLocalEffectSite {
 struct IREffectCallEdge {
     std::string callable_identity;
     IROrigin origin;
+    IROperationKind operation_kind{IROperationKind::Call};
+    std::string operation_name;
 };
 
 struct IRCallableEffectSummary {

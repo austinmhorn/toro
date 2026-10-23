@@ -143,6 +143,10 @@ rebuild its call graph. The policy pass runs after storage decisions and final
 ARC optimization so it can discharge semantic allocation effects only for
 allocation sites proven stack-backed. It consumes ownership, escape, storage,
 transfer, borrow, and ARC facts without recomputing or mutating them.
+Contract explanation is a separate reporting layer. `toro ir --performance`
+and normal performance diagnostics consume the analyzer's structured verdict,
+published call edges, and final runtime facts; they must not independently
+decide whether a contract passes.
 
 Performance/memory decisions should eventually be observable and explainable through Toro tooling.
 
@@ -172,8 +176,8 @@ recomputing them or introducing source ownership syntax.
 
 Future analyses should extend that pipeline with broader borrow/storage
 reasoning, cross-call ownership handoff where the ABI can represent it, broader
-ARC elision, and richer performance-contract inspection. These remain IR
-passes rather than backend reasoning.
+ARC elision, and general memory/performance observability. These remain IR
+passes or reporting layers rather than backend reasoning.
 
 Escape annotations remain descriptive; only the explicit storage-decision pass
 may select stack storage. Heap remains the fallback whenever proof is uncertain.

@@ -120,6 +120,8 @@ std::string method_suffix(std::string_view identity)
 struct EffectEdge {
     std::string target;
     IROrigin origin;
+    IROperationKind operation_kind{IROperationKind::Call};
+    std::string operation_name;
 };
 
 struct EffectNode {
@@ -241,10 +243,13 @@ private:
     void add_edge(
         EffectNode& node,
         const std::string& target,
-        const IROrigin& origin)
+        const IROrigin& origin,
+        IROperationKind operation_kind,
+        std::string operation_name)
     {
         if (node_indices_.contains(target)) {
-            node.edges.push_back(EffectEdge{target, origin});
+            node.edges.push_back(EffectEdge{
+                target, origin, operation_kind, std::move(operation_name)});
         } else {
             add_local(node, IREffect::UnknownExternal, origin);
         }
@@ -474,13 +479,16 @@ private:
             const auto concrete = specialization_identity(
                 operation, node.substitutions);
             if (node_indices_.contains(concrete)) {
-                add_edge(node, concrete, operation.origin);
+                add_edge(node, concrete, operation.origin,
+                    operation.kind, operation.name);
             } else {
                 const auto symbolic = specialization_identity(operation);
                 if (node_indices_.contains(symbolic)) {
-                    add_edge(node, symbolic, operation.origin);
+                    add_edge(node, symbolic, operation.origin,
+                        operation.kind, operation.name);
                 } else {
-                    add_edge(node, operation.selected_declaration, operation.origin);
+                    add_edge(node, operation.selected_declaration,
+                        operation.origin, operation.kind, operation.name);
                 }
             }
         } else if (const auto intrinsic = runtime_intrinsic(operation.name)) {
@@ -532,7 +540,8 @@ private:
                 }
             }
             if (!valid_candidate) continue;
-            add_edge(node, candidate.identity, operation.origin);
+            add_edge(node, candidate.identity, operation.origin,
+                operation.kind, operation.name);
             found = true;
         }
         if (!found) {
@@ -619,7 +628,8 @@ private:
             summary.local_effect_sites = node.local_effect_sites;
             for (const auto& edge : node.edges) {
                 summary.call_edges.push_back(
-                    IREffectCallEdge{edge.target, edge.origin});
+                    IREffectCallEdge{edge.target, edge.origin,
+                        edge.operation_kind, edge.operation_name});
             }
             for (const auto effect : effects_in_order) {
                 const auto index = effect_index(effect);

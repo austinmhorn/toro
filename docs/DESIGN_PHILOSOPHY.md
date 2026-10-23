@@ -62,7 +62,10 @@ IR marker are active, and transitive effect-policy validation now rejects known
 prohibited or unprovable behavior. Contract satisfaction is evaluated against
 the proven final runtime plan: stack-promoted construction is not treated as a
 heap allocation, while fallback heap storage and real escapes remain visible.
-Richer explanations remain staged in Phase 10.4.
+Contract verdicts are now explainable through `toro ir --performance` and
+concise multi-hop diagnostics. This explanation layer consumes the analyzer's
+structured verdict and proven runtime plan; it does not reinterpret policy.
+Broader memory and performance observability remains staged in Phase 11.
 
 Potential prohibited behavior includes:
 

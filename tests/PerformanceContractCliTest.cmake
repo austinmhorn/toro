@@ -75,7 +75,7 @@ if(NOT blocked_error STREQUAL repeated_error)
 endif()
 if(NOT blocked_error MATCHES "violates its contract"
     OR NOT blocked_error MATCHES "blocking operation"
-    OR NOT blocked_error MATCHES "call to 'output'"
+    OR NOT blocked_error MATCHES "'tick' calls 'output'"
     OR NOT blocked_error MATCHES "\\[performance-contract\\]")
     message(FATAL_ERROR "blocking diagnostic was incomplete: ${blocked_error}")
 endif()
@@ -88,8 +88,46 @@ execute_process(
 )
 if(unknown_result EQUAL 0
     OR NOT unknown_error MATCHES "cannot be proven"
-    OR NOT unknown_error MATCHES "unknown external behavior")
+    OR NOT unknown_error MATCHES "has no performance contract")
     message(FATAL_ERROR "unknown behavior diagnostic was incomplete: ${unknown_error}")
+endif()
+
+execute_process(
+    COMMAND "${TORO_EXECUTABLE}" ir --performance "${stack_source}"
+    RESULT_VARIABLE stack_report_result
+    OUTPUT_VARIABLE stack_report
+    ERROR_VARIABLE stack_report_error
+)
+if(NOT stack_report_result EQUAL 0
+    OR NOT stack_report MATCHES "contract satisfied"
+    OR NOT stack_report MATCHES "runtime-storage stack"
+    OR NOT stack_report MATCHES "general-heap-allocation discharged")
+    message(FATAL_ERROR "stack performance report was incomplete: ${stack_report_error}${stack_report}")
+endif()
+
+execute_process(
+    COMMAND "${TORO_EXECUTABLE}" ir --performance "${heap_source}"
+    RESULT_VARIABLE heap_report_result
+    OUTPUT_VARIABLE heap_report
+    ERROR_VARIABLE heap_report_error
+)
+if(NOT heap_report_result EQUAL 0
+    OR NOT heap_report MATCHES "contract violated"
+    OR NOT heap_report MATCHES "runtime-storage heap"
+    OR NOT heap_report MATCHES "escapes through return")
+    message(FATAL_ERROR "heap performance report was incomplete: ${heap_report_error}${heap_report}")
+endif()
+
+execute_process(
+    COMMAND "${TORO_EXECUTABLE}" ir --performance "${unknown_source}"
+    RESULT_VARIABLE unknown_report_result
+    OUTPUT_VARIABLE unknown_report
+    ERROR_VARIABLE unknown_report_error
+)
+if(NOT unknown_report_result EQUAL 0
+    OR NOT unknown_report MATCHES "contract unproven"
+    OR NOT unknown_report MATCHES "has no performance contract")
+    message(FATAL_ERROR "unknown performance report was incomplete: ${unknown_report_error}${unknown_report}")
 endif()
 
 file(REMOVE "${safe_source}" "${stack_source}" "${heap_source}"

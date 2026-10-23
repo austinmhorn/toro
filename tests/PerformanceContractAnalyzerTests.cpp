@@ -9,6 +9,7 @@
 #include "toro/OwnershipSummaryAnalyzer.hpp"
 #include "toro/Parser.hpp"
 #include "toro/PerformanceContractAnalyzer.hpp"
+#include "toro/PerformanceContractReporter.hpp"
 #include "toro/SemanticAnalyzer.hpp"
 #include "toro/StorageDecisionAnalyzer.hpp"
 #include "toro/StrongCycleAnalyzer.hpp"
@@ -364,6 +365,11 @@ void test_heap_escape_multiple_sites_and_collections()
             && has_cause(result(mixed, "work(Watcher)"),
                 toro::IREffect::Allocate),
         "one stack site incorrectly discharged a separate heap site");
+    const auto mixed_report = toro::PerformanceContractReporter().report(mixed);
+    expect(mixed_report.find("runtime-storage heap") != std::string::npos
+            && mixed_report.find("weak target requires heap")
+                != std::string::npos,
+        "heap fallback explanation omitted the existing weak reason");
 
     const auto collection = analyze(
         "performance function collect() { values := List<int>() }\n");
@@ -476,6 +482,12 @@ void test_final_ownership_borrow_and_dispatch_facts()
         "final-use ownership transfer was not preserved before validation");
     expect(ir.escape_metrics.stack_allocations == 4,
         "safe alias/dispatch/generic constructions were not stack-backed");
+    const auto report = toro::PerformanceContractReporter().report(ir);
+    expect(report.find("borrow value -> inspect.value") != std::string::npos
+            && report.find("ownership-transfer") != std::string::npos
+            && report.find("virtual dispatch run") != std::string::npos
+            && report.find("interface dispatch run") != std::string::npos,
+        "final borrow/transfer/dynamic proofs were not explained");
 }
 
 void test_cross_analysis_invariants()
@@ -590,6 +602,125 @@ void test_non_prohibited_effect_categories_remain_allowed()
         "allowed effects produced a performance-contract diagnostic");
 }
 
+void test_explanation_reports_and_diagnostics()
+{
+    auto satisfied = analyze(
+        "class Particle { public value: int }\n"
+        "function helper() { particle := Particle() }\n"
+        "performance function update() { helper() }\n");
+    const auto verdict_before = result(satisfied, "update()").status;
+    const auto satisfied_report
+        = toro::PerformanceContractReporter().report(satisfied);
+    expect(satisfied_report.find("contract satisfied") != std::string::npos
+            && satisfied_report.find("construction Particle")
+                != std::string::npos
+            && satisfied_report.find("runtime-storage stack")
+                != std::string::npos
+            && satisfied_report.find("general-heap-allocation discharged")
+                != std::string::npos
+            && satisfied_report.find("-> helper") != std::string::npos,
+        "satisfied report omitted its transitive stack proof");
+
+    toro::PerformanceContractReporter().annotate_diagnostics(satisfied);
+    expect(result(satisfied, "update()").status == verdict_before,
+        "explanation generation changed a contract verdict");
+
+    auto violated = analyze(
+        "function output() { print(1) }\n"
+        "function middle() { output() }\n"
+        "performance function update() { middle() }\n");
+    const auto violated_report
+        = toro::PerformanceContractReporter().report(violated);
+    expect(violated_report.find("contract violated") != std::string::npos
+            && violated_report.find("-> middle") != std::string::npos
+            && violated_report.find("-> output") != std::string::npos
+            && violated_report.find("blocking operation")
+                != std::string::npos,
+        "violated report omitted its multi-hop cause path");
+    toro::PerformanceContractReporter().annotate_diagnostics(violated);
+    const auto diagnostic_text = diagnostics(violated);
+    expect(diagnostic_text.find("'update' calls 'middle'")
+                != std::string::npos
+            && diagnostic_text.find("'middle' calls 'output'")
+                != std::string::npos,
+        "performance diagnostic omitted its multi-hop call notes");
+
+    const auto unknown = analyze(
+        "extern \"C\" function native_tick(value: c_int) -> c_int\n"
+        "performance function update() { value := native_tick(1 as c_int) }\n");
+    const auto unknown_report
+        = toro::PerformanceContractReporter().report(unknown);
+    expect(unknown_report.find("contract unproven") != std::string::npos
+            && unknown_report.find("has no performance contract")
+                != std::string::npos,
+        "unproven report claimed or omitted unknown foreign behavior");
+    expect(unknown_report == toro::PerformanceContractReporter().report(unknown),
+        "performance report was not deterministic");
+
+    const auto recursive = analyze(
+        "function output() { print(1) }\n"
+        "performance function repeat(value: int) {\n"
+        "    if value > 0 { repeat(value - 1) } else { output() }\n"
+        "}\n");
+    const auto recursive_report
+        = toro::PerformanceContractReporter().report(recursive);
+    expect(recursive_report.find("contract violated") != std::string::npos
+            && recursive_report.find("-> output") != std::string::npos
+            && recursive_report.size() < 10000,
+        "recursive explanation did not terminate on a canonical path");
+}
+
+void test_dynamic_and_generic_explanations()
+{
+    const auto safe_dispatch = analyze(
+        "interface Action { function run() }\n"
+        "class Safe implements Action { public function run() {} }\n"
+        "performance function invoke(value: Action) { value.run() }\n");
+    const auto safe_report
+        = toro::PerformanceContractReporter().report(safe_dispatch);
+    expect(safe_report.find("interface dispatch run") != std::string::npos
+            && safe_report.find("all-targets contract-safe")
+                != std::string::npos,
+        "safe interface target set was not explained");
+
+    const auto unsafe_dispatch = analyze(
+        "interface Action { function run() }\n"
+        "class Unsafe implements Action {\n"
+        "    public function run() { print(1) }\n"
+        "}\n"
+        "performance function invoke(value: Action) { value.run() }\n");
+    const auto unsafe_report
+        = toro::PerformanceContractReporter().report(unsafe_dispatch);
+    expect(unsafe_report.find("Unsafe.run") != std::string::npos
+            && unsafe_report.find("[dynamic target]") != std::string::npos,
+        "unsafe interface implementation was not identified");
+
+    const auto mixed_targets = analyze(
+        "interface Action { function run() }\n"
+        "class First implements Action { public function run() { print(1) } }\n"
+        "class Second implements Action { public function run() { print(2) } }\n"
+        "performance function invoke(value: Action) { value.run() }\n");
+    const auto mixed_report
+        = toro::PerformanceContractReporter().report(mixed_targets);
+    expect(mixed_report.find("First.run") != std::string::npos
+            && mixed_report.find("Second.run") != std::string::npos,
+        "multiple unsafe dynamic targets were collapsed");
+
+    const auto generic = analyze(
+        "class Box {}\n"
+        "performance function identity<T>(value: T) -> T { return value }\n"
+        "function main() {\n"
+        "    number := identity<int>(1)\n"
+        "    box := Box()\n"
+        "    same := identity<Box>(box)\n"
+        "}\n");
+    const auto generic_report
+        = toro::PerformanceContractReporter().report(generic);
+    expect(generic_report.find("identity<T=int>") != std::string::npos
+            && generic_report.find("identity<T=Box>") != std::string::npos,
+        "generic specialization identities collapsed in the report");
+}
+
 } // namespace
 
 int main()
@@ -608,6 +739,8 @@ int main()
         test_cross_analysis_invariants();
         test_synchronization_policy_and_determinism();
         test_non_prohibited_effect_categories_remain_allowed();
+        test_explanation_reports_and_diagnostics();
+        test_dynamic_and_generic_explanations();
     } catch (const std::exception& error) {
         std::cerr << "performance contract test failure: " << error.what() << '\n';
         return 1;

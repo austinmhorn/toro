@@ -30,6 +30,7 @@ add_library(toro_core
     src/NativeCompiler.cpp
     src/OwnershipSummaryAnalyzer.cpp
     src/PerformanceContractAnalyzer.cpp
+    src/PerformanceContractReporter.cpp
     src/Parser.cpp
     src/ProjectConfig.cpp
     src/SemanticAnalyzer.cpp
@@ -210,6 +211,10 @@ if(BUILD_TESTING)
     add_test(NAME project_cli_ir_arc COMMAND toro ir --arc)
     set_tests_properties(project_cli_ir_arc PROPERTIES
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/project)
+    add_test(NAME project_cli_ir_performance COMMAND toro ir --performance)
+    set_tests_properties(project_cli_ir_performance PROPERTIES
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/project
+        PASS_REGULAR_EXPRESSION "performance-contracts")
     add_test(NAME project_cli_emit_c COMMAND toro emit-c)
     set_tests_properties(project_cli_emit_c PROPERTIES
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/project)

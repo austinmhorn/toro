@@ -11,6 +11,7 @@
 #include "toro/NativeCompiler.hpp"
 #include "toro/OwnershipSummaryAnalyzer.hpp"
 #include "toro/PerformanceContractAnalyzer.hpp"
+#include "toro/PerformanceContractReporter.hpp"
 #include "toro/Parser.hpp"
 #include "toro/ProjectConfig.hpp"
 #include "toro/SemanticAnalyzer.hpp"
@@ -44,7 +45,7 @@ void print_usage(std::ostream& output)
               "       toro tokens <source.toro>\n"
               "       toro ast-expression <source.toro>\n"
               "       toro ast <source.toro>\n"
-              "       toro ir [--effects | --ownership | --escape | --arc [--no-opt]] [source.toro]\n"
+              "       toro ir [--effects | --ownership | --escape | --performance | --arc [--no-opt]] [source.toro]\n"
               "       toro check [source.toro]\n"
               "       toro emit-c [source.toro] [-o <output.c>]\n"
               "       toro build [source.toro] [-o <output>]\n"
@@ -137,6 +138,7 @@ void analyze_runtime_plan(toro::IRProgram& ir)
     toro::BorrowInferenceAnalyzer().analyze(ir);
     toro::ArcOptimizer().optimize(ir);
     toro::PerformanceContractAnalyzer().analyze(ir);
+    toro::PerformanceContractReporter().annotate_diagnostics(ir);
 }
 
 void print_diagnostics(const toro::IRProgram& ir)
@@ -182,19 +184,34 @@ void print_ir(
     bool include_arc = false,
     bool optimize_arc = true,
     bool include_escape = false,
-    bool include_ownership = false)
+    bool include_ownership = false,
+    bool include_performance = false)
 {
     auto program = load_program(input);
     toro::SemanticAnalyzer().analyze(program);
     toro::TypeChecker().check(program);
     auto ir = toro::IRLowerer().lower(program);
     analyze_runtime_plan(ir);
-    enforce_diagnostics(ir);
+    if (!include_performance) {
+        enforce_diagnostics(ir);
+    } else {
+        for (const auto& diagnostic : ir.diagnostics) {
+            if (diagnostic.code != "performance-contract") {
+                std::cerr << toro::format_diagnostic(diagnostic);
+                if (diagnostic.severity == toro::DiagnosticSeverity::Error) {
+                    throw ReportedDiagnostics{};
+                }
+            }
+        }
+    }
     if (include_arc && !optimize_arc) {
         toro::ArcMaterializer().materialize(ir);
     }
     std::cout << toro::dump_ir(
         ir, include_effects, include_arc, include_escape, include_ownership);
+    if (include_performance) {
+        std::cout << toro::PerformanceContractReporter().report(ir);
+    }
 }
 
 void emit_c(
@@ -400,6 +417,12 @@ int main(int argc, char* argv[])
     const bool file_ir_escape = argc == 4
         && std::string_view(argv[1]) == "ir"
         && std::string_view(argv[2]) == "--escape";
+    const bool project_ir_performance = argc == 3
+        && std::string_view(argv[1]) == "ir"
+        && std::string_view(argv[2]) == "--performance";
+    const bool file_ir_performance = argc == 4
+        && std::string_view(argv[1]) == "ir"
+        && std::string_view(argv[2]) == "--performance";
     const bool project_ir_arc = argc == 3
         && std::string_view(argv[1]) == "ir"
         && std::string_view(argv[2]) == "--arc";
@@ -430,6 +453,7 @@ int main(int argc, char* argv[])
         && !file_ir_effects && !project_ir_ownership && !file_ir_ownership
         && !project_ir_arc && !file_ir_arc
         && !project_ir_escape && !file_ir_escape
+        && !project_ir_performance && !file_ir_performance
         && !project_ir_arc_unoptimized && !file_ir_arc_unoptimized
         && !project_build_with_output
         && !project_emit_c_with_output && !file_build_with_output
@@ -452,6 +476,12 @@ int main(int argc, char* argv[])
             print_ir(direct_input(argv[3]), true);
         } else if (project_ir_effects) {
             print_ir(project_input(), true);
+        } else if (file_ir_performance) {
+            print_ir(direct_input(argv[3]), false, false, true,
+                false, false, true);
+        } else if (project_ir_performance) {
+            print_ir(project_input(), false, false, true,
+                false, false, true);
         } else if (file_ir_ownership) {
             print_ir(direct_input(argv[3]), false, false, true, false, true);
         } else if (project_ir_ownership) {

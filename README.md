@@ -114,7 +114,11 @@ storage no longer count as general heap allocation, while heap-backed sites,
 collections, allocating runtime helpers, and genuine escapes remain invalid.
 Effect summaries stay descriptive and unchanged; the contract pass consumes
 storage, transfer, borrow, and optimized ARC facts after their canonical
-analyses complete.
+analyses complete. `toro ir --performance` provides deterministic
+contract-specific inspection: satisfied callables show material runtime proofs,
+while violated and unproven callables show concise call paths, final effect
+origins, dynamic targets, and available storage/escape reasons. Explanation is
+separate from verdict calculation and does not change the Phase 10.3 policy.
 
 ## Build
 
@@ -218,6 +222,7 @@ Inspect the deterministic typed IR after semantic analysis and type checking:
 ```bash
 ./build/toro ir examples/backend_hardening.toro
 ./build/toro ir --effects examples/backend_hardening.toro
+./build/toro ir --performance examples/performance.toro
 ./build/toro ir --ownership examples/backend_hardening.toro
 ./build/toro ir --escape examples/backend_hardening.toro
 ./build/toro ir --arc examples/backend_hardening.toro

@@ -720,8 +720,8 @@ Completed:
 - transitive fixed-point refinement across ordinary helpers, recursion,
   virtual/interface target sets, and concrete generic identities using the
   effect pass's existing declaration/dispatch edges;
-- stack-storage proof retained in contract results for later explanation while
-  Phase 10.4's richer inspection and cause-chain UI remains deferred;
+- stack-storage proof retained in contract results for the Phase 10.4
+  inspection and cause-chain layer;
 - ownership-transfer, borrow, and optimized ARC schedules consumed as final
   runtime facts without adding a new no-ARC rule or changing those analyses.
 
@@ -731,7 +731,22 @@ A class instance that would normally use heap + ARC may still be legal if escape
 
 ## 10.4 Diagnostics
 
-Contract failures must explain why:
+Completed:
+
+- deterministic `toro ir --performance` inspection in direct-file and project
+  modes without changing contract verdicts;
+- concise satisfied reports showing stack-allocation discharge, inferred
+  borrows, ownership transfers, and safe dynamic target sets only where useful;
+- distinct violated and unproven reports with canonical shortest call paths,
+  terminal effect/source origins, heap fallback details, and existing escape
+  reasons;
+- multi-hop compiler diagnostics with one deterministic path per root reason;
+- concrete generic identities and virtual/interface target identities retained
+  in explanations;
+- explanation generation kept separate from policy evaluation, leaving Phase
+  11's general memory/performance observability tooling deferred.
+
+Contract failures explain why:
 
 ```text
 performance contract violation

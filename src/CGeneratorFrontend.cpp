@@ -7,6 +7,7 @@
 #include "toro/IRLowerer.hpp"
 #include "toro/OwnershipSummaryAnalyzer.hpp"
 #include "toro/PerformanceContractAnalyzer.hpp"
+#include "toro/PerformanceContractReporter.hpp"
 #include "toro/StorageDecisionAnalyzer.hpp"
 #include "toro/StrongCycleAnalyzer.hpp"
 
@@ -28,6 +29,7 @@ std::string CGenerator::generate(const Program& program)
     BorrowInferenceAnalyzer{}.analyze(ir);
     ArcOptimizer{}.optimize(ir);
     PerformanceContractAnalyzer{}.analyze(ir);
+    PerformanceContractReporter{}.annotate_diagnostics(ir);
     if (has_error_diagnostics(ir.diagnostics)) {
         std::string message;
         for (const auto& diagnostic : ir.diagnostics) {

@@ -80,7 +80,18 @@ prohibited by the current policy. Time queries, environment access, native
 calls, dynamic dispatch with fully known safe targets, process I/O, and
 termination likewise remain allowed unless their reachable behavior includes a
 prohibited or unknown effect. No source ownership or lifetime syntax is
-introduced. Richer contract explanations remain deferred to Phase 10.4.
+introduced.
+
+`toro ir --performance` explains the resulting contract verdict without
+re-evaluating policy. Satisfied reports show material runtime proofs such as an
+exact construction being stack-backed, inferred borrowing or ownership
+transfer, and fully safe virtual/interface target sets. Violated and unproven
+reports remain distinct and show a deterministic shortest call path to the
+prohibited or unknown operation, its source origin, and available storage or
+escape reasons. Concrete generic specialization identities are preserved.
+Normal diagnostics use the same structured explanation but remain concise.
+This is contract-specific inspection; Phase 11's general observability tooling
+remains deferred.
 
 ### Modules and imports
 

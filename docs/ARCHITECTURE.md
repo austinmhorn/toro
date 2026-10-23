@@ -726,8 +726,8 @@ Important unsupported or deferred runtime features include:
   beyond the current operation-bounded parameter, receiver, argument, and
   straight-line local-alias facts, direct-local stack promotion,
   allocation-site escape annotations, and block-local final-use transfer;
-- richer `performance function` cause-chain inspection and policy categories
-  beyond the current final-plan-aware allocation/escape contract.
+- general memory/performance observability and policy categories beyond the
+  current contract-specific final-plan report.
 
 The type system may understand some concepts before the C backend can execute them. The backend should reject unsupported constructs clearly rather than emit incorrect C.
 
@@ -870,7 +870,17 @@ Transitive helper, recursive, virtual/interface, and concrete generic behavior
 is refined through direct edges already published by effect analysis.
 Ownership transfer, inferred borrowing, and the optimized ARC schedule are
 final inputs rather than new policy rules—retain/release are not independently
-forbidden today. Richer multi-hop diagnostic explanations remain Phase 10.4.
+forbidden today.
+
+Phase 10.4 adds a separate `PerformanceContractReporter`. The analyzer remains
+the sole verdict authority. The reporter consumes structured results, local
+effect sites, resolved direct/dynamic call edges, escape/storage reasons, and
+final ARC schedules to produce concise diagnostics and deterministic
+`toro ir --performance` output. It finds canonical shortest simple paths, so
+recursive graphs terminate without expanding cycles indefinitely. Satisfied
+reports expose only material discharge/ownership/dispatch proofs; failed and
+unproven reports retain terminal source origins and concrete generic or dynamic
+target identities. General Phase 11 observability remains separate.
 
 Dynamic dispatch need not automatically be forbidden, but its cost/effect should be visible to analysis and inspection.
 
