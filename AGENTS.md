@@ -155,6 +155,14 @@ and IR operations, never inferred runtime execution frequencies.
 
 Performance/memory decisions should eventually be observable and explainable through Toro tooling.
 
+Memory explanation follows the same `analysis decides; reporting explains`
+boundary. `MemoryExplainer` consumes finalized structured memory/IR facts and
+must not rerun ownership, escape, storage, transfer, borrow, cycle, dispatch,
+or ARC analysis. Source targets resolve by exact logical origin; ambiguous
+line-only targets produce deterministic column candidates rather than fuzzy
+selection. Explanation must remain read-only and leave generated code
+unchanged.
+
 ## Architecture guardrails
 
 Current pipeline:

@@ -241,6 +241,12 @@ Request the detailed static memory report:
 ./build/toro inspect --memory examples/backend_hardening.toro
 ```
 
+Explain the memory decision at one exact source location:
+
+```bash
+./build/toro explain-memory examples/class_arc.toro:15:5
+```
+
 `toro inspect` reports stable allocation identities and stack/heap decisions,
 dynamic dispatch targets, optimized ARC before/after behavior, ownership
 transfers and inferred borrows, capture count, and blocking/synchronization
@@ -250,7 +256,12 @@ escape, ARC, transfer, borrow, weak-field, and possible-cycle detail. Its
 numbers are static compiler sites and operations, not runtime execution counts
 or profiling data. Project mode is available as `toro inspect` or
 `toro inspect --memory` from a directory containing `toro.toml`.
-Location-specific memory explanation remains Phase 11.3 work.
+`toro explain-memory <source.toro>:<line>[:<column>]` is the targeted static
+view. If one line contains relevant facts at multiple columns, it lists those
+columns deterministically and asks for a column. Locations without a memory
+fact report that cleanly. The command consumes completed analyses and does not
+change optimization or generated code. In project mode, the target file must
+belong to the loaded project.
 
 `--ownership` shows deterministic parameter behavior, compact transitive
 causes, and managed-return relationships. `--escape` shows deterministic managed-allocation classifications, storage

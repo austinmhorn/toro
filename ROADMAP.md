@@ -829,10 +829,29 @@ remain deferred.
 
 ## 11.3 `toro explain-memory`
 
+Completed:
+
+- deterministic `toro explain-memory <source.toro>:<line>[:<column>]` in
+  direct-file and project modes;
+- a dedicated structured, read-only `MemoryExplainer` consuming the finalized
+  `MemoryReporter` model and typed-IR analysis facts without rerunning analysis;
+- exact source-origin resolution for allocation/storage, escape causes,
+  retained and elided ARC operations, inferred borrows, ownership transfers,
+  strong/weak fields, and possible strong-cycle advisories;
+- concrete generic identities and known virtual/interface target identities;
+- deterministic ambiguity reporting when one line has relevant facts at more
+  than one column, with explicit column disambiguation;
+- deterministic no-result reporting for locations without a memory decision;
+- optimizer-recorded provenance for borrow- and transfer-driven ARC elision
+  and active retain/release preservation, without changing optimization
+  decisions;
+- cross-analysis and generated-C non-mutation coverage.
+
 Explain a specific source location:
 
 ```text
 toro explain-memory src/game.toro:142
+toro explain-memory src/game.toro:142:18
 ```
 
 Possible output:
@@ -854,6 +873,10 @@ ARC:
 ```
 
 The goal is automatic memory management without opaque behavior.
+
+This is static compiler explanation, not runtime profiling or instrumentation.
+Line-only targets are accepted when all matching facts have one exact source
+column; otherwise the command lists candidates and requests a column.
 
 ---
 

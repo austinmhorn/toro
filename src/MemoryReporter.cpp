@@ -37,6 +37,8 @@ MemoryArcOperationReport operation_report(const IRArcOperation& operation)
         operation.value,
         operation.origin,
         operation.reason,
+        operation.elision,
+        operation.retention,
     };
 }
 

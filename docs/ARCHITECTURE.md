@@ -905,18 +905,34 @@ All counts are static sites or operations, never estimated runtime frequencies.
 Stack-promoted construction remains a semantic managed construction while its
 runtime storage and eliminated general heap allocation are reported separately.
 
+Phase 11.3 adds `MemoryExplainer`, a location-specific read-only consumer of the
+structured `MemoryReport` and finalized typed IR. It indexes exact logical
+module/line/column origins for storage decisions, escape causes, ARC operations,
+borrows, transfers, strong/weak fields, and cycle advisories. Minimal ARC
+provenance records whether an existing elision came from an inferred borrow or
+ownership transfer and why an active retain/release remained; it does not alter
+either decision. Known
+virtual/interface targets come from existing effect call edges. The explainer
+does not rerun dispatch, ownership, escape, storage, borrow, transfer, cycle, or
+ARC analysis.
+
+`toro explain-memory <source.toro>:<line>[:<column>]` uses exact source origins.
+A line with facts at multiple columns produces a deterministic candidate list
+rather than choosing one; an exact location without a fact reports no memory
+decision. This is static explanation, not profiling or instrumentation.
+
 The existing specialized `toro ir --effects`, `--ownership`, `--escape`,
 `--arc`, and `--performance` views remain authoritative detailed inspection
 surfaces. `MemoryReporter` consumes their underlying structured facts rather
-than their text. Phase 11.3 location-specific explanation remains separate
-future work.
+than their text. `MemoryExplainer` in turn consumes structured report/IR facts,
+never their formatted text.
 
 Current and planned surfaces include:
 
 ```text
 toro inspect
 toro inspect --memory
-toro explain-memory <file>:<line>
+toro explain-memory <file>:<line>[:<column>]
 ```
 
 Reports may include:

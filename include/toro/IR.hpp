@@ -201,6 +201,23 @@ enum class IRArcOperationKind {
     OwnershipTransfer,
 };
 
+enum class IRArcElisionKind : std::uint8_t {
+    InferredBorrow,
+    OwnershipTransfer,
+};
+
+struct IRArcElision {
+    IRArcElisionKind kind{IRArcElisionKind::InferredBorrow};
+    std::string related_value;
+    IROrigin origin;
+    std::string reason;
+};
+
+struct IRArcRetention {
+    IROrigin origin;
+    std::string reason;
+};
+
 struct IRArcOperation {
     IRArcOperationKind kind{IRArcOperationKind::Retain};
     std::string value;
@@ -208,6 +225,8 @@ struct IRArcOperation {
     std::string reason;
     std::size_t pair_id{0};
     bool elided{false};
+    std::optional<IRArcElision> elision{};
+    std::optional<IRArcRetention> retention{};
 };
 
 struct IRCallableArcSchedule {

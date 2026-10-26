@@ -98,8 +98,11 @@ source semantics or optimization policy. `toro inspect --memory [source.toro]`
 provides the detailed static memory report, including allocation sites,
 stack/heap storage, escape causes, ARC before/after counts, transfers, borrows,
 weak fields, and possible strong cycles. These are static compiler facts, not
-runtime profiling counts. Source-location-specific memory explanations remain
-deferred to Phase 11.3.
+runtime profiling counts. `toro explain-memory
+<source.toro>:<line>[:<column>]` answers a targeted static memory question from
+those finalized facts. It reports deterministic candidate columns when a line
+is ambiguous and a clean no-decision result when the exact location has no
+memory fact. Explanation does not rerun analysis or change optimization.
 
 ### Modules and imports
 

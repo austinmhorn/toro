@@ -445,7 +445,15 @@ void apply_transfer_operations(
                         && arc.reason == "borrowed value stored in owning local";
                 }
                 destination_retain = destination_retain && at_destination;
-                if (source_release || destination_retain) arc.elided = true;
+                if (source_release || destination_retain) {
+                    arc.elided = true;
+                    arc.elision = IRArcElision{
+                        IRArcElisionKind::OwnershipTransfer,
+                        source + " -> " + destination,
+                        operation.origin,
+                        "final-use ownership transfer",
+                    };
+                }
             }
         }
         schedule.optimized_operations.push_back(IRArcOperation{
@@ -466,13 +474,15 @@ void apply_transfer_operations(
 void elide_pair(
     IRCallableArcSchedule& schedule,
     std::size_t pair,
-    std::size_t& elided_pairs)
+    std::size_t& elided_pairs,
+    const IRArcElision& provenance)
 {
     if (pair == 0) return;
     bool changed = false;
     for (auto& operation : schedule.optimized_operations) {
         if (operation.pair_id == pair && !operation.elided) {
             operation.elided = true;
+            operation.elision = provenance;
             changed = true;
         }
     }
@@ -506,7 +516,13 @@ void apply_borrow_operations(
     for (const auto& borrow : operation.borrows) {
         if (borrow.kind == IRBorrowKind::LocalAlias) {
             elide_pair(schedule,
-                local_alias_pair(operation, borrow, schedule), elided_pairs);
+                local_alias_pair(operation, borrow, schedule), elided_pairs,
+                IRArcElision{
+                    IRArcElisionKind::InferredBorrow,
+                    borrow.source + " -> " + borrow.destination,
+                    borrow.origin,
+                    borrow.reason,
+                });
         }
         schedule.optimized_operations.push_back(IRArcOperation{
             IRArcOperationKind::BorrowedTemporary,
@@ -542,6 +558,23 @@ void update_metrics(IRProgram& program)
             } else if (operation.kind == IRArcOperationKind::Release) {
                 ++program.arc_metrics.releases_after;
             }
+        }
+    }
+}
+
+void record_retention_provenance(IRProgram& program)
+{
+    for (auto& schedule : program.arc_schedules) {
+        for (auto& operation : schedule.optimized_operations) {
+            if (operation.elided
+                || (operation.kind != IRArcOperationKind::Retain
+                    && operation.kind != IRArcOperationKind::Release)) {
+                continue;
+            }
+            operation.retention = IRArcRetention{
+                operation.origin,
+                "no proven borrow or ownership-transfer elision",
+            };
         }
     }
 }
@@ -671,7 +704,15 @@ void ArcOptimizer::optimize(IRProgram& program) const
                         break;
                     }
                 }
-                elide_pair(schedule, pair, elided_pairs);
+                elide_pair(schedule, pair, elided_pairs,
+                    IRArcElision{
+                        IRArcElisionKind::InferredBorrow,
+                        summary.parameter_name,
+                        summary.origin,
+                        summary.receiver
+                            ? "inferred operation-bounded receiver borrow"
+                            : "inferred operation-bounded parameter borrow",
+                    });
                 schedule.optimized_operations.push_back(IRArcOperation{
                     IRArcOperationKind::BorrowedTemporary,
                     summary.parameter_name,
@@ -701,6 +742,7 @@ void ArcOptimizer::optimize(IRProgram& program) const
         }
     }
     program.arc_stage = IRArcStage::Optimized;
+    record_retention_provenance(program);
     update_metrics(program);
     program.arc_metrics.elided_pairs = elided_pairs;
     program.arc_metrics.ownership_transfers = transfer_count;

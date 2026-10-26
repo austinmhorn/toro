@@ -8,6 +8,7 @@
 #include "toro/IRLowerer.hpp"
 #include "toro/InspectionReporter.hpp"
 #include "toro/Lexer.hpp"
+#include "toro/MemoryExplainer.hpp"
 #include "toro/MemoryReporter.hpp"
 #include "toro/ModuleLoader.hpp"
 #include "toro/NativeCompiler.hpp"
@@ -25,6 +26,7 @@
 #include "toro/TestRunner.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -49,6 +51,7 @@ void print_usage(std::ostream& output)
               "       toro ast <source.toro>\n"
               "       toro ir [--effects | --ownership | --escape | --performance | --arc [--no-opt]] [source.toro]\n"
               "       toro inspect [--memory] [source.toro]\n"
+              "       toro explain-memory <source.toro>:<line>[:<column>]\n"
               "       toro check [source.toro]\n"
               "       toro emit-c [source.toro] [-o <output.c>]\n"
               "       toro build [source.toro] [-o <output>]\n"
@@ -71,6 +74,58 @@ struct CompilationInput {
     std::optional<std::string> project_name;
     std::vector<std::string> c_libraries;
 };
+
+struct MemoryTarget {
+    std::filesystem::path path;
+    std::size_t line{0};
+    std::optional<std::size_t> column;
+};
+
+std::size_t parse_source_coordinate(std::string_view text)
+{
+    std::size_t value = 0;
+    const auto [end, error] = std::from_chars(
+        text.data(), text.data() + text.size(), value);
+    if (error != std::errc{} || end != text.data() + text.size()
+        || value == 0) {
+        throw std::invalid_argument(
+            "usage: toro explain-memory <source.toro>:<line>[:<column>]");
+    }
+    return value;
+}
+
+MemoryTarget parse_memory_target(std::string_view text)
+{
+    const auto last_separator = text.rfind(':');
+    if (last_separator == std::string_view::npos) {
+        throw std::invalid_argument(
+            "usage: toro explain-memory <source.toro>:<line>[:<column>]");
+    }
+
+    const auto final_coordinate = parse_source_coordinate(
+        text.substr(last_separator + 1));
+    const auto before_final = text.substr(0, last_separator);
+    if (std::filesystem::path(before_final).extension() == ".toro") {
+        return MemoryTarget{
+            std::filesystem::path(before_final), final_coordinate, std::nullopt};
+    }
+
+    const auto line_separator = before_final.rfind(':');
+    if (line_separator == std::string_view::npos) {
+        throw std::invalid_argument(
+            "usage: toro explain-memory <source.toro>:<line>[:<column>]");
+    }
+    const auto path_text = before_final.substr(0, line_separator);
+    if (std::filesystem::path(path_text).extension() != ".toro") {
+        throw std::invalid_argument(
+            "usage: toro explain-memory <source.toro>:<line>[:<column>]");
+    }
+    return MemoryTarget{
+        std::filesystem::path(path_text),
+        parse_source_coordinate(before_final.substr(line_separator + 1)),
+        final_coordinate,
+    };
+}
 
 CompilationInput direct_input(const std::filesystem::path& path)
 {
@@ -233,6 +288,46 @@ void inspect_source(const CompilationInput& input, bool include_memory = false)
     }
 }
 
+std::filesystem::path normalized_source_path(
+    const std::filesystem::path& path)
+{
+    return std::filesystem::absolute(path).lexically_normal();
+}
+
+std::string module_for_target(
+    const toro::Program& program, const std::filesystem::path& target_path)
+{
+    const auto normalized_target = normalized_source_path(target_path);
+    const auto module = std::ranges::find_if(program.modules,
+        [&](const auto& candidate) {
+            const std::filesystem::path candidate_path(candidate.path);
+            return candidate_path.is_absolute()
+                && candidate_path.lexically_normal() == normalized_target;
+        });
+    if (module == program.modules.end()) {
+        throw std::invalid_argument(
+            "source target is not part of the compiled program: "
+            + target_path.string());
+    }
+    return module->name;
+}
+
+void explain_memory(
+    const CompilationInput& input, const MemoryTarget& target)
+{
+    auto program = load_program(input);
+    const auto module_name = module_for_target(program, target.path);
+    toro::SemanticAnalyzer().analyze(program);
+    toro::TypeChecker().check(program);
+    auto ir = toro::IRLowerer().lower(program);
+    analyze_runtime_plan(ir);
+    enforce_diagnostics(ir);
+    const auto memory = toro::MemoryReporter().inspect(ir);
+    const auto explanation = toro::MemoryExplainer().explain(
+        ir, memory, module_name, target.line, target.column);
+    std::cout << toro::MemoryExplainer().format(explanation);
+}
+
 void emit_c(
     const CompilationInput& input,
     const std::optional<std::filesystem::path>& output_path = std::nullopt)
@@ -381,6 +476,12 @@ int main(int argc, char* argv[])
         return 0;
     }
 
+    if (argc == 2 && std::string_view(argv[1]) == "explain-memory") {
+        std::cerr << "error: explain-memory requires a source target\n";
+        print_usage(std::cerr);
+        return 1;
+    }
+
     if (argc >= 2 && std::string_view(argv[1]) == "fmt") {
         try {
             return format_sources(argc, argv);
@@ -417,6 +518,8 @@ int main(int argc, char* argv[])
     }
 
     const bool standard_source_command = argc == 3 && is_source_command(argv[1]);
+    const bool explain_memory_command = argc == 3
+        && std::string_view(argv[1]) == "explain-memory";
     const bool project_command = argc == 2 && is_project_command(argv[1]);
     const bool project_ir_effects = argc == 3
         && std::string_view(argv[1]) == "ir"
@@ -474,7 +577,8 @@ int main(int argc, char* argv[])
     const bool file_emit_c_with_output = argc == 5
         && std::string_view(argv[1]) == "emit-c"
         && std::string_view(argv[3]) == "-o";
-    if (argc != 2 && !standard_source_command && !project_ir_effects
+    if (argc != 2 && !standard_source_command && !explain_memory_command
+        && !project_ir_effects
         && !file_ir_effects && !project_ir_ownership && !file_ir_ownership
         && !project_ir_arc && !file_ir_arc
         && !project_ir_escape && !file_ir_escape
@@ -490,7 +594,13 @@ int main(int argc, char* argv[])
     }
 
     try {
-        if (file_inspect_memory) {
+        if (explain_memory_command) {
+            const auto target = parse_memory_target(argv[2]);
+            const auto manifest = std::filesystem::current_path() / "toro.toml";
+            explain_memory(std::filesystem::exists(manifest)
+                    ? project_input() : direct_input(target.path),
+                target);
+        } else if (file_inspect_memory) {
             inspect_source(direct_input(argv[3]), true);
         } else if (project_inspect_memory) {
             inspect_source(project_input(), true);

@@ -89,8 +89,10 @@ borrowing/transfers, and blocking/synchronization effects—without changing
 those decisions. `toro inspect --memory` provides the detailed static memory
 report: allocation sites, final storage, ARC before/after optimization,
 borrows, transfers, weak fields, and possible strong cycles. It is intentionally
-not a runtime profiler. Source-location-targeted memory explanations remain
-later Phase 11 work.
+not a runtime profiler. `toro explain-memory file.toro:line[:column]` now turns
+those finalized compiler facts into a targeted explanation. Ambiguous lines are
+reported rather than guessed, and the explainer cannot change analysis or
+optimization decisions.
 
 Future tooling should be able to answer questions such as:
 

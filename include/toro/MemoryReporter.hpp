@@ -47,6 +47,8 @@ struct MemoryArcOperationReport {
     std::string value;
     IROrigin origin;
     std::string reason;
+    std::optional<IRArcElision> elision;
+    std::optional<IRArcRetention> retention;
 };
 
 struct CallableMemoryReport {
