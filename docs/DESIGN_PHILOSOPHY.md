@@ -83,6 +83,12 @@ This is not a promise that a function is algorithmically fast. It is a guarantee
 
 Compiler automation should be inspectable.
 
+The first general surface is `toro inspect`, which summarizes already-proven
+runtime decisions—allocation/storage, dynamic dispatch, optimized ARC,
+borrowing/transfers, and blocking/synchronization effects—without changing
+those decisions. Detailed memory metrics and source-location-specific memory
+explanations remain later Phase 11 work.
+
 Future tooling should be able to answer questions such as:
 
 - Why was this object heap allocated?

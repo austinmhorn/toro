@@ -229,6 +229,20 @@ Inspect the deterministic typed IR after semantic analysis and type checking:
 ./build/toro ir --arc --no-opt examples/backend_hardening.toro
 ```
 
+Inspect the compiler's deterministic runtime plan overview:
+
+```bash
+./build/toro inspect examples/backend_hardening.toro
+```
+
+`toro inspect` reports stable allocation identities and stack/heap decisions,
+dynamic dispatch targets, optimized ARC before/after behavior, ownership
+transfers and inferred borrows, capture count, and blocking/synchronization
+effect sites. It consumes existing analysis results and does not alter generated
+code. Project mode is available as `toro inspect` from a directory containing
+`toro.toml`. Detailed memory reports and location-specific memory explanation
+remain Phase 11.2 and 11.3 work.
+
 `--ownership` shows deterministic parameter behavior, compact transitive
 causes, and managed-return relationships. `--escape` shows deterministic managed-allocation classifications, storage
 decisions, fallback reasons, origins, and non-escaping/escaping/unknown plus

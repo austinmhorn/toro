@@ -744,7 +744,7 @@ Completed:
 - concrete generic identities and virtual/interface target identities retained
   in explanations;
 - explanation generation kept separate from policy evaluation, leaving Phase
-  11's general memory/performance observability tooling deferred.
+  11's general memory/performance observability tooling as a separate layer.
 
 Contract failures explain why:
 
@@ -767,7 +767,22 @@ Automation should be explainable.
 
 ## 11.1 `toro inspect`
 
-Expose compiler-visible runtime properties such as:
+Completed:
+
+- deterministic `toro inspect [source.toro]` in direct-file and project modes;
+- a structured, read-only inspection model built from authoritative typed-IR
+  analysis facts rather than parsed textual dumps;
+- stable allocation identities, source origins, escape classifications,
+  stack/heap decisions, and existing storage reasons;
+- virtual/interface dispatch sites with exact reachable declaration targets;
+- per-callable ARC before/after counts, elided operations, ownership transfers,
+  and inferred borrows;
+- blocking, filesystem, and synchronization effect sites;
+- explicit capture count reporting (currently zero because Toro has no
+  capture-bearing source construct or IR operation);
+- cross-analysis and generated-C non-mutation coverage.
+
+The command exposes compiler-visible runtime properties such as:
 
 - allocations;
 - dynamic dispatch;

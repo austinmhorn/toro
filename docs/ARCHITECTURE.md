@@ -726,8 +726,9 @@ Important unsupported or deferred runtime features include:
   beyond the current operation-bounded parameter, receiver, argument, and
   straight-line local-alias facts, direct-local stack promotion,
   allocation-site escape annotations, and block-local final-use transfer;
-- general memory/performance observability and policy categories beyond the
-  current contract-specific final-plan report.
+- detailed memory reports, location-specific memory explanations, and policy
+  categories beyond the current general runtime-plan overview and
+  contract-specific final-plan report.
 
 The type system may understand some concepts before the C backend can execute them. The backend should reject unsupported constructs clearly rather than emit incorrect C.
 
@@ -886,9 +887,22 @@ Dynamic dispatch need not automatically be forbidden, but its cost/effect should
 
 ## Observability architecture
 
-Future tooling should expose compiler decisions.
+Phase 11.1 adds `InspectionReporter`, a read-only consumer of the completed IR
+analysis pipeline. `toro inspect [source.toro]` works in direct-file and project
+modes and exposes a deterministic general runtime overview without parsing the
+existing textual IR dumps or making optimization decisions. Its structured
+model retains stable allocation/callable identities, logical source origins,
+escape and storage decisions, dynamic target sets, optimized ARC counts,
+ownership transfers, inferred borrows, and blocking/synchronization effect
+sites. Capture count is explicitly zero until Toro gains a capture-bearing
+source construct and corresponding IR operation.
 
-Possible surfaces include:
+The existing specialized `toro ir --effects`, `--ownership`, `--escape`,
+`--arc`, and `--performance` views remain authoritative detailed inspection
+surfaces. Phase 11.2 memory reports and Phase 11.3 location-specific explanation
+remain separate future work.
+
+Current and planned surfaces include:
 
 ```text
 toro inspect
@@ -897,7 +911,7 @@ toro build --memory-report
 toro explain-memory <file>:<line>
 ```
 
-Reports may eventually include:
+Reports may include:
 
 - stack/heap/arena allocations;
 - ARC retains/releases;

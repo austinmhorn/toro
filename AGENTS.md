@@ -147,6 +147,10 @@ Contract explanation is a separate reporting layer. `toro ir --performance`
 and normal performance diagnostics consume the analyzer's structured verdict,
 published call edges, and final runtime facts; they must not independently
 decide whether a contract passes.
+General runtime-plan observability follows the same rule: `toro inspect`
+consumes structured results from the completed analysis pipeline and must not
+re-run or mutate effect, ownership, escape, storage, ARC, or performance
+decisions.
 
 Performance/memory decisions should eventually be observable and explainable through Toro tooling.
 
@@ -174,10 +178,10 @@ lifetime analysis. ARC optimization must preserve an inspectable unoptimized
 schedule and consume existing summary facts conservatively rather than
 recomputing them or introducing source ownership syntax.
 
-Future analyses should extend that pipeline with broader borrow/storage
-reasoning, cross-call ownership handoff where the ABI can represent it, broader
-ARC elision, and general memory/performance observability. These remain IR
-passes or reporting layers rather than backend reasoning.
+Future work should extend that pipeline with broader borrow/storage reasoning,
+cross-call ownership handoff where the ABI can represent it, broader ARC
+elision, and deeper memory/performance reports and explanations. These remain
+IR passes or read-only reporting layers rather than backend reasoning.
 
 Escape annotations remain descriptive; only the explicit storage-decision pass
 may select stack storage. Heap remains the fallback whenever proof is uncertain.

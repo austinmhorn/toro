@@ -6,6 +6,7 @@
 #include "toro/EscapeAnalyzer.hpp"
 #include "toro/Formatter.hpp"
 #include "toro/IRLowerer.hpp"
+#include "toro/InspectionReporter.hpp"
 #include "toro/Lexer.hpp"
 #include "toro/ModuleLoader.hpp"
 #include "toro/NativeCompiler.hpp"
@@ -46,6 +47,7 @@ void print_usage(std::ostream& output)
               "       toro ast-expression <source.toro>\n"
               "       toro ast <source.toro>\n"
               "       toro ir [--effects | --ownership | --escape | --performance | --arc [--no-opt]] [source.toro]\n"
+              "       toro inspect [source.toro]\n"
               "       toro check [source.toro]\n"
               "       toro emit-c [source.toro] [-o <output.c>]\n"
               "       toro build [source.toro] [-o <output>]\n"
@@ -59,7 +61,7 @@ void print_usage(std::ostream& output)
 bool is_project_command(std::string_view command)
 {
     return command == "check" || command == "ir" || command == "emit-c"
-        || command == "build" || command == "run";
+        || command == "build" || command == "run" || command == "inspect";
 }
 
 struct CompilationInput {
@@ -97,7 +99,8 @@ bool is_source_command(std::string_view command)
 {
     return command == "tokens" || command == "ast-expression"
         || command == "ast" || command == "check" || command == "emit-c"
-        || command == "ir" || command == "build" || command == "run";
+        || command == "ir" || command == "build" || command == "run"
+        || command == "inspect";
 }
 
 void print_tokens(std::string_view source)
@@ -212,6 +215,17 @@ void print_ir(
     if (include_performance) {
         std::cout << toro::PerformanceContractReporter().report(ir);
     }
+}
+
+void inspect_source(const CompilationInput& input)
+{
+    auto program = load_program(input);
+    toro::SemanticAnalyzer().analyze(program);
+    toro::TypeChecker().check(program);
+    auto ir = toro::IRLowerer().lower(program);
+    analyze_runtime_plan(ir);
+    enforce_diagnostics(ir);
+    std::cout << toro::InspectionReporter().report(ir);
 }
 
 void emit_c(
@@ -505,6 +519,8 @@ int main(int argc, char* argv[])
                 check_source(input);
             } else if (command == "ir") {
                 print_ir(input);
+            } else if (command == "inspect") {
+                inspect_source(input);
             } else if (command == "emit-c") {
                 emit_c(input);
             } else if (command == "build") {
@@ -522,6 +538,8 @@ int main(int argc, char* argv[])
                 check_source(direct_input(argv[2]));
             } else if (std::string_view(argv[1]) == "ir") {
                 print_ir(direct_input(argv[2]));
+            } else if (std::string_view(argv[1]) == "inspect") {
+                inspect_source(direct_input(argv[2]));
             } else if (std::string_view(argv[1]) == "emit-c") {
                 emit_c(direct_input(argv[2]));
             } else if (std::string_view(argv[1]) == "build") {

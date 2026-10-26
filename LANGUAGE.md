@@ -90,8 +90,13 @@ reports remain distinct and show a deterministic shortest call path to the
 prohibited or unknown operation, its source origin, and available storage or
 escape reasons. Concrete generic specialization identities are preserved.
 Normal diagnostics use the same structured explanation but remain concise.
-This is contract-specific inspection; Phase 11's general observability tooling
-remains deferred.
+This is contract-specific inspection. The general `toro inspect [source.toro]`
+surface now summarizes the compiler's proven runtime plan—allocations and
+storage, dynamic dispatch, optimized ARC behavior, ownership transfers,
+borrows, captures, and blocking/synchronization effects—without changing Toro
+source semantics or optimization policy. Detailed memory reports and
+source-location-specific memory explanations remain deferred to Phase 11.2 and
+11.3.
 
 ### Modules and imports
 
