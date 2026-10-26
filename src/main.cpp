@@ -8,6 +8,7 @@
 #include "toro/IRLowerer.hpp"
 #include "toro/InspectionReporter.hpp"
 #include "toro/Lexer.hpp"
+#include "toro/MemoryReporter.hpp"
 #include "toro/ModuleLoader.hpp"
 #include "toro/NativeCompiler.hpp"
 #include "toro/OwnershipSummaryAnalyzer.hpp"
@@ -47,7 +48,7 @@ void print_usage(std::ostream& output)
               "       toro ast-expression <source.toro>\n"
               "       toro ast <source.toro>\n"
               "       toro ir [--effects | --ownership | --escape | --performance | --arc [--no-opt]] [source.toro]\n"
-              "       toro inspect [source.toro]\n"
+              "       toro inspect [--memory] [source.toro]\n"
               "       toro check [source.toro]\n"
               "       toro emit-c [source.toro] [-o <output.c>]\n"
               "       toro build [source.toro] [-o <output>]\n"
@@ -217,7 +218,7 @@ void print_ir(
     }
 }
 
-void inspect_source(const CompilationInput& input)
+void inspect_source(const CompilationInput& input, bool include_memory = false)
 {
     auto program = load_program(input);
     toro::SemanticAnalyzer().analyze(program);
@@ -225,7 +226,11 @@ void inspect_source(const CompilationInput& input)
     auto ir = toro::IRLowerer().lower(program);
     analyze_runtime_plan(ir);
     enforce_diagnostics(ir);
-    std::cout << toro::InspectionReporter().report(ir);
+    if (include_memory) {
+        std::cout << toro::MemoryReporter().report(ir);
+    } else {
+        std::cout << toro::InspectionReporter().report(ir);
+    }
 }
 
 void emit_c(
@@ -451,6 +456,12 @@ int main(int argc, char* argv[])
         && std::string_view(argv[1]) == "ir"
         && std::string_view(argv[2]) == "--arc"
         && std::string_view(argv[3]) == "--no-opt";
+    const bool project_inspect_memory = argc == 3
+        && std::string_view(argv[1]) == "inspect"
+        && std::string_view(argv[2]) == "--memory";
+    const bool file_inspect_memory = argc == 4
+        && std::string_view(argv[1]) == "inspect"
+        && std::string_view(argv[2]) == "--memory";
     const bool project_build_with_output = argc == 4
         && std::string_view(argv[1]) == "build"
         && std::string_view(argv[2]) == "-o";
@@ -469,6 +480,7 @@ int main(int argc, char* argv[])
         && !project_ir_escape && !file_ir_escape
         && !project_ir_performance && !file_ir_performance
         && !project_ir_arc_unoptimized && !file_ir_arc_unoptimized
+        && !project_inspect_memory && !file_inspect_memory
         && !project_build_with_output
         && !project_emit_c_with_output && !file_build_with_output
         && !file_emit_c_with_output) {
@@ -478,7 +490,11 @@ int main(int argc, char* argv[])
     }
 
     try {
-        if (file_ir_arc_unoptimized) {
+        if (file_inspect_memory) {
+            inspect_source(direct_input(argv[3]), true);
+        } else if (project_inspect_memory) {
+            inspect_source(project_input(), true);
+        } else if (file_ir_arc_unoptimized) {
             print_ir(direct_input(argv[4]), false, true, false);
         } else if (project_ir_arc_unoptimized) {
             print_ir(project_input(), false, true, false);

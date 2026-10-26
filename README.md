@@ -235,13 +235,22 @@ Inspect the compiler's deterministic runtime plan overview:
 ./build/toro inspect examples/backend_hardening.toro
 ```
 
+Request the detailed static memory report:
+
+```bash
+./build/toro inspect --memory examples/backend_hardening.toro
+```
+
 `toro inspect` reports stable allocation identities and stack/heap decisions,
 dynamic dispatch targets, optimized ARC before/after behavior, ownership
 transfers and inferred borrows, capture count, and blocking/synchronization
 effect sites. It consumes existing analysis results and does not alter generated
-code. Project mode is available as `toro inspect` from a directory containing
-`toro.toml`. Detailed memory reports and location-specific memory explanation
-remain Phase 11.2 and 11.3 work.
+code. The memory report adds program and per-callable managed-allocation-site,
+escape, ARC, transfer, borrow, weak-field, and possible-cycle detail. Its
+numbers are static compiler sites and operations, not runtime execution counts
+or profiling data. Project mode is available as `toro inspect` or
+`toro inspect --memory` from a directory containing `toro.toml`.
+Location-specific memory explanation remains Phase 11.3 work.
 
 `--ownership` shows deterministic parameter behavior, compact transitive
 causes, and managed-return relationships. `--escape` shows deterministic managed-allocation classifications, storage

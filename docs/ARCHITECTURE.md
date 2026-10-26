@@ -726,9 +726,9 @@ Important unsupported or deferred runtime features include:
   beyond the current operation-bounded parameter, receiver, argument, and
   straight-line local-alias facts, direct-local stack promotion,
   allocation-site escape annotations, and block-local final-use transfer;
-- detailed memory reports, location-specific memory explanations, and policy
-  categories beyond the current general runtime-plan overview and
-  contract-specific final-plan report.
+- build-integrated memory reports, location-specific memory explanations, and
+  policy categories beyond the current general runtime-plan overview, detailed
+  static memory report, and contract-specific final-plan report.
 
 The type system may understand some concepts before the C backend can execute them. The backend should reject unsupported constructs clearly rather than emit incorrect C.
 
@@ -897,17 +897,25 @@ ownership transfers, inferred borrows, and blocking/synchronization effect
 sites. Capture count is explicitly zero until Toro gains a capture-bearing
 source construct and corresponding IR operation.
 
+Phase 11.2 adds a separate `MemoryReporter` over the same finalized `IRProgram`.
+It produces a structured program-wide report with derived summary totals,
+per-callable records, allocation-site detail, final static ARC operations,
+elided operations, transfers, borrows, weak fields, and advisory strong cycles.
+All counts are static sites or operations, never estimated runtime frequencies.
+Stack-promoted construction remains a semantic managed construction while its
+runtime storage and eliminated general heap allocation are reported separately.
+
 The existing specialized `toro ir --effects`, `--ownership`, `--escape`,
 `--arc`, and `--performance` views remain authoritative detailed inspection
-surfaces. Phase 11.2 memory reports and Phase 11.3 location-specific explanation
-remain separate future work.
+surfaces. `MemoryReporter` consumes their underlying structured facts rather
+than their text. Phase 11.3 location-specific explanation remains separate
+future work.
 
 Current and planned surfaces include:
 
 ```text
 toro inspect
 toro inspect --memory
-toro build --memory-report
 toro explain-memory <file>:<line>
 ```
 

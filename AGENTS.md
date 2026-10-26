@@ -150,7 +150,8 @@ decide whether a contract passes.
 General runtime-plan observability follows the same rule: `toro inspect`
 consumes structured results from the completed analysis pipeline and must not
 re-run or mutate effect, ownership, escape, storage, ARC, or performance
-decisions.
+decisions. Detailed `toro inspect --memory` counts are static allocation sites
+and IR operations, never inferred runtime execution frequencies.
 
 Performance/memory decisions should eventually be observable and explainable through Toro tooling.
 

@@ -792,22 +792,40 @@ The command exposes compiler-visible runtime properties such as:
 
 ## 11.2 Memory reports
 
-Potential interface:
+Completed:
+
+- deterministic `toro inspect --memory [source.toro]` in direct-file and
+  project modes;
+- a dedicated structured `MemoryReporter` consuming finalized IR facts without
+  rerunning or mutating analysis;
+- program-wide and per-callable managed-allocation-site, escape, static ARC,
+  ownership-transfer, and inferred-borrow accounting;
+- stable allocation identities, concrete types, logical source origins,
+  analyzer-provided escape causes, storage decisions, and storage reasons;
+- explicit distinction between semantic managed construction, stack/heap
+  runtime storage, and whether a general heap allocation remains;
+- non-owning weak-field reporting and advisory strong-cycle reporting from the
+  existing strong-cycle analysis;
+- deterministic concrete generic identities and final static ARC-plan details;
+- cross-analysis, generated-C, and native-behavior non-mutation coverage.
+
+Current interface:
 
 ```text
-toro build --memory-report
 toro inspect --memory
 ```
 
-Potential metrics:
+The report's counts are static compiler facts—allocation sites and static ARC
+operations—not runtime execution frequencies. Reported metrics include:
 
 - stack allocations;
 - heap allocations;
-- future arena allocations;
 - ARC retains/releases;
 - elided ARC operations;
 - potential cycles;
-- atomic ARC operations once concurrency exists.
+
+Build-integrated reports, future arena allocations, and atomic ARC accounting
+remain deferred.
 
 ## 11.3 `toro explain-memory`
 

@@ -94,9 +94,12 @@ This is contract-specific inspection. The general `toro inspect [source.toro]`
 surface now summarizes the compiler's proven runtime plan—allocations and
 storage, dynamic dispatch, optimized ARC behavior, ownership transfers,
 borrows, captures, and blocking/synchronization effects—without changing Toro
-source semantics or optimization policy. Detailed memory reports and
-source-location-specific memory explanations remain deferred to Phase 11.2 and
-11.3.
+source semantics or optimization policy. `toro inspect --memory [source.toro]`
+provides the detailed static memory report, including allocation sites,
+stack/heap storage, escape causes, ARC before/after counts, transfers, borrows,
+weak fields, and possible strong cycles. These are static compiler facts, not
+runtime profiling counts. Source-location-specific memory explanations remain
+deferred to Phase 11.3.
 
 ### Modules and imports
 

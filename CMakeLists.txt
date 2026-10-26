@@ -27,6 +27,7 @@ add_library(toro_core
     src/IRLowerer.cpp
     src/InspectionReporter.cpp
     src/Lexer.cpp
+    src/MemoryReporter.cpp
     src/ModuleLoader.cpp
     src/NativeCompiler.cpp
     src/OwnershipSummaryAnalyzer.cpp
@@ -96,6 +97,11 @@ if(BUILD_TESTING)
     target_link_libraries(toro_inspection_reporter_tests PRIVATE toro_core)
     toro_enable_warnings(toro_inspection_reporter_tests)
     add_test(NAME inspection_reporter COMMAND toro_inspection_reporter_tests)
+
+    add_executable(toro_memory_reporter_tests tests/MemoryReporterTests.cpp)
+    target_link_libraries(toro_memory_reporter_tests PRIVATE toro_core)
+    toro_enable_warnings(toro_memory_reporter_tests)
+    add_test(NAME memory_reporter COMMAND toro_memory_reporter_tests)
 
     add_executable(toro_effect_analyzer_tests tests/EffectAnalyzerTests.cpp)
     target_link_libraries(toro_effect_analyzer_tests PRIVATE toro_core)
@@ -226,6 +232,10 @@ if(BUILD_TESTING)
     set_tests_properties(project_cli_inspect PROPERTIES
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/project
         PASS_REGULAR_EXPRESSION "toro-inspect 1")
+    add_test(NAME project_cli_inspect_memory COMMAND toro inspect --memory)
+    set_tests_properties(project_cli_inspect_memory PROPERTIES
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/project
+        PASS_REGULAR_EXPRESSION "toro-memory-report 1")
     add_test(NAME project_cli_emit_c COMMAND toro emit-c)
     set_tests_properties(project_cli_emit_c PROPERTIES
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/examples/project)
