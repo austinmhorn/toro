@@ -952,7 +952,15 @@ The goal is automatic management without opaque behavior.
 
 ## Advanced future runtime work
 
-Later phases may explore:
+Phase 12.1 completed an evidence-only arena feasibility study, documented in
+`docs/ARENA_INVESTIGATION.md`. Current-language frame, parser-graph, and request
+workloads expose plausible common-lifetime heap sites after stack promotion,
+ownership transfer, borrowing, and ARC optimization, but static site counts do
+not establish a material runtime cost. The recommendation is to defer arena
+design until representative application profiling justifies it. No arena
+syntax, IR storage category, runtime allocator, or backend behavior exists.
+
+Later phases may explore, when evidence justifies them:
 
 - arenas/scoped bulk allocation;
 - local vs shared/thread-safe ARC;

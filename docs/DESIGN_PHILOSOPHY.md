@@ -133,6 +133,15 @@ They should be eligible for:
 
 They should not become ARC-managed merely because the runtime supports ARC.
 
+Phase 12.1's arena investigation reinforces the evidence-first boundary. Small
+current-language frame, parser, and request workloads reveal plausible
+common-lifetime heap graphs, but static compiler facts alone do not show that
+allocator or ARC cost is material. Arena design therefore remains deferred
+until a representative application and profiling demonstrate a residual cost
+that existing analysis, scalar replacement, collection improvements, or
+reusable storage cannot address. Toro should not acquire lifetime syntax merely
+because a region allocator is technically possible.
+
 ### References
 
 `class` values have identity and reference semantics.

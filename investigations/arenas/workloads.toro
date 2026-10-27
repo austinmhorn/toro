@@ -1,0 +1,62 @@
+class FrameParticle {
+    public x: int
+
+    public y: int
+}
+
+class SyntaxNode {
+    public kind: string
+
+    public child: SyntaxNode?
+}
+
+class RequestValue {
+    public name: string
+
+    public value: string
+}
+
+class Session {
+    public name: string
+}
+
+function frame_tick() {
+    particles := List<FrameParticle>()
+    first := FrameParticle(x: 1, y: 2)
+    second := FrameParticle(x: 3, y: 4)
+    third := FrameParticle(x: 5, y: 6)
+    particles.add(first)
+    particles.add(second)
+    particles.add(third)
+    print(particles.count)
+}
+
+function parse_unit() {
+    root := SyntaxNode(kind: "root")
+    expression := SyntaxNode(kind: "expression")
+    literal := SyntaxNode(kind: "literal")
+    root.child = expression
+    expression.child = literal
+    print(root.kind)
+}
+
+function handle_request() {
+    values := List<RequestValue>()
+    route := RequestValue(name: "route", value: "/items")
+    request_id := RequestValue(name: "request-id", value: "42")
+    values.add(route)
+    values.add(request_id)
+    print(values.count)
+}
+
+function make_session() -> Session {
+    return Session(name: "long-lived")
+}
+
+function main() {
+    frame_tick()
+    parse_unit()
+    handle_request()
+    session := make_session()
+    print(session.name)
+}

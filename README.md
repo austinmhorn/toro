@@ -6,6 +6,12 @@ Toro is a statically typed, native programming language focused on readable synt
 
 Toro is currently under active development.
 
+Contributor design investigations live under `docs/`. The Phase 12.1 arena
+feasibility study is recorded in `docs/ARENA_INVESTIGATION.md`; it recommends
+deferring arena design until representative application profiling demonstrates
+a material residual bounded-lifetime allocation cost. Toro currently has no
+arena syntax or runtime support.
+
 The first compiler implementation is written in C++23.
 It currently loads and tokenizes `.toro` source files and can parse expressions,
 variable declarations, assignments, calls, functions, returns, blocks, conditional

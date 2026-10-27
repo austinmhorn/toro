@@ -132,6 +132,11 @@ Long term:
   consume that IR decision and must not independently infer storage.
 - Avoid source-level ownership syntax unless real programs prove it necessary.
 - Do not prematurely implement arenas, atomic ARC, ownership annotations, or other advanced memory features before the roadmap reaches them.
+- Phase 12.1 is an evidence-only arena feasibility investigation with a `Defer`
+  recommendation. `docs/ARENA_INVESTIGATION.md` records the reopening criteria.
+  Do not add arena syntax, lifetime annotations, IR operations, runtime support,
+  or lowering until representative Toro application profiling satisfies those
+  criteria and a later canonical design milestone is approved.
 
 `performance function` is the canonical compiler-enforced execution contract,
 not merely an optimization hint. Its syntax and typed IR marker are active.

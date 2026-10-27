@@ -884,17 +884,30 @@ column; otherwise the command lists candidates and requests a column.
 
 Only implement these after real Toro applications and profiling justify them.
 
-## 12.1 Arenas / scoped bulk allocation
+## 12.1 Arena feasibility and workload investigation
 
-Explore explicit arena/scoped allocation for workloads such as:
+Completed as an investigation/specification milestone only:
 
-- games/simulation frames;
-- parsers;
-- request processing;
-- compilers;
-- media pipelines.
+- documented the current optimized memory baseline rather than assuming all
+  class constructions retain general heap/ARC costs;
+- added a small current-language investigation corpus covering frame/tick
+  transients, a parser-style object graph, request-scoped values, and a
+  deliberately open-ended returned object;
+- used existing static inspection to identify collection-storage and
+  strong-field heap sites that plausibly share a bulk lifetime;
+- compared arenas with stronger lifetime/escape analysis, scalar replacement,
+  collection improvements, reusable buffers, pooling, inference, and no change;
+- recorded required lifetime, identity, destruction, strong/weak reference,
+  collection, generic, FFI, performance-contract, and concurrency constraints;
+- compared conceptual runtime strategies without selecting or implementing one;
+- concluded **Defer** because static site evidence does not establish material
+  allocator or ARC cost in a representative application.
 
-Exact syntax should be designed from real use cases, not prematurely.
+The canonical evidence artifact is `docs/ARENA_INVESTIGATION.md`. This
+milestone does not authorize arena syntax, lifetime annotations, IR operations,
+runtime APIs, lowering, or allocator implementation. Reopen arena design only
+when a representative Toro application and profiling show material residual
+bounded-lifetime allocation cost after the existing optimization pipeline.
 
 ## 12.2 Concurrency model
 
