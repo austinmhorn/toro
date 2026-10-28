@@ -136,21 +136,27 @@ They should not become ARC-managed merely because the runtime supports ARC.
 Phase 12.1's arena investigation reinforces the evidence-first boundary. Small
 current-language frame, parser, and request workloads reveal plausible
 common-lifetime heap graphs, but static compiler facts alone do not show that
-allocator or ARC cost is material. Arena design therefore remains deferred
-until a representative application and profiling demonstrate a residual cost
-that existing analysis, scalar replacement, collection improvements, or
-reusable storage cannot address. Toro should not acquire lifetime syntax merely
-because a region allocator is technically possible.
+allocator or ARC cost is material. Its original recommendation therefore
+deferred design until a representative application and profiling demonstrated
+a residual cost. Application Milestone A2 now meets that runtime-cost gate for
+one simulation path and reopens design investigation, while still requiring
+comparison with existing analysis, scalar replacement, collection
+improvements, and reusable storage. Toro should not acquire lifetime syntax
+merely because a region allocator is technically possible.
 
 Application Milestone A1 adds the first real simulation evidence. Its
 collection-backed tick-local effects remain heap allocated even though their
 logical lifetime ends every tick, while ownership transfer already removes
 part of the ARC traffic. That is a useful candidate pattern, not runtime cost
-proof. The same application exposes independently updatable actor/effect work,
-but without scaling or contention evidence it also leaves concurrency design
-deferred. This is the intended evidence-first progression: build applications,
-observe real constraints, profile separately, and only then authorize new
-memory or execution semantics.
+proof by itself. Application Milestone A2 then measured that path externally:
+effect allocation and final lifecycle were material native CPU categories while
+peak memory stayed bounded. That evidence reopens arena design investigation,
+but not implementation; alternatives such as collection reuse, value
+representation, scalar replacement, and collection-aware storage still require
+comparison. The same profile did not demonstrate a concurrency benefit, so
+execution-model design remains deferred. This is the intended evidence-first
+progression: build applications, observe real constraints, profile separately,
+and only then authorize narrowly scoped design work.
 
 ### References
 

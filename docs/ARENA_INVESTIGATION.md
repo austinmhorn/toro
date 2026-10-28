@@ -371,3 +371,20 @@ before implementing runtime storage.
 but static site evidence alone does not demonstrate a material runtime problem.
 Gather application and profiling evidence before specifying or implementing an
 arena feature.
+
+## 17. Application Milestone A2 update
+
+The external profiling study in
+`applications/simulation/PROFILE_REPORT.md` satisfies the runtime-cost part of
+the reopening gate for one representative workload. Its bounded tick-local
+`FrameEffect` path accounts for 78.5% of generated baseline allocator calls;
+effect allocation and final lifecycle together account for approximately 36.9%
+of samples in an allocation-amplified native profile. Existing transfer,
+borrowing, and ARC-elision decisions do not remove that heap lifecycle.
+
+The updated recommendation is **Reopen** for a separately approved design and
+alternatives investigation. This does not select an arena model and does not
+authorize syntax, lifetime annotations, IR operations, runtime allocation, or
+backend lowering. Collection reuse/reservation, value representation, scalar
+replacement, and collection-aware storage must be evaluated alongside any
+region design. Phase 12.2 concurrency remains deferred.

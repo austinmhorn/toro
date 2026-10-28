@@ -956,9 +956,12 @@ Phase 12.1 completed an evidence-only arena feasibility study, documented in
 `docs/ARENA_INVESTIGATION.md`. Current-language frame, parser-graph, and request
 workloads expose plausible common-lifetime heap sites after stack promotion,
 ownership transfer, borrowing, and ARC optimization, but static site counts do
-not establish a material runtime cost. The recommendation is to defer arena
-design until representative application profiling justifies it. No arena
-syntax, IR storage category, runtime allocator, or backend behavior exists.
+not establish a material runtime cost. Application Milestone A2 subsequently
+profiled the representative simulation and found material allocation and final
+lifecycle cost in its bounded tick-local `FrameEffect` path. The recommendation
+is now to reopen a separately approved arena design/alternatives investigation.
+No arena syntax, IR storage category, runtime allocator, or backend behavior
+exists, and A2 does not authorize adding one.
 
 Later phases may explore, when evidence justifies them:
 

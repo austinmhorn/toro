@@ -1,0 +1,5 @@
+import simulation.profile
+
+function main() {
+    run_profile(8000, 128, 24)
+}

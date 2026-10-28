@@ -1,0 +1,14 @@
+import simulation.world
+
+public function run_profile(ticks: int, actors: int, effects_per_tick: int) {
+    result := run_simulation("profile", ticks, actors, effects_per_tick)
+    handle result {
+        ok(stats) {
+            print(stats.checksum)
+        }
+
+        error(problem) {
+            print(problem)
+        }
+    }
+}

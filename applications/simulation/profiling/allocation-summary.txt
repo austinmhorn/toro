@@ -1,0 +1,36 @@
+Baseline workload: 2,000 ticks, 128 actors, 24 effects per tick
+
+Generated application allocator invocations, counted from deterministic loop
+execution and verified against malloc_history stack identities:
+
+  96,000  FrameEffect object + weak-control allocations (48,000 * 2)
+  14,000  event List backing reallocations (7 per tick)
+   8,000  FrameEffect List backing reallocations (4 per tick)
+   2,000  event List objects (1 per tick)
+   2,000  FrameEffect List objects (1 per tick)
+     268  persistent actors, controls, collections, Array and Map storage
+  -------
+ 122,268  generated application allocator invocations
+
+FrameEffect object/control allocation accounts for 78.5% of these invocations.
+All tick-local collection objects, backing growth and FrameEffect allocations
+together account for 99.8%. This count excludes allocator activity internal to
+the C library/process startup. It comprises 100,262 `malloc`/`calloc` calls and
+22,006 `realloc` growth calls; a `realloc` invocation may extend storage in
+place rather than create a distinct new block.
+
+Live snapshot of the amplified CPU workload (vmmap/heap):
+
+  physical footprint             2,081 KiB
+  live malloc-zone allocation       94 KiB
+  live malloc-zone allocation count 1,391
+  heap non-object nodes             1,210 / 94 KiB
+
+Exit leak check of the baseline workload:
+
+  186 nodes malloced for 15 KiB at inspection
+  0 leaks / 0 leaked bytes
+
+malloc_history was used as a live stack-identity check. It confirmed separate
+FrameEffect object and control-block malloc sites and per-list realloc sites,
+but attachment overhead made it unsuitable as a whole-run dynamic counter.

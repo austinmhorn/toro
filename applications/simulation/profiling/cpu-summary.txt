@@ -1,0 +1,22 @@
+External sampler: /usr/bin/sample, 1 ms interval for 1 second
+Workload: 50,000 ticks, 512 actors, 96 effects per tick
+Samples in simulation: 682
+
+Inclusive native sample groups:
+
+159  23.3%  FrameEffect list release / object release / finalization / free
+ 93  13.6%  FrameEffect object and weak-control allocation sites
+ 78  11.4%  virtual actor update path, including integrate_axis
+ 73  10.7%  event List add/growth, including realloc
+ 46   6.7%  TickEvent handle/apply_event
+ 44   6.5%  Array get
+ 36   5.3%  event List get
+ 29   4.3%  actor List get
+ 24   3.5%  Array set
+  9   1.3%  FrameEffect List add/growth, including realloc
+  8   1.2%  checksum mixing
+
+Percentages are sample shares, not exact elapsed-time measurements. Groups are
+identified from symbolized native stacks. The two FrameEffect allocation sites
+are the object and its weak control block. This compact summary replaces the
+temporary 30 KiB raw sample report.

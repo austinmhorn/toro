@@ -7,18 +7,22 @@ Toro is a statically typed, native programming language focused on readable synt
 Toro is currently under active development.
 
 Contributor design investigations live under `docs/`. The Phase 12.1 arena
-feasibility study is recorded in `docs/ARENA_INVESTIGATION.md`; it recommends
-deferring arena design until representative application profiling demonstrates
-a material residual bounded-lifetime allocation cost. Toro currently has no
-arena syntax or runtime support.
+feasibility study is recorded in `docs/ARENA_INVESTIGATION.md`. Its original
+defer gate required representative runtime evidence; Application Milestone A2
+has now met the cost-attribution criterion and reopens a design investigation.
+Toro still has no arena syntax or runtime support, and no implementation has
+been authorized.
 
 The first representative application lives in `applications/simulation/`.
 It is a deterministic multi-module simulation with persistent actors,
 tick-local events/effects, virtual dispatch, collections, `Result`, weak
 references, lifecycle behavior, and performance-contracted numeric helpers.
 Its evidence report records current memory and ergonomics findings. The
-application strengthens the case for profiling collection-backed frame-local
-allocations, but it does not yet justify arenas or a concurrency model.
+follow-up external profiling study is recorded in
+`applications/simulation/PROFILE_REPORT.md`. It found material bounded
+tick-local allocation/lifecycle cost and reopens arena *design investigation*
+without authorizing an arena implementation. It found no evidence sufficient
+to reopen concurrency design.
 
 The first compiler implementation is written in C++23.
 It currently loads and tokenizes `.toro` source files and can parse expressions,

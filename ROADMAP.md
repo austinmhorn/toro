@@ -963,10 +963,28 @@ Completed as an application and evidence milestone, not a compiler feature:
 - identified potentially data-parallel actor/effect loops but no demonstrated
   concurrency requirement or scaling benefit.
 
-The resulting recommendations remain **Defer** for arena implementation and
-**Defer** for Phase 12.2 concurrency design. A separately authorized external
-profiling study or another representative application is required before those
-gates are reconsidered.
+The A1 recommendations were **Defer** for arena implementation and **Defer**
+for Phase 12.2 concurrency design pending runtime evidence.
+
+## Application Milestone A2 — external simulation profiling
+
+Completed as an evidence-gathering milestone:
+
+- profiled native Toro-built simulation executables externally with `time`,
+  `sample`, `malloc_history`, `vmmap`, `heap`, and `leaks`;
+- measured deterministic tick, actor, and effect scaling variants;
+- found flat peak memory across tick scaling and zero reported leaks;
+- counted 122,268 generated allocator invocations in the baseline, including
+  96,000 for 48,000 `FrameEffect` object/control pairs;
+- observed 13.6% of amplified CPU samples in effect allocation and 23.3% in
+  effect release/finalization/free, with event-list growth a secondary 10.7%;
+- found no measured parallel speedup or sufficiently dominant parallel region.
+
+The resulting arena recommendation is **Reopen** for a separately approved
+design/alternatives investigation only. No arena syntax, IR, runtime, or
+lowering is authorized. Phase 12.2 remains **Defer**; concurrency, atomic ARC,
+and local/shared ARC specialization remain unauthorized. See
+`applications/simulation/PROFILE_REPORT.md`.
 
 Before 1.0, build representative real applications in target domains.
 

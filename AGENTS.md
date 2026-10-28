@@ -132,17 +132,19 @@ Long term:
   consume that IR decision and must not independently infer storage.
 - Avoid source-level ownership syntax unless real programs prove it necessary.
 - Do not prematurely implement arenas, atomic ARC, ownership annotations, or other advanced memory features before the roadmap reaches them.
-- Phase 12.1 is an evidence-only arena feasibility investigation with a `Defer`
-  recommendation. `docs/ARENA_INVESTIGATION.md` records the reopening criteria.
-  Do not add arena syntax, lifetime annotations, IR operations, runtime support,
-  or lowering until representative Toro application profiling satisfies those
-  criteria and a later canonical design milestone is approved.
-- Application Milestone A1 provides a real simulation workload and static
-  evidence, but no runtime cost attribution or concurrency scaling evidence.
-  Its canonical report is `applications/simulation/REPORT.md`; its arena and
-  Phase 12.2 recommendations are both `Defer`. Do not treat candidate loops or
-  frame-local heap sites alone as authorization for arenas, concurrency, atomic
-  ARC, or local/shared ARC specialization.
+- Phase 12.1 was an evidence-only arena feasibility investigation with an
+  initial `Defer` recommendation. Application Milestone A2 subsequently found
+  material allocator/lifecycle cost in the bounded tick-local `FrameEffect`
+  path and changed the arena recommendation to `Reopen`. This authorizes a
+  later design investigation only. Do not add arena syntax, lifetime
+  annotations, IR operations, runtime support, or lowering until a separate
+  canonical design milestone is approved.
+- Application Milestone A1 provides the representative simulation and static
+  evidence. A2 adds external timing, sampling, allocation, memory, and leak
+  evidence in `applications/simulation/PROFILE_REPORT.md`. Its arena
+  recommendation is `Reopen`; its Phase 12.2 recommendation remains `Defer`.
+  Do not treat reopening arena investigation as authorization for arenas,
+  concurrency, atomic ARC, or local/shared ARC specialization.
 
 `performance function` is the canonical compiler-enforced execution contract,
 not merely an optimization hint. Its syntax and typed IR marker are active.

@@ -248,9 +248,9 @@ simulation arithmetic.
 Repeated generated C and inspection output are byte-identical. The generated
 C compiles as strict C11 with `-pedantic-errors`.
 
-Meaningful cost attribution is not currently available from Toro tooling.
-External allocation and CPU profiling would be required before drawing runtime
-optimization conclusions.
+Meaningful cost attribution was not available from Toro tooling during A1.
+External allocation and CPU profiling was therefore required before drawing
+runtime optimization conclusions; A2 later performed that study.
 
 ## 15. Potential concurrency opportunities
 
@@ -325,9 +325,26 @@ concurrency is necessary or beneficial. It supplies no scheduler, contention,
 latency, or scaling evidence and therefore does not justify concurrency syntax,
 atomic ARC, or local/shared ARC specialization.
 
-The smallest legitimate next activity is a separately authorized external
-profiling study of this application. It should measure native allocation counts
-and bytes, CPU samples, peak memory, and scaling at several source-configured
-workload sizes without changing Toro semantics. A second representative
-application, especially a parser/compiler-style tool, would then test whether
-the observed collection and bounded-lifetime patterns generalize.
+The smallest legitimate next activity identified by A1 was a separately
+authorized external profiling study of this application. A2 completed that
+study without changing Toro semantics. A second representative application,
+especially a parser/compiler-style tool, would still test whether the observed
+collection and bounded-lifetime patterns generalize.
+
+## 18. A2 profiling supplement
+
+Application Milestone A2 completed the external study proposed above. Its
+canonical evidence is in `PROFILE_REPORT.md`, with compact raw summaries under
+`profiling/`.
+
+The baseline executes 48,000 tick-local `FrameEffect` constructions and 96,000
+corresponding object/control-block allocator calls. In an allocation-amplified
+native sample, effect allocation sites accounted for 13.6% of samples and
+effect release/finalization/free for 23.3%. Peak memory remained flat as tick
+count increased, and `leaks` reported zero leaks. Event-list growth was a
+secondary visible cost at 10.7% of samples.
+
+This runtime evidence changes the arena gate to **Reopen** for a future design
+and alternatives investigation. It does not authorize implementation. Phase
+12.2 remains **Defer** because no parallel speedup or material parallel
+bottleneck was demonstrated.
