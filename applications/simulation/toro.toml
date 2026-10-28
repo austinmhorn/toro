@@ -1,0 +1,6 @@
+[project]
+name = "toro-simulation"
+
+[source]
+root = "src"
+entry = "main.toro"

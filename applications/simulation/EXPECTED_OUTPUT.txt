@@ -1,0 +1,38 @@
+lifecycle actor destroyed
+weak reference cleared
+run
+small
+ticks
+12
+actors remaining
+8
+events processed
+120
+effects spawned
+36
+effects expired
+36
+team zero score
+31284
+team one score
+35384
+checksum
+9708436005
+run
+stress
+ticks
+2000
+actors remaining
+128
+events processed
+260000
+effects spawned
+48000
+effects expired
+48000
+team zero score
+192377299
+team one score
+192509251
+checksum
+254399

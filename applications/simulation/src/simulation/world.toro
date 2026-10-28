@@ -1,0 +1,114 @@
+import simulation.config
+import simulation.entities
+import simulation.events
+import simulation.math
+
+public struct SimulationStats {
+    label: string
+
+    ticks: int
+
+    actors_remaining: int
+
+    events_processed: int
+
+    effects_spawned: int
+
+    effects_expired: int
+
+    team_zero_score: int
+
+    team_one_score: int
+
+    checksum: int
+}
+
+function create_actors(count: int) -> List<Actor> {
+    actors := List<Actor>()
+    leader := Actor(id: 0, team: 0, position: Vec2(x: 3, y: 5), velocity: Vec2(x: 1, y: 2))
+    actors.add(leader)
+    index := 1
+    team := 1
+    while index < count {
+        scout := Scout(id: index, team: team, position: Vec2(x: index + 2, y: index + 4), velocity: Vec2(x: 1, y: -1), leader: leader, boost: 1)
+        actors.add(scout)
+        if team == 0 {
+            team = 1
+        } else {
+            team = 0
+        }
+        index = index + 1
+    }
+    return actors
+}
+
+function simulate(config: SimulationConfig) -> SimulationStats {
+    actors := create_actors(config.actor_count)
+    scores := Array<int>(0, 0)
+    counters := Map<string, int>()
+    counters["events"] = 0
+    counters["spawned"] = 0
+    counters["expired"] = 0
+    checksum := 7
+    tick := 0
+    while tick < config.ticks {
+        events := List<TickEvent>()
+        for actor in actors {
+            update_value := actor.update(config.world_bound)
+            events.add(TickEvent::actor_moved(update_value))
+            scores[actor.team] = scores[actor.team] + update_value
+        }
+        effects := List<FrameEffect>()
+        effect_index := 0
+        while effect_index < config.effects_per_tick {
+            effect := FrameEffect(position: Vec2(x: tick + effect_index, y: effect_index + 1), ttl: 1)
+            effects.add(effect)
+            effect_index = effect_index + 1
+        }
+        events.add(TickEvent::effects_spawned(effects.count))
+        expired := 0
+        for effect in effects {
+            checksum = mix_checksum(checksum, effect.update())
+            if effect.is_expired() {
+                expired = expired + 1
+            }
+        }
+        events.add(TickEvent::effects_expired(expired))
+        totals := EventTotals()
+        for event in events {
+            totals = apply_event(event, totals)
+        }
+        counters["events"] = counters["events"] + totals.processed
+        counters["spawned"] = counters["spawned"] + totals.spawned
+        counters["expired"] = counters["expired"] + totals.expired
+        checksum = mix_checksum(checksum, totals.moved_checksum)
+        tick = tick + 1
+    }
+    return SimulationStats(label: config.label, ticks: config.ticks, actors_remaining: actors.count, events_processed: counters["events"], effects_spawned: counters["spawned"], effects_expired: counters["expired"], team_zero_score: scores[0], team_one_score: scores[1], checksum: checksum)
+}
+
+public function run_simulation(label: string, ticks: int, actors: int, effects_per_tick: int) -> Result<SimulationStats, string> {
+    config := validate_config(label, ticks, actors, effects_per_tick, 97)?
+    return ok(simulate(config))
+}
+
+public function print_summary(stats: SimulationStats) {
+    print("run")
+    print(stats.label)
+    print("ticks")
+    print(stats.ticks)
+    print("actors remaining")
+    print(stats.actors_remaining)
+    print("events processed")
+    print(stats.events_processed)
+    print("effects spawned")
+    print(stats.effects_spawned)
+    print("effects expired")
+    print(stats.effects_expired)
+    print("team zero score")
+    print(stats.team_zero_score)
+    print("team one score")
+    print(stats.team_one_score)
+    print("checksum")
+    print(stats.checksum)
+}

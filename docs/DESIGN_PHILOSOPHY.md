@@ -142,6 +142,16 @@ that existing analysis, scalar replacement, collection improvements, or
 reusable storage cannot address. Toro should not acquire lifetime syntax merely
 because a region allocator is technically possible.
 
+Application Milestone A1 adds the first real simulation evidence. Its
+collection-backed tick-local effects remain heap allocated even though their
+logical lifetime ends every tick, while ownership transfer already removes
+part of the ARC traffic. That is a useful candidate pattern, not runtime cost
+proof. The same application exposes independently updatable actor/effect work,
+but without scaling or contention evidence it also leaves concurrency design
+deferred. This is the intended evidence-first progression: build applications,
+observe real constraints, profile separately, and only then authorize new
+memory or execution semantics.
+
 ### References
 
 `class` values have identity and reference semantics.

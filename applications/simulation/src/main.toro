@@ -1,0 +1,23 @@
+import simulation.entities
+import simulation.world
+
+function report(result: Result<SimulationStats, string>) {
+    handle result {
+        ok(stats) {
+            print_summary(stats)
+        }
+
+        error(problem) {
+            print(problem)
+        }
+    }
+}
+
+function main() {
+    observer := make_cleared_observer()
+    if observer.actor == null {
+        print("weak reference cleared")
+    }
+    report(run_simulation("small", 12, 8, 3))
+    report(run_simulation("stress", 2000, 128, 24))
+}

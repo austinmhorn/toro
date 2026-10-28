@@ -12,6 +12,14 @@ deferring arena design until representative application profiling demonstrates
 a material residual bounded-lifetime allocation cost. Toro currently has no
 arena syntax or runtime support.
 
+The first representative application lives in `applications/simulation/`.
+It is a deterministic multi-module simulation with persistent actors,
+tick-local events/effects, virtual dispatch, collections, `Result`, weak
+references, lifecycle behavior, and performance-contracted numeric helpers.
+Its evidence report records current memory and ergonomics findings. The
+application strengthens the case for profiling collection-backed frame-local
+allocations, but it does not yet justify arenas or a concurrency model.
+
 The first compiler implementation is written in C++23.
 It currently loads and tokenizes `.toro` source files and can parse expressions,
 variable declarations, assignments, calls, functions, returns, blocks, conditional

@@ -1,0 +1,36 @@
+public enum TickEvent {
+    actor_moved(int)
+    effects_spawned(int)
+    effects_expired(int)
+}
+
+public struct EventTotals {
+    processed: int
+
+    moved_checksum: int
+
+    spawned: int
+
+    expired: int
+}
+
+public function apply_event(event: TickEvent, totals: EventTotals) -> EventTotals {
+    next := totals
+    handle event {
+        actor_moved(value) {
+            next.processed = next.processed + 1
+            next.moved_checksum = next.moved_checksum + value
+        }
+
+        effects_spawned(count) {
+            next.processed = next.processed + 1
+            next.spawned = next.spawned + count
+        }
+
+        effects_expired(count) {
+            next.processed = next.processed + 1
+            next.expired = next.expired + count
+        }
+    }
+    return next
+}

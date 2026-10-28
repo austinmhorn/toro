@@ -1,0 +1,26 @@
+public struct Vec2 {
+    x: int
+
+    y: int
+}
+
+public performance function integrate_axis(value: int, velocity: int, limit: int) -> int {
+    next := value + velocity
+    if next >= limit {
+        return next - limit
+    }
+    if next < 0 {
+        return next + limit
+    }
+    return next
+}
+
+public performance function mix_checksum(current: int, value: int) -> int {
+    if current > 1000000000 {
+        return value
+    }
+    if current < -1000000000 {
+        return value
+    }
+    return current * 31 + value
+}

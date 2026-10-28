@@ -1,0 +1,72 @@
+import simulation.math
+
+public class Actor {
+    public id: int
+
+    public team: int
+
+    public position: Vec2
+
+    public velocity: Vec2
+
+    public virtual function update(bound: int) -> int {
+        self.position.x = integrate_axis(self.position.x, self.velocity.x, bound)
+        self.position.y = integrate_axis(self.position.y, self.velocity.y, bound)
+        return self.position.x * 17 + self.position.y * 13 + self.id
+    }
+
+    public virtual function kind() -> string {
+        return "actor"
+    }
+}
+
+public class Scout : Actor {
+    public weak leader: Actor?
+
+    public boost: int
+
+    public override function update(bound: int) -> int {
+        self.position.x = integrate_axis(self.position.x, self.velocity.x + self.boost, bound)
+        self.position.y = integrate_axis(self.position.y, self.velocity.y, bound)
+        return self.position.x * 19 + self.position.y * 11 + self.id
+    }
+
+    public override function kind() -> string {
+        return "scout"
+    }
+}
+
+public class FrameEffect {
+    position: Vec2
+
+    ttl: int
+
+    init(position: Vec2, ttl: int) {
+        self.position = position
+        self.ttl = ttl
+    }
+
+    public function update() -> int {
+        self.ttl = self.ttl - 1
+        return self.position.x + self.position.y + self.ttl
+    }
+
+    public function is_expired() -> bool {
+        return self.ttl == 0
+    }
+}
+
+public class LifecycleActor : Actor {
+    destroy() {
+        print("lifecycle actor destroyed")
+    }
+}
+
+public class ActorObserver {
+    public weak actor: Actor?
+}
+
+public function make_cleared_observer() -> ActorObserver {
+    actor := LifecycleActor(id: 999, team: 0, position: Vec2(x: 1, y: 1), velocity: Vec2(x: 0, y: 0))
+    return ActorObserver(actor: actor)
+}

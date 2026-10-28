@@ -1,0 +1,27 @@
+public struct SimulationConfig {
+    label: string
+
+    ticks: int
+
+    actor_count: int
+
+    effects_per_tick: int
+
+    world_bound: int
+}
+
+public function validate_config(label: string, ticks: int, actor_count: int, effects_per_tick: int, world_bound: int) -> Result<SimulationConfig, string> {
+    if ticks <= 0 {
+        return error("ticks must be positive")
+    }
+    if actor_count <= 0 {
+        return error("actor count must be positive")
+    }
+    if effects_per_tick < 0 {
+        return error("effects per tick must not be negative")
+    }
+    if world_bound <= 1 {
+        return error("world bound must be greater than one")
+    }
+    return ok(SimulationConfig(label: label, ticks: ticks, actor_count: actor_count, effects_per_tick: effects_per_tick, world_bound: world_bound))
+}

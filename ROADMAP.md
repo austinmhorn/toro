@@ -945,6 +945,29 @@ Do not make such syntax dominate ordinary Toro.
 
 Toro should not declare success merely because the language can compile itself or run examples.
 
+## Application Milestone A1 — representative simulation workload
+
+Completed as an application and evidence milestone, not a compiler feature:
+
+- added a cohesive six-module deterministic simulation under
+  `applications/simulation/`;
+- exercised persistent actors, tick-local effects/events, collections,
+  inheritance and virtual dispatch, weak references, lifecycle, enums,
+  `Result`, performance contracts, and project/module workflows;
+- provided small verification and larger stress configurations with stable
+  checksums;
+- recorded static memory, ARC, transfer, borrow, escape, weak-reference, cycle,
+  and performance-contract evidence in `applications/simulation/REPORT.md`;
+- found a real frame-local collection-backed heap pattern but no runtime cost
+  evidence sufficient to reopen arena design;
+- identified potentially data-parallel actor/effect loops but no demonstrated
+  concurrency requirement or scaling benefit.
+
+The resulting recommendations remain **Defer** for arena implementation and
+**Defer** for Phase 12.2 concurrency design. A separately authorized external
+profiling study or another representative application is required before those
+gates are reconsidered.
+
 Before 1.0, build representative real applications in target domains.
 
 Suggested validation projects:

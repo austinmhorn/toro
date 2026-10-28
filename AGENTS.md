@@ -137,6 +137,12 @@ Long term:
   Do not add arena syntax, lifetime annotations, IR operations, runtime support,
   or lowering until representative Toro application profiling satisfies those
   criteria and a later canonical design milestone is approved.
+- Application Milestone A1 provides a real simulation workload and static
+  evidence, but no runtime cost attribution or concurrency scaling evidence.
+  Its canonical report is `applications/simulation/REPORT.md`; its arena and
+  Phase 12.2 recommendations are both `Defer`. Do not treat candidate loops or
+  frame-local heap sites alone as authorization for arenas, concurrency, atomic
+  ARC, or local/shared ARC specialization.
 
 `performance function` is the canonical compiler-enforced execution contract,
 not merely an optimization hint. Its syntax and typed IR marker are active.
