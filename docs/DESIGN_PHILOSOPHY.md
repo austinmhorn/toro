@@ -158,6 +158,15 @@ execution-model design remains deferred. This is the intended evidence-first
 progression: build applications, observe real constraints, profile separately,
 and only then authorize narrowly scoped design work.
 
+Phase 12.1B applies that discipline to the reopened gate. Its preferred
+eventual region model is inferred and lexically anchored, preserving ordinary
+source and conservative heap fallback. It nevertheless recommends measuring
+collection reservation and tick-list reuse first: those smaller mechanisms can
+remove backing-store churn without introducing a lifetime model, while a later
+profile can isolate whether per-object allocation/finalization still warrants
+an arena prototype. Neither the collection experiment nor an arena prototype
+is implicitly authorized by the design document.
+
 ### References
 
 `class` values have identity and reference semantics.

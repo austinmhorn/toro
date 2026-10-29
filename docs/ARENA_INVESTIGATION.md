@@ -388,3 +388,24 @@ authorize syntax, lifetime annotations, IR operations, runtime allocation, or
 backend lowering. Collection reuse/reservation, value representation, scalar
 replacement, and collection-aware storage must be evaluated alongside any
 region design. Phase 12.2 concurrency remains deferred.
+
+## 18. Phase 12.1B design outcome
+
+The authorized design and alternatives investigation is complete in
+`docs/ARENA_DESIGN.md`. It specifies a preferred eventual inferred,
+lexically anchored, hybrid-ownership region model, but recommends:
+
+```text
+Prototype alternative first
+```
+
+Reservation plus reuse of the event/effect lists could theoretically remove
+26,000 baseline allocator invocations without new lifetime semantics. It cannot
+remove the 96,000 `FrameEffect` object/control allocations, so the experiment
+is intended to isolate the residual cost rather than assume arenas are
+unnecessary.
+
+No arena implementation is authorized. The next proposed activity is a
+separately authorized collection reservation/reuse experiment using the saved
+A2 workloads and profiling method. An internal arena prototype remains
+conditional on its result and separate approval. Phase 12.2 remains deferred.

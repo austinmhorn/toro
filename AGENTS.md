@@ -135,16 +135,20 @@ Long term:
 - Phase 12.1 was an evidence-only arena feasibility investigation with an
   initial `Defer` recommendation. Application Milestone A2 subsequently found
   material allocator/lifecycle cost in the bounded tick-local `FrameEffect`
-  path and changed the arena recommendation to `Reopen`. This authorizes a
-  later design investigation only. Do not add arena syntax, lifetime
-  annotations, IR operations, runtime support, or lowering until a separate
-  canonical design milestone is approved.
+  path and changed the arena recommendation to `Reopen`. Phase 12.1B records
+  the resulting semantics and alternatives in `docs/ARENA_DESIGN.md`; its
+  recommendation is `Prototype alternative first`. Do not add arena syntax,
+  lifetime annotations, IR operations, runtime support, or lowering. A
+  collection reservation/reuse experiment and any later arena prototype both
+  require separate authorization.
 - Application Milestone A1 provides the representative simulation and static
   evidence. A2 adds external timing, sampling, allocation, memory, and leak
   evidence in `applications/simulation/PROFILE_REPORT.md`. Its arena
   recommendation is `Reopen`; its Phase 12.2 recommendation remains `Defer`.
-  Do not treat reopening arena investigation as authorization for arenas,
-  concurrency, atomic ARC, or local/shared ARC specialization.
+  Do not treat the completed design investigation as authorization for arenas,
+  concurrency, atomic ARC, or local/shared ARC specialization. Phase 12.1B's
+  preferred eventual model is compiler-inferred and lexically anchored, but it
+  is a specification only.
 
 `performance function` is the canonical compiler-enforced execution contract,
 not merely an optimization hint. Its syntax and typed IR marker are active.

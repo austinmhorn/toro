@@ -909,6 +909,40 @@ runtime APIs, lowering, or allocator implementation. Reopen arena design only
 when a representative Toro application and profiling show material residual
 bounded-lifetime allocation cost after the existing optimization pipeline.
 
+## 12.1B Arena design and alternatives specification — completed
+
+Application Milestone A2 reopened the design gate with runtime evidence. Phase
+12.1B specifies the semantic boundary and compares the measured workload with
+collection reservation/reuse, object pooling, stronger stack/lifetime analysis,
+compiler-inferred regions, and explicit/scoped arenas.
+
+Completed conclusions:
+
+- collection reservation plus tick-list reuse could theoretically remove
+  26,000 of 122,268 baseline allocator invocations, but not the dominant 96,000
+  `FrameEffect` object/control allocations or their final lifecycle;
+- the preferred eventual arena direction, if still justified, is a
+  compiler-inferred, lexically anchored, single-threaded region with
+  conservative heap fallback;
+- region-local edges would use region lifetime, region-to-heap edges would keep
+  normal ARC, and heap-to-region edges would be prohibited in an initial model;
+- exactly-once derived-to-base destruction and ordinary heap-field cleanup
+  remain required before bulk release;
+- weak targets, FFI escape, concurrency, and uncertain collection/cross-region
+  aliases remain outside an initial prototype boundary;
+- future IR and reporting would need explicit region identity, provenance,
+  storage decisions, cleanup obligations, and capacity classification;
+- no performance-contract policy changes are made.
+
+Recommendation: **Prototype alternative first.** A separately authorized
+Phase 12.1C should measure `List<T>` reservation, clear, and reuse against the
+saved A2 workload. A narrow internal arena prototype remains conditional on
+the post-alternative effect allocation/finalization path remaining material and
+requires separate authorization. See `docs/ARENA_DESIGN.md`.
+
+Phase 12.1B adds no arena syntax, frontend changes, IR operations, runtime
+allocator, backend lowering, or performance-policy behavior.
+
 ## 12.2 Concurrency model
 
 Define Toro concurrency before optimizing for it.
@@ -980,11 +1014,12 @@ Completed as an evidence-gathering milestone:
   effect release/finalization/free, with event-list growth a secondary 10.7%;
 - found no measured parallel speedup or sufficiently dominant parallel region.
 
-The resulting arena recommendation is **Reopen** for a separately approved
-design/alternatives investigation only. No arena syntax, IR, runtime, or
-lowering is authorized. Phase 12.2 remains **Defer**; concurrency, atomic ARC,
-and local/shared ARC specialization remain unauthorized. See
-`applications/simulation/PROFILE_REPORT.md`.
+The resulting arena recommendation was **Reopen** for the now-completed Phase
+12.1B design/alternatives investigation. Phase 12.1B recommends **Prototype
+alternative first**, pending separate authorization. No arena syntax, IR,
+runtime, or lowering is authorized. Phase 12.2 remains **Defer**; concurrency,
+atomic ARC, and local/shared ARC specialization remain unauthorized. See
+`applications/simulation/PROFILE_REPORT.md` and `docs/ARENA_DESIGN.md`.
 
 Before 1.0, build representative real applications in target domains.
 

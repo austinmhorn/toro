@@ -959,9 +959,13 @@ ownership transfer, borrowing, and ARC optimization, but static site counts do
 not establish a material runtime cost. Application Milestone A2 subsequently
 profiled the representative simulation and found material allocation and final
 lifecycle cost in its bounded tick-local `FrameEffect` path. The recommendation
-is now to reopen a separately approved arena design/alternatives investigation.
-No arena syntax, IR storage category, runtime allocator, or backend behavior
-exists, and A2 does not authorize adding one.
+reopened Phase 12.1B's design/alternatives investigation. That specification is
+now recorded in `docs/ARENA_DESIGN.md` and recommends prototyping collection
+reservation/reuse before an arena. Its preferred eventual model is a
+compiler-inferred, lexically anchored region selected by the storage-decision
+pipeline, with explicit IR provenance and conservative heap fallback. No arena
+syntax, IR storage category, runtime allocator, or backend behavior exists, and
+no implementation is authorized.
 
 Later phases may explore, when evidence justifies them:
 

@@ -9,9 +9,10 @@ Toro is currently under active development.
 Contributor design investigations live under `docs/`. The Phase 12.1 arena
 feasibility study is recorded in `docs/ARENA_INVESTIGATION.md`. Its original
 defer gate required representative runtime evidence; Application Milestone A2
-has now met the cost-attribution criterion and reopens a design investigation.
-Toro still has no arena syntax or runtime support, and no implementation has
-been authorized.
+met the cost-attribution criterion and reopened a design investigation. Phase
+12.1B's design and alternatives specification is in `docs/ARENA_DESIGN.md`.
+It recommends prototyping collection reservation/reuse first. Toro still has
+no arena syntax or runtime support, and no implementation has been authorized.
 
 The first representative application lives in `applications/simulation/`.
 It is a deterministic multi-module simulation with persistent actors,
