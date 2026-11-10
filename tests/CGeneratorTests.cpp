@@ -878,8 +878,10 @@ void test_collection_lowering()
         "    copied := array\n"
         "    copied[0] = 3\n"
         "    list := List<string>(\"Toro\")\n"
+        "    list.reserve(8)\n"
         "    list.add(\"native\")\n"
         "    cloned := list.clone()\n"
+        "    list.clear()\n"
         "    map := Map<string, int>()\n"
         "    map[\"answer\"] = 42\n"
         "    print(map[\"answer\"])\n"
@@ -891,6 +893,12 @@ void test_collection_lowering()
         "Array bounds check");
     expect_contains(output, "struct toro_list_ls", "List specialization");
     expect_contains(output, "toro_list_ls_add", "List growth helper");
+    expect_contains(output, "toro_list_ls_reserve_storage",
+        "List capacity helper");
+    expect_contains(output, "toro_list_ls_reserve(toro_var_list, 8)",
+        "List reserve call");
+    expect_contains(output, "toro_list_ls_clear(toro_var_list)",
+        "List clear call");
     expect_contains(output,
         "(size_t)toro_index >= toro_value->toro_count) { abort(); }",
         "List bounds check");

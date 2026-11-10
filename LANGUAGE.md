@@ -351,14 +351,25 @@ print(values.count)
 ```
 
 `List<T>` is growable and reference-backed. `add` and `append` add one element,
-ordinary assignment shares storage, and `clone()` creates independent storage:
+`reserve(capacity)` ensures room for at least that many elements without
+changing count or contents, and `clear()` removes all elements while retaining
+the backing capacity for reuse. Ordinary assignment shares storage, so aliases
+observe clear; `clone()` creates independent storage:
 
 ```toro
 names := List<string>("Toro")
 names.add("native")
+names.reserve(16)
 shared := names
 independent := names.clone()
+shared.clear()
 ```
+
+`reserve` is a no-op when existing capacity is sufficient and rejects negative
+capacity. It may allocate, but does not promise an exact internal capacity.
+`clear` releases stored managed references normally, including final
+destruction and weak invalidation when the removed ownership was final; it does
+not allocate or free the reusable backing storage merely to clear contents.
 
 `Map<K, V>` is reference-backed. Indexed assignment inserts or updates a key,
 indexed access looks it up, `contains(key)` tests presence, and `clone()` creates

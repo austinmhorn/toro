@@ -7,7 +7,11 @@ application. It exists to exercise the current compiler as an integrated
 product and to collect evidence for future memory, concurrency, collection,
 performance-contract, standard-library, and ergonomics decisions.
 
-It is not a benchmark suite, an arena prototype, or a concurrency design.
+It began as an application workload rather than a benchmark suite or
+concurrency design. Later authorized milestones reused the same saved workload
+for controlled collection-reuse and narrow internal arena experiments; those
+experiments do not make arenas part of the application's public Toro source or
+establish production arena semantics.
 
 ## 2. Architecture
 
@@ -209,10 +213,10 @@ correctness failure, so A1 does not change the compiler for it.
 
 ## 12. Language ergonomics issues
 
-1. **Significant ergonomic issue:** `List<T>` has no removal, pop, clear, or
-   capacity-reservation operation. The simulation cannot naturally model
-   selective entity/projectile removal or reuse per-tick list capacity. It
-   instead drops complete tick-local lists.
+1. **Remaining ergonomic issue:** `List<T>` still has no removal or pop
+   operation, so the simulation cannot naturally model selective
+   entity/projectile removal. Phase 12.1C added `reserve` and `clear`, allowing
+   per-tick capacity reuse without broadening the collection API further.
 2. **Nuisance:** there is no remainder operator in the current arithmetic
    subset, so bounded coordinate/checksum logic uses explicit branches.
 3. **Nuisance:** no string interpolation or multi-value formatted output exists;
@@ -348,3 +352,33 @@ This runtime evidence changes the arena gate to **Reopen** for a future design
 and alternatives investigation. It does not authorize implementation. Phase
 12.2 remains **Defer** because no parallel speedup or material parallel
 bottleneck was demonstrated.
+
+## 19. Phase 12.1C collection-reuse supplement
+
+Phase 12.1C implemented `List.reserve` and `List.clear`, moved the event/effect
+lists outside the tick loop, reserved their configured bounds, and cleared them
+after use. The deterministic output remains identical to
+`EXPECTED_OUTPUT.txt`; effect objects are still freshly allocated and released
+each tick.
+
+The canonical comparison is `COLLECTION_REUSE_REPORT.md`. Generated allocator
+invocations fell from 122,268 to 96,272 and reallocations from 22,006 to 8. The
+96,000 `FrameEffect` object/control allocations remained, while their combined
+allocation/teardown path accounted for approximately 35.5% of the amplified
+sample. The recommendation is **Prototype arena** through a separately proposed
+and authorized narrow milestone. Phase 12.2 remains **Defer**.
+
+## 20. Phase 12.1D arena-prototype supplement
+
+The explicitly authorized narrow prototype is complete in
+`ARENA_PROTOTYPE_REPORT.md`. The simulation-only experimental configuration
+selects the tick-local `FrameEffect`/cleared-List lifetime. Generated object and
+control storage uses a fixed aligned region, while persistent actors and all
+uncertain allocations remain heap-backed.
+
+The output remains byte-identical. The prototype removes all 96,000 measured
+effect object/control allocator calls, reducing total generated allocator
+invocations from 96,272 to 272. The amplified sampled region
+storage/lifecycle path is approximately 11.7%, down from 35.5%; memory remains
+bounded and leak checking reports zero leaks. The recommendation is **Proceed
+to language design**. Phase 12.2 remains **Defer**.

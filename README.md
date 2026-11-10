@@ -11,8 +11,15 @@ feasibility study is recorded in `docs/ARENA_INVESTIGATION.md`. Its original
 defer gate required representative runtime evidence; Application Milestone A2
 met the cost-attribution criterion and reopened a design investigation. Phase
 12.1B's design and alternatives specification is in `docs/ARENA_DESIGN.md`.
-It recommends prototyping collection reservation/reuse first. Toro still has
-no arena syntax or runtime support, and no implementation has been authorized.
+Its alternative-first collection experiment is complete in
+`applications/simulation/COLLECTION_REUSE_REPORT.md`: reservation and reuse
+removed 25,996 allocator calls while the bounded effect lifecycle remained
+material. The separately authorized Phase 12.1D internal prototype is recorded
+in `applications/simulation/ARENA_PROTOTYPE_REPORT.md`. It eliminated the
+96,000 measured `FrameEffect` object/control allocator calls with fixed,
+compiler-bounded region storage and recommends **Proceed to language design**.
+Toro still has no public arena syntax or general-purpose arena feature; the
+prototype is simulation-scoped and experimental.
 
 The first representative application lives in `applications/simulation/`.
 It is a deterministic multi-module simulation with persistent actors,
@@ -589,7 +596,9 @@ completion path. Classes without `init` retain field-based construction.
 Core collections lower to deterministic C specializations and helper functions.
 `Array<T>` owns fixed contiguous storage and copies independently; `List<T>` and
 `Map<string, V>` use shared non-atomic reference-counted backing storage and
-provide `clone()` for independent storage. Array/List indexing is bounds checked,
+provide `clone()` for independent storage. Lists also provide `reserve` and
+`clear` for reusable backing capacity with normal managed-element cleanup.
+Array/List indexing is bounds checked,
 `for ... in` iterates them in index order, and stored class references are
 retained and released with the collection. Map iteration and non-string Map keys
 remain deferred pending canonical hashing and entry-binding semantics. Strings

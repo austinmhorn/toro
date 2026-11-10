@@ -164,8 +164,14 @@ source and conservative heap fallback. It nevertheless recommends measuring
 collection reservation and tick-list reuse first: those smaller mechanisms can
 remove backing-store churn without introducing a lifetime model, while a later
 profile can isolate whether per-object allocation/finalization still warrants
-an arena prototype. Neither the collection experiment nor an arena prototype
-is implicitly authorized by the design document.
+an arena prototype. Phase 12.1C performed that measurement: the collection
+mechanisms removed 25,996 allocator calls, while effect allocation and teardown
+remained approximately 35.5% of samples with all 96,000 object/control
+allocations intact. Phase 12.1D then implemented the separately authorized
+narrow internal prototype. It removed those allocator calls with fixed bounded
+storage while preserving tested lifecycle semantics, so the recommendation is
+to proceed to a later language-design milestone. This is evidence for design,
+not public syntax or permission to generalize the experimental path.
 
 ### References
 

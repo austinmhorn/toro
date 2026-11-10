@@ -52,7 +52,8 @@ public:
             root_,
             root_ / "src",
             root_ / "src/main.toro",
-            {}};
+            {},
+            std::nullopt};
     }
 
 private:

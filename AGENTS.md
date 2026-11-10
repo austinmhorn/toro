@@ -128,8 +128,9 @@ Long term:
 - Ownership/escape/borrow analysis belongs behind the toro IR layer, not as
   ad-hoc logic spread through the C generator. The current `EscapeAnalyzer`
   annotates managed allocation sites, and `StorageDecisionAnalyzer` is the sole
-  authority that promotes proven direct local owners to stack storage. Backends
-  consume that IR decision and must not independently infer storage.
+  authority that promotes proven direct local owners to stack storage and, for
+  the explicitly scoped 12.1D experiment, selects the configured arena region.
+  Backends consume that IR decision and must not independently infer storage.
 - Avoid source-level ownership syntax unless real programs prove it necessary.
 - Do not prematurely implement arenas, atomic ARC, ownership annotations, or other advanced memory features before the roadmap reaches them.
 - Phase 12.1 was an evidence-only arena feasibility investigation with an
@@ -137,18 +138,28 @@ Long term:
   material allocator/lifecycle cost in the bounded tick-local `FrameEffect`
   path and changed the arena recommendation to `Reopen`. Phase 12.1B records
   the resulting semantics and alternatives in `docs/ARENA_DESIGN.md`; its
-  recommendation is `Prototype alternative first`. Do not add arena syntax,
-  lifetime annotations, IR operations, runtime support, or lowering. A
-  collection reservation/reuse experiment and any later arena prototype both
-  require separate authorization.
+  recommendation was `Prototype alternative first`. Phase 12.1C then completed
+  the authorized collection reservation/reuse experiment. It removed 25,996
+  allocator invocations while the bounded effect allocation/teardown path
+  remained approximately 35.5% of samples, so its recommendation is `Prototype
+  arena`. Phase 12.1D is the explicitly authorized narrow internal prototype:
+  it uses simulation-only experimental manifest configuration, typed-IR
+  `Arena` storage/provenance, and fixed C11 region lowering for the proven
+  tick-local `FrameEffect` path. Its evidence is recorded in
+  `applications/simulation/ARENA_PROTOTYPE_REPORT.md`, and its recommendation
+  is `Proceed to language design`. This does not authorize public arena syntax,
+  arbitrary arenas, general region inference, weak/FFI arena references,
+  concurrency, or production use. Do not broaden the prototype without a later
+  canonical design milestone.
 - Application Milestone A1 provides the representative simulation and static
   evidence. A2 adds external timing, sampling, allocation, memory, and leak
   evidence in `applications/simulation/PROFILE_REPORT.md`. Its arena
   recommendation is `Reopen`; its Phase 12.2 recommendation remains `Defer`.
-  Do not treat the completed design investigation as authorization for arenas,
-  concurrency, atomic ARC, or local/shared ARC specialization. Phase 12.1B's
-  preferred eventual model is compiler-inferred and lexically anchored, but it
-  is a specification only.
+  Phase 12.1C's evidence is recorded in
+  `applications/simulation/COLLECTION_REUSE_REPORT.md`; Phase 12.1D's measured
+  prototype evidence is recorded in `ARENA_PROTOTYPE_REPORT.md`. The prototype
+  is not authorization for concurrency, atomic ARC, local/shared ARC
+  specialization, or stable language semantics. Phase 12.2 remains `Defer`.
 
 `performance function` is the canonical compiler-enforced execution contract,
 not merely an optimization hint. Its syntax and typed IR marker are active.

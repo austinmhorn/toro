@@ -153,6 +153,7 @@ MemoryReport MemoryReporter::inspect(const IRProgram& program) const
             allocation.state,
             allocation.storage,
             allocation.storage_reason,
+            allocation.region_identity,
             std::move(causes),
         });
     }
@@ -192,6 +193,8 @@ MemoryReport MemoryReporter::inspect(const IRProgram& program) const
         ++report.summary.managed_allocation_sites;
         if (allocation.storage == IRStorageClass::Stack) {
             ++report.summary.stack_allocation_sites;
+        } else if (allocation.storage == IRStorageClass::Arena) {
+            ++report.summary.arena_allocation_sites;
         } else {
             ++report.summary.heap_allocation_sites;
         }
@@ -213,6 +216,8 @@ MemoryReport MemoryReporter::inspect(const IRProgram& program) const
         ++callable->allocation_sites;
         if (allocation.storage == IRStorageClass::Stack) {
             ++callable->stack_allocation_sites;
+        } else if (allocation.storage == IRStorageClass::Arena) {
+            ++callable->arena_allocation_sites;
         } else {
             ++callable->heap_allocation_sites;
         }
@@ -223,6 +228,11 @@ MemoryReport MemoryReporter::inspect(const IRProgram& program) const
         report.callables, {}, &CallableMemoryReport::callable_identity);
     for (const auto& callable : report.callables) {
         add_counts(report.summary.arc, callable.arc);
+    }
+    for (const auto& region : program.regions) {
+        report.summary.arena_teardown_entries += region.teardown_entries;
+        report.summary.arena_arc_suppressions += region.runtime_arc_suppressions;
+        report.summary.arena_heap_fallbacks += region.heap_fallbacks;
     }
 
     for (const auto& declaration : program.declarations) {
@@ -263,8 +273,17 @@ std::string MemoryReporter::format(const MemoryReport& report) const
     output += "summary\n";
     output += "  managed-allocation-sites total "
         + std::to_string(summary.managed_allocation_sites) + " stack "
-        + std::to_string(summary.stack_allocation_sites) + " heap "
+        + std::to_string(summary.stack_allocation_sites) + " arena "
+        + std::to_string(summary.arena_allocation_sites) + " heap "
         + std::to_string(summary.heap_allocation_sites) + "\n";
+    output += "  arena-runtime allocation-sites "
+        + std::to_string(summary.arena_allocation_sites)
+        + " teardown-entries "
+        + std::to_string(summary.arena_teardown_entries)
+        + " arc-suppressions "
+        + std::to_string(summary.arena_arc_suppressions)
+        + " heap-fallbacks "
+        + std::to_string(summary.arena_heap_fallbacks) + "\n";
     output += "  escape-sites non-escaping "
         + std::to_string(summary.non_escaping_sites) + " escaping "
         + std::to_string(summary.escaping_sites) + " unknown "
@@ -305,6 +324,9 @@ std::string MemoryReporter::format(const MemoryReport& report) const
         if (!allocation.storage_reason.empty()) {
             output += "    storage-reason " + allocation.storage_reason + "\n";
         }
+        if (!allocation.region_identity.empty()) {
+            output += "    region " + allocation.region_identity + "\n";
+        }
         output += "    escape-causes\n";
         if (allocation.escape_causes.empty()) output += "      none\n";
         for (const auto& cause : allocation.escape_causes) {
@@ -323,7 +345,8 @@ std::string MemoryReporter::format(const MemoryReport& report) const
         output += "  callable " + callable.callable_identity + "\n";
         output += "    allocation-sites total "
             + std::to_string(callable.allocation_sites) + " stack "
-            + std::to_string(callable.stack_allocation_sites) + " heap "
+            + std::to_string(callable.stack_allocation_sites) + " arena "
+            + std::to_string(callable.arena_allocation_sites) + " heap "
             + std::to_string(callable.heap_allocation_sites) + "\n";
         output += "    escape-sites non-escaping "
             + std::to_string(callable.non_escaping_sites) + " escaping "

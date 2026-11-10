@@ -58,6 +58,7 @@ IRInspectionReport InspectionReporter::inspect(const IRProgram& program) const
             allocation.state,
             allocation.storage,
             allocation.storage_reason,
+            allocation.region_identity,
         });
     }
 
@@ -184,10 +185,16 @@ IRInspectionReport InspectionReporter::inspect(const IRProgram& program) const
 std::string InspectionReporter::format(const IRInspectionReport& report) const
 {
     std::size_t stack_allocations = 0;
+    std::size_t arena_allocations = 0;
     std::size_t heap_allocations = 0;
     for (const auto& allocation : report.allocations) {
-        allocation.storage == IRStorageClass::Stack
-            ? ++stack_allocations : ++heap_allocations;
+        if (allocation.storage == IRStorageClass::Stack) {
+            ++stack_allocations;
+        } else if (allocation.storage == IRStorageClass::Arena) {
+            ++arena_allocations;
+        } else {
+            ++heap_allocations;
+        }
     }
     std::size_t blocking_effects = 0;
     std::size_t synchronization_effects = 0;
@@ -202,6 +209,7 @@ std::string InspectionReporter::format(const IRInspectionReport& report) const
     std::string output = "toro-inspect 1\nentry " + report.entry_module + "\n";
     output += "summary\n";
     output += "  allocations stack " + std::to_string(stack_allocations)
+        + " arena " + std::to_string(arena_allocations)
         + " heap " + std::to_string(heap_allocations) + "\n";
     output += "  dynamic-dispatch-sites "
         + std::to_string(report.dispatches.size()) + "\n";
@@ -223,6 +231,9 @@ std::string InspectionReporter::format(const IRInspectionReport& report) const
             + std::string(ir_storage_class_name(allocation.storage));
         if (!allocation.reason.empty()) output += " ; " + allocation.reason;
         output += '\n';
+        if (!allocation.region_identity.empty()) {
+            output += "    region " + allocation.region_identity + "\n";
+        }
     }
 
     output += "dynamic-dispatch\n";

@@ -573,6 +573,8 @@ private:
             value->transfer_source = operation.ownership_transfer->source;
         }
         value->stack_storage = operation.storage == IRStorageClass::Stack;
+        value->arena_storage = operation.storage == IRStorageClass::Arena;
+        value->arena_region = operation.region_identity;
         if (operation.result_type) value->resolved_type = operation.result_type->type;
         for (const auto& [name, type] : operation.substitutions) {
             value->resolved_substitutions.emplace_back(name, type.type);
@@ -602,6 +604,9 @@ private:
         auto value = std::make_unique<BlockStmt>(
             operation.origin.location, std::move(statements));
         value->module_name = operation.origin.module_name;
+        value->arena_region = operation.region_identity;
+        value->arena_capacity_bytes = operation.region_capacity_bytes;
+        value->arena_max_objects = operation.region_max_objects;
         return value;
     }
 

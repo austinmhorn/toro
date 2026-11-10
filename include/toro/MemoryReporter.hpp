@@ -21,7 +21,11 @@ struct MemoryArcCounts {
 struct MemorySummary {
     std::size_t managed_allocation_sites{0};
     std::size_t stack_allocation_sites{0};
+    std::size_t arena_allocation_sites{0};
     std::size_t heap_allocation_sites{0};
+    std::size_t arena_teardown_entries{0};
+    std::size_t arena_arc_suppressions{0};
+    std::size_t arena_heap_fallbacks{0};
     std::size_t non_escaping_sites{0};
     std::size_t escaping_sites{0};
     std::size_t unknown_escape_sites{0};
@@ -39,6 +43,7 @@ struct MemoryAllocationReport {
     IREscapeState escape_state{IREscapeState::Unknown};
     IRStorageClass storage{IRStorageClass::Heap};
     std::string storage_reason;
+    std::string region_identity;
     std::vector<IREscapeCause> escape_causes;
 };
 
@@ -55,6 +60,7 @@ struct CallableMemoryReport {
     std::string callable_identity;
     std::size_t allocation_sites{0};
     std::size_t stack_allocation_sites{0};
+    std::size_t arena_allocation_sites{0};
     std::size_t heap_allocation_sites{0};
     std::size_t non_escaping_sites{0};
     std::size_t escaping_sites{0};

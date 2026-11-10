@@ -13,8 +13,8 @@ function main() {
     print(values[0])
     print(copied[0])
     print(sum(values))
-
     names := List<string>("Toro")
+    names.reserve(8)
     shared := names
     shared.add("native")
     print(names.count)
@@ -22,7 +22,11 @@ function main() {
     cloned[0] = "copy"
     print(names[0])
     print(cloned[0])
-
+    shared.clear()
+    print(names.count)
+    print(cloned.count)
+    names.add("reused")
+    print(names[0])
     scores := Map<string, int>()
     scores["Toro"] = 14
     same_scores := scores

@@ -56,6 +56,27 @@ std::string generate_with_storage(std::string_view source, bool enable_stack)
     return toro::CGenerator().generate(ir);
 }
 
+std::string generate_with_arena(
+    std::string_view source, bool enabled, std::size_t max_objects = 16)
+{
+    auto tokens = toro::Lexer(source).tokenize();
+    const auto program = toro::Parser(std::move(tokens)).parse_program();
+    toro::SemanticAnalyzer().analyze(program);
+    toro::TypeChecker().check(program);
+    auto ir = toro::IRLowerer().lower(program);
+    toro::EffectAnalyzer().analyze(ir);
+    toro::OwnershipSummaryAnalyzer().analyze(ir);
+    toro::EscapeAnalyzer().analyze(ir);
+    toro::StorageDecisionAnalyzer().analyze(ir, true,
+        toro::ExperimentalArenaOptions{
+            enabled, "Item", "tick", 4096, max_objects});
+    toro::ArcMaterializer().materialize(ir);
+    toro::OwnershipTransferAnalyzer().analyze(ir);
+    toro::BorrowInferenceAnalyzer().analyze(ir);
+    toro::ArcOptimizer().optimize(ir);
+    return toro::CGenerator().generate(ir);
+}
+
 void expect(bool condition, std::string_view message)
 {
     if (!condition) {
@@ -861,6 +882,11 @@ void test_collection_runtime_behavior()
         "    for value in array { total = total + value }\n"
         "    print(total)\n"
         "    list := List<int>(1, 2)\n"
+        "    list.reserve(8)\n"
+        "    print(list.count)\n"
+        "    list.reserve(1)\n"
+        "    print(list.count)\n"
+        "    print(list[1])\n"
         "    alias := list\n"
         "    append_value(alias)\n"
         "    alias.add(4)\n"
@@ -871,6 +897,14 @@ void test_collection_runtime_behavior()
         "    independent[0] = 7\n"
         "    print(list[0])\n"
         "    print(independent[0])\n"
+        "    alias.clear()\n"
+        "    print(list.count)\n"
+        "    print(independent.count)\n"
+        "    list.reserve(2)\n"
+        "    list.add(10)\n"
+        "    list.clear()\n"
+        "    list.add(11)\n"
+        "    print(list[0])\n"
         "    nested := List<List<int>>(List<int>(4))\n"
         "    print(nested[0][0])\n"
         "    map := Map<string, int>()\n"
@@ -901,8 +935,53 @@ void test_collection_runtime_behavior()
     const auto [status, output] = capture_run(toro::NativeCompiler(), c_source);
     expect(status == 0, "collection program did not exit successfully");
     expect(
-        output == "1\n9\n8\n3\n6\n1\n7\n4\n2\n2\n5\ntrue\n1\n1\n1\n1\nitem destroyed\n",
+        output == "1\n9\n8\n3\n2\n2\n2\n6\n1\n7\n0\n6\n11\n4\n2\n2\n5\ntrue\n1\n1\n1\n1\nitem destroyed\n",
         "collection program produced unexpected output");
+}
+
+void test_list_clear_managed_lifetime_and_weak_invalidation()
+{
+    const auto c_source = generate(
+        "class Item {\n"
+        "    public name: string\n"
+        "    destroy() { print(self.name) }\n"
+        "}\n"
+        "class Observer {\n"
+        "    public weak target: Item?\n"
+        "}\n"
+        "function add_observed(items: List<Item>) -> Observer {\n"
+        "    item := Item(name: \"cleared once\")\n"
+        "    observer := Observer(target: item)\n"
+        "    items.add(item)\n"
+        "    return observer\n"
+        "}\n"
+        "function clear_generic<T>(values: List<T>) { values.clear() }\n"
+        "function main() {\n"
+        "    items := List<Item>()\n"
+        "    items.reserve(4)\n"
+        "    alias := items\n"
+        "    observer := add_observed(items)\n"
+        "    copy := items.clone()\n"
+        "    alias.clear()\n"
+        "    print(items.count)\n"
+        "    print(copy.count)\n"
+        "    if observer.target == null { print(\"cleared weak\") }\n"
+        "    clear_generic<Item>(copy)\n"
+        "    if observer.target == null { print(\"copy released\") }\n"
+        "    nullable := List<Item?>()\n"
+        "    nullable.reserve(2)\n"
+        "    nullable.add(null)\n"
+        "    nullable.add(Item(name: \"nullable cleared\"))\n"
+        "    nullable.clear()\n"
+        "    nullable.clear()\n"
+        "    nullable.add(Item(name: \"reused capacity\"))\n"
+        "    nullable.clear()\n"
+        "}\n");
+    const auto [status, output] = capture_run(toro::NativeCompiler(), c_source);
+    expect(status == 0, "managed List.clear program failed");
+    expect(
+        output == "0\n1\ncleared once\ncopy released\nnullable cleared\nreused capacity\n",
+        "List.clear changed managed ownership, clone, or weak behavior: " + output);
 }
 
 void test_initializer_collection_argument_value_semantics()
@@ -996,6 +1075,23 @@ void test_collection_bounds_failure()
     throw std::runtime_error("out-of-bounds Array access unexpectedly succeeded");
 }
 
+void test_negative_list_reserve_failure()
+{
+    try {
+        static_cast<void>(toro::NativeCompiler().run(generate(
+            "function main() {\n"
+            "    values := List<int>()\n"
+            "    values.reserve(-1)\n"
+            "}\n")));
+    } catch (const std::runtime_error& error) {
+        expect(std::string_view(error.what()).find("runtime process failure")
+                != std::string_view::npos,
+            "negative List.reserve did not report a runtime process failure");
+        return;
+    }
+    throw std::runtime_error("negative List.reserve unexpectedly succeeded");
+}
+
 void test_temporary_cleanup()
 {
     const auto before = native_temporary_directories();
@@ -1005,6 +1101,96 @@ void test_temporary_cleanup()
     const auto after = native_temporary_directories();
     expect(result == 0, "cleanup test program failed");
     expect(before == after, "native run left temporary artifacts behind");
+}
+
+void test_experimental_arena_runtime_and_differential_behavior()
+{
+    constexpr std::string_view source =
+        "class Base {\n"
+        "    public virtual function read() -> int { return -1 }\n"
+        "    destroy() { print(999) }\n"
+        "}\n"
+        "class Child {\n"
+        "    public value: int\n"
+        "    destroy() { print(self.value + 100) }\n"
+        "}\n"
+        "class Item : Base {\n"
+        "    public value: int\n"
+        "    public child: Child?\n"
+        "    init(value: int, child: Child) {\n"
+        "        self.value = value\n"
+        "        self.child = child\n"
+        "    }\n"
+        "    public override function read() -> int { return self.value }\n"
+        "    destroy() { print(self.value) }\n"
+        "}\n"
+        "function main() {\n"
+        "    first_values := List<Item>()\n"
+        "    second_values := List<Item>()\n"
+        "    index := 0\n"
+        "    while index < 2 {\n"
+        "        first_child := Child(value: index * 10 + 1)\n"
+        "        first := Item(index * 10 + 1, first_child)\n"
+        "        first_values.add(first)\n"
+        "        second_child := Child(value: index * 10 + 2)\n"
+        "        second := Item(index * 10 + 2, second_child)\n"
+        "        second_values.add(second)\n"
+        "        print(first_values[0].read())\n"
+        "        second_values.clear()\n"
+        "        first_values.clear()\n"
+        "        index = index + 1\n"
+        "    }\n"
+        "}\n";
+    const auto arena_c = generate_with_arena(source, true);
+    const auto heap_c = generate_with_arena(source, false);
+    expect(arena_c.find("toro_arena_allocate") != std::string::npos
+            && arena_c.find("toro_arena_teardown") != std::string::npos,
+        "arena runtime helpers were not emitted");
+    expect(arena_c.find("malloc(sizeof(toro_class_Item")
+                == std::string::npos,
+        "arena-backed Item still used per-object heap allocation");
+    const toro::NativeCompiler compiler;
+    const auto [arena_status, arena_output] = capture_run(compiler, arena_c);
+    const auto [heap_status, heap_output] = capture_run(compiler, heap_c);
+    expect(arena_status == 0 && heap_status == 0,
+        "arena/heap differential program failed");
+    if (arena_output != heap_output) {
+        throw std::runtime_error(
+            "arena storage changed observable output or lifecycle behavior\n"
+            "arena:\n" + arena_output + "heap:\n" + heap_output);
+    }
+    expect(arena_output
+            == "1\n2\n999\n1\n999\n102\n101\n"
+               "11\n12\n999\n11\n999\n112\n111\n",
+        "arena teardown was not reverse-order or exactly once");
+}
+
+void test_experimental_arena_capacity_failure()
+{
+    constexpr std::string_view source =
+        "class Item {}\n"
+        "function main() {\n"
+        "    values := List<Item>()\n"
+        "    index := 0\n"
+        "    while index < 1 {\n"
+        "        first := Item()\n"
+        "        values.add(first)\n"
+        "        second := Item()\n"
+        "        values.add(second)\n"
+        "        values.clear()\n"
+        "        index = index + 1\n"
+        "    }\n"
+        "}\n";
+    try {
+        static_cast<void>(toro::NativeCompiler().run(
+            generate_with_arena(source, true, 1)));
+    } catch (const std::runtime_error& error) {
+        expect(std::string_view(error.what()).find("runtime process failure")
+                != std::string_view::npos,
+            "arena capacity exhaustion lacked a deterministic runtime failure");
+        return;
+    }
+    throw std::runtime_error("arena capacity exhaustion unexpectedly succeeded");
 }
 
 } // namespace
@@ -1030,9 +1216,13 @@ int main()
         test_generic_inheritance_interface_runtime_behavior();
         test_overload_and_conversion_runtime_behavior();
         test_collection_runtime_behavior();
+        test_list_clear_managed_lifetime_and_weak_invalidation();
         test_initializer_collection_argument_value_semantics();
         test_backend_integration_runtime_behavior();
         test_collection_bounds_failure();
+        test_negative_list_reserve_failure();
+        test_experimental_arena_runtime_and_differential_behavior();
+        test_experimental_arena_capacity_failure();
         test_temporary_cleanup();
     } catch (const std::exception& error) {
         std::cerr << "native compiler test failure: " << error.what() << '\n';

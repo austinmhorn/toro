@@ -379,6 +379,20 @@ void test_heap_escape_multiple_sites_and_collections()
                 toro::IREffect::Allocate),
         "runtime collection allocation was incorrectly discharged");
 
+    const auto reserve = analyze(
+        "performance function prepare(values: List<int>) { values.reserve(16) }\n");
+    expect(result(reserve, "prepare(List<int>)").status
+                == toro::IRPerformanceContractStatus::Violated
+            && has_cause(result(reserve, "prepare(List<int>)"),
+                toro::IREffect::Allocate),
+        "List.reserve allocation capability was hidden from performance policy");
+
+    const auto clear = analyze(
+        "performance function reuse(values: List<int>) { values.clear() }\n");
+    expect(result(clear, "reuse(List<int>)").status
+                == toro::IRPerformanceContractStatus::Satisfied,
+        "non-allocating primitive List.clear violated the performance contract");
+
     const auto persistent = analyze(
         "class Particle {}\n"
         "class Holder { public value: Particle? }\n"

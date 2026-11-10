@@ -51,14 +51,16 @@ function simulate(config: SimulationConfig) -> SimulationStats {
     counters["expired"] = 0
     checksum := 7
     tick := 0
+    events := List<TickEvent>()
+    events.reserve(config.actor_count + 2)
+    effects := List<FrameEffect>()
+    effects.reserve(config.effects_per_tick)
     while tick < config.ticks {
-        events := List<TickEvent>()
         for actor in actors {
             update_value := actor.update(config.world_bound)
             events.add(TickEvent::actor_moved(update_value))
             scores[actor.team] = scores[actor.team] + update_value
         }
-        effects := List<FrameEffect>()
         effect_index := 0
         while effect_index < config.effects_per_tick {
             effect := FrameEffect(position: Vec2(x: tick + effect_index, y: effect_index + 1), ttl: 1)
@@ -82,6 +84,8 @@ function simulate(config: SimulationConfig) -> SimulationStats {
         counters["spawned"] = counters["spawned"] + totals.spawned
         counters["expired"] = counters["expired"] + totals.expired
         checksum = mix_checksum(checksum, totals.moved_checksum)
+        events.clear()
+        effects.clear()
         tick = tick + 1
     }
     return SimulationStats(label: config.label, ticks: config.ticks, actors_remaining: actors.count, events_processed: counters["events"], effects_spawned: counters["spawned"], effects_expired: counters["expired"], team_zero_score: scores[0], team_one_score: scores[1], checksum: checksum)

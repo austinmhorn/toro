@@ -97,6 +97,7 @@ struct IRBorrowUse {
 enum class IRStorageClass : std::uint8_t {
     Heap,
     Stack,
+    Arena,
 };
 
 struct IROperation {
@@ -112,6 +113,9 @@ struct IROperation {
     std::vector<IRBorrowUse> borrows;
     std::string allocation_identity;
     std::optional<IRStorageClass> storage;
+    std::string region_identity;
+    std::size_t region_capacity_bytes{0};
+    std::size_t region_max_objects{0};
 };
 
 struct IRGenericParameter {
@@ -427,6 +431,19 @@ struct IRAllocationEscape {
     std::vector<IREscapeCause> causes;
     IRStorageClass storage{IRStorageClass::Heap};
     std::string storage_reason;
+    std::string region_identity;
+};
+
+struct IRRegionInfo {
+    std::string identity;
+    IROrigin origin;
+    std::size_t capacity_bytes{0};
+    std::size_t max_objects{0};
+    std::vector<std::string> allocation_identities;
+    std::size_t arena_allocation_sites{0};
+    std::size_t teardown_entries{0};
+    std::size_t runtime_arc_suppressions{0};
+    std::size_t heap_fallbacks{0};
 };
 
 struct IREscapeMetrics {
@@ -435,7 +452,9 @@ struct IREscapeMetrics {
     std::size_t escaping{0};
     std::size_t unknown{0};
     std::size_t stack_allocations{0};
+    std::size_t arena_allocations{0};
     std::size_t heap_allocations{0};
+    std::size_t arena_fallbacks{0};
 };
 
 struct IRProgram {
@@ -447,6 +466,7 @@ struct IRProgram {
     std::vector<IRCallableEffectSummary> effect_summaries;
     std::vector<IRPerformanceContractResult> performance_contract_results;
     std::vector<IRAllocationEscape> escape_allocations;
+    std::vector<IRRegionInfo> regions;
     IREscapeMetrics escape_metrics;
     IRArcStage arc_stage{IRArcStage::Semantic};
     std::vector<IRCallableArcSchedule> arc_schedules;

@@ -284,10 +284,12 @@ proofs.
 
 ## 12. Interaction with performance contracts
 
-Current policy distinguishes stack-promoted construction from general heap
-allocation. It has no arena category, and this investigation does not change
-that policy. Any current heap-backed candidate continues to violate a
-`performance function` allocation constraint.
+At the time of this investigation, policy distinguished stack-promoted
+construction from general heap allocation and had no arena category. The later
+12.1D prototype added an observable IR arena storage category, but deliberately
+did not change performance-contract policy: experimental arena construction
+continues to carry the semantic allocation effect and is not discharged as
+predictable execution.
 
 A future policy could treat bounded bump allocation separately from general
 heap allocation, but only after the runtime establishes bounded allocation
@@ -405,7 +407,36 @@ remove the 96,000 `FrameEffect` object/control allocations, so the experiment
 is intended to isolate the residual cost rather than assume arenas are
 unnecessary.
 
-No arena implementation is authorized. The next proposed activity is a
-separately authorized collection reservation/reuse experiment using the saved
-A2 workloads and profiling method. An internal arena prototype remains
-conditional on its result and separate approval. Phase 12.2 remains deferred.
+No arena implementation was authorized by 12.1B. Its next proposed activity was
+the separately authorized collection reservation/reuse experiment using the
+saved A2 workloads and profiling method. The completed result follows; an
+internal arena prototype still requires separate approval. Phase 12.2 remains
+deferred.
+
+## 19. Phase 12.1C collection experiment outcome
+
+The authorized experiment is complete in
+`applications/simulation/COLLECTION_REUSE_REPORT.md`. Reservation and reuse
+removed 25,996 allocator invocations (21.26%) and reduced reallocations from
+22,006 to 8, while preserving deterministic output, managed cleanup, bounded
+memory, and zero leaks. The 96,000 `FrameEffect` object/control allocations were
+unchanged, and effect allocation plus teardown remained approximately 35.5% of
+the allocation-amplified sample.
+
+The recommendation is now **Prototype arena**, meaning a separate narrow
+prototype milestone may be proposed. No arena syntax, IR, runtime, or lowering
+is authorized by this investigation or by 12.1C. Phase 12.2 remains **Defer**.
+
+## 20. Phase 12.1D prototype result
+
+The later explicitly authorized prototype is complete; see
+`applications/simulation/ARENA_PROTOTYPE_REPORT.md`. It eliminated the targeted
+96,000 `FrameEffect` object/control allocator calls using typed-IR arena
+provenance and fixed tick-local C11 storage. The measured broad effect
+storage/lifecycle sample share fell from 35.5% to approximately 11.7%, output
+remained identical, memory stayed bounded, and leak checking found zero leaks.
+
+Its recommendation is **Proceed to language design**. That advances the work to
+a future semantics/design milestone only. The internal manifest opt-in is not
+Toro syntax, and general arenas, weak/FFI participation, threads, and broad
+region inference remain unauthorized. Phase 12.2 remains **Defer**.

@@ -672,7 +672,10 @@ value containing a count and owned contiguous element buffer; copying in Toro
 invokes a deep buffer clone. `List<T>` is a pointer to a growable,
 reference-counted contiguous backing object. `Map<string, V>` is a pointer to a
 reference-counted open-addressed hash table. Ordinary List/Map assignment retains
-the backing object, while `.clone()` allocates independent storage.
+the backing object, while `.clone()` allocates independent storage. List
+`reserve` grows through the same specialization helper without changing logical
+contents, and List `clear` releases logical managed elements and resets count
+without freeing reusable capacity.
 
 Element helpers isolate retain/release behavior for class references and nested
 shared collections. Array/List access uses generated checked get/set helpers,
@@ -960,12 +963,21 @@ not establish a material runtime cost. Application Milestone A2 subsequently
 profiled the representative simulation and found material allocation and final
 lifecycle cost in its bounded tick-local `FrameEffect` path. The recommendation
 reopened Phase 12.1B's design/alternatives investigation. That specification is
-now recorded in `docs/ARENA_DESIGN.md` and recommends prototyping collection
-reservation/reuse before an arena. Its preferred eventual model is a
+now recorded in `docs/ARENA_DESIGN.md` and recommended measuring collection
+reservation/reuse before an arena. Phase 12.1C completed that experiment:
+generated allocator invocations fell by 21.26% and reallocations fell from
+22,006 to 8, while all 96,000 effect object/control allocations and an
+approximately 35.5% sampled effect lifecycle path remained. The resulting
+recommendation authorized Phase 12.1D's narrow internal prototype. That
+prototype adds explicit IR `Arena` storage, region identity and fixed-capacity
+metadata, structured lifetime suppression, and backend-consumed fixed C11 bump
+storage only for the simulation's proven tick-local `FrameEffect` path. It
+eliminated all 96,000 measured object/control allocator calls and recommends a
+later language-design milestone. The preferred eventual model remains a
 compiler-inferred, lexically anchored region selected by the storage-decision
 pipeline, with explicit IR provenance and conservative heap fallback. No arena
-syntax, IR storage category, runtime allocator, or backend behavior exists, and
-no implementation is authorized.
+syntax or general-purpose runtime feature exists; the current implementation is
+an experimental application-only path.
 
 Later phases may explore, when evidence justifies them:
 

@@ -73,6 +73,7 @@ struct CompilationInput {
     std::optional<std::filesystem::path> source_root;
     std::optional<std::string> project_name;
     std::vector<std::string> c_libraries;
+    std::optional<toro::ExperimentalArenaConfig> experimental_arena;
 };
 
 struct MemoryTarget {
@@ -129,7 +130,7 @@ MemoryTarget parse_memory_target(std::string_view text)
 
 CompilationInput direct_input(const std::filesystem::path& path)
 {
-    return CompilationInput{path, std::nullopt, std::nullopt, {}};
+    return CompilationInput{path, std::nullopt, std::nullopt, {}, std::nullopt};
 }
 
 CompilationInput project_input()
@@ -140,6 +141,7 @@ CompilationInput project_input()
         project.source_root,
         project.name,
         project.c_libraries,
+        project.experimental_arena,
     };
 }
 
@@ -185,13 +187,25 @@ void print_ast(std::string_view source)
     std::cout << toro::dump_program(program);
 }
 
-void analyze_runtime_plan(toro::IRProgram& ir)
+void analyze_runtime_plan(
+    toro::IRProgram& ir,
+    const std::optional<toro::ExperimentalArenaConfig>& arena = std::nullopt)
 {
     toro::EffectAnalyzer().analyze(ir);
     toro::OwnershipSummaryAnalyzer().analyze(ir);
     toro::StrongCycleAnalyzer().analyze(ir);
     toro::EscapeAnalyzer().analyze(ir);
-    toro::StorageDecisionAnalyzer().analyze(ir);
+    toro::ExperimentalArenaOptions options;
+    if (arena) {
+        options = toro::ExperimentalArenaOptions{
+            true,
+            arena->type_name,
+            arena->region_name,
+            arena->capacity_bytes,
+            arena->max_objects,
+        };
+    }
+    toro::StorageDecisionAnalyzer().analyze(ir, true, std::move(options));
     toro::ArcMaterializer().materialize(ir);
     toro::OwnershipTransferAnalyzer().analyze(ir);
     toro::BorrowInferenceAnalyzer().analyze(ir);
@@ -221,7 +235,7 @@ void check_source(const CompilationInput& input)
     toro::SemanticAnalyzer().analyze(program);
     toro::TypeChecker().check(program);
     auto ir = toro::IRLowerer().lower(program);
-    analyze_runtime_plan(ir);
+    analyze_runtime_plan(ir, input.experimental_arena);
     enforce_diagnostics(ir);
     std::cout << "check passed\n";
 }
@@ -232,7 +246,7 @@ std::string generate_c(const CompilationInput& input)
     toro::SemanticAnalyzer().analyze(program);
     toro::TypeChecker().check(program);
     auto ir = toro::IRLowerer().lower(program);
-    analyze_runtime_plan(ir);
+    analyze_runtime_plan(ir, input.experimental_arena);
     enforce_diagnostics(ir);
     return toro::CGenerator().generate(ir);
 }
@@ -250,7 +264,7 @@ void print_ir(
     toro::SemanticAnalyzer().analyze(program);
     toro::TypeChecker().check(program);
     auto ir = toro::IRLowerer().lower(program);
-    analyze_runtime_plan(ir);
+    analyze_runtime_plan(ir, input.experimental_arena);
     if (!include_performance) {
         enforce_diagnostics(ir);
     } else {
@@ -279,7 +293,7 @@ void inspect_source(const CompilationInput& input, bool include_memory = false)
     toro::SemanticAnalyzer().analyze(program);
     toro::TypeChecker().check(program);
     auto ir = toro::IRLowerer().lower(program);
-    analyze_runtime_plan(ir);
+    analyze_runtime_plan(ir, input.experimental_arena);
     enforce_diagnostics(ir);
     if (include_memory) {
         std::cout << toro::MemoryReporter().report(ir);
@@ -320,7 +334,7 @@ void explain_memory(
     toro::SemanticAnalyzer().analyze(program);
     toro::TypeChecker().check(program);
     auto ir = toro::IRLowerer().lower(program);
-    analyze_runtime_plan(ir);
+    analyze_runtime_plan(ir, input.experimental_arena);
     enforce_diagnostics(ir);
     const auto memory = toro::MemoryReporter().inspect(ir);
     const auto explanation = toro::MemoryExplainer().explain(

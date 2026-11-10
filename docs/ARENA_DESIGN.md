@@ -688,5 +688,55 @@ If later authorized, the first arena prototype should be internal/test-only:
 - explicit IR decisions and inspection before backend lowering;
 - differential correctness, strict C11, memory, and A2 profiling coverage.
 
-That prototype remains pending both the collection experiment and separate
-authorization.
+That prototype remained pending the collection experiment; after the measured
+outcome below, it still requires separate authorization.
+
+## 24. Phase 12.1C measured outcome
+
+The separately authorized collection experiment is complete. Its canonical
+evidence is `applications/simulation/COLLECTION_REUSE_REPORT.md`.
+
+`List<T>.reserve` and `List<T>.clear` allowed the event/effect lists to persist
+across ticks without changing shared-reference or managed-element semantics.
+The result removed 25,996 of 122,268 generated allocator invocations (21.26%)
+and reduced reallocations from 22,006 to 8. All 96,000 `FrameEffect`
+object/control allocations remained. Effect allocation and final teardown were
+still approximately 35.5% of application samples, above the pre-registered 10%
+materiality gate in this specification.
+
+The resulting recommendation is:
+
+```text
+Prototype arena
+```
+
+This advances the evidence gate only far enough to propose a separately
+authorized narrow internal prototype within the constraints above. It does not
+authorize arena syntax, lifetime annotations, IR changes, runtime allocation,
+or backend lowering. Phase 12.2 remains deferred.
+
+## 25. Phase 12.1D prototype outcome
+
+The separately authorized internal prototype is complete. Its canonical
+evidence is `applications/simulation/ARENA_PROTOTYPE_REPORT.md`.
+
+The prototype follows this document's narrow model: stack promotion first,
+explicit IR arena provenance, compiler-bounded loop lifetime, fixed aligned
+bump storage, region-owned ARC suppression, ordinary cleanup of heap fields,
+reverse-allocation finalization, and conservative heap fallback. It targets
+only the configured tick-local `FrameEffect`/cleared-List shape.
+
+It eliminated all 96,000 measured `FrameEffect` object/control allocator calls
+and reduced the amplified sampled storage/lifecycle path from approximately
+35.5% to 11.7%, with byte-identical output, bounded memory, and zero leaks.
+
+The resulting recommendation is:
+
+```text
+Proceed to language design
+```
+
+This does not finalize syntax or make the prototype production-ready.
+Destructor timing, capacity/fallback policy, diagnostics, inference boundaries,
+and any user-facing region model require a later canonical design milestone.
+Phase 12.2 remains deferred.

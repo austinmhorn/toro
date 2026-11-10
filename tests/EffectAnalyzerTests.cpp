@@ -67,6 +67,19 @@ bool has_effect(
     return false;
 }
 
+bool has_local_effect_site(
+    const toro::IRCallableEffectSummary& callable,
+    toro::IREffect effect,
+    std::string_view operation_name)
+{
+    for (const auto& site : callable.local_effect_sites) {
+        if (site.effect == effect && site.operation_name == operation_name) {
+            return true;
+        }
+    }
+    return false;
+}
+
 const toro::IREffectCause& cause(
     const toro::IRCallableEffectSummary& callable,
     toro::IREffect effect)
@@ -124,6 +137,42 @@ void test_pure_values_references_and_collections()
         "shared collection should retain");
     expect(has_effect(collection, toro::IREffect::ReleaseDestroy),
         "shared collection should release");
+}
+
+void test_list_reserve_and_clear_effects()
+{
+    const auto ir = analyze_source(
+        "class Item {}\n"
+        "function primitive(values: List<int>) {\n"
+        "    values.reserve(16)\n"
+        "    values.clear()\n"
+        "}\n"
+        "function managed<T>(values: List<T>) {\n"
+        "    values.clear()\n"
+        "}\n"
+        "function main() {\n"
+        "    values := List<Item>(Item())\n"
+        "    managed<Item>(values)\n"
+        "}\n");
+
+    const auto& primitive = summary(ir, "primitive(List<int>)");
+    expect(has_local_effect_site(
+               primitive, toro::IREffect::Allocate, "reserve"),
+        "List.reserve did not retain its allocation capability");
+    expect(!has_local_effect_site(
+               primitive, toro::IREffect::Allocate, "clear"),
+        "List.clear was incorrectly classified as allocating");
+    expect(!has_local_effect_site(
+               primitive, toro::IREffect::ReleaseDestroy, "clear"),
+        "primitive List.clear was classified as managed cleanup");
+
+    const auto& managed = summary(ir, "managed(List<T>)<T=Item>");
+    expect(has_local_effect_site(
+               managed, toro::IREffect::ReleaseDestroy, "clear"),
+        "managed generic List.clear lost its release/destruction effect");
+    expect(!has_local_effect_site(
+               managed, toro::IREffect::Allocate, "clear"),
+        "managed List.clear was incorrectly classified as allocating");
 }
 
 void test_transitive_recursive_and_mutual_fixed_point()
@@ -320,6 +369,7 @@ int main()
 {
     try {
         test_pure_values_references_and_collections();
+        test_list_reserve_and_clear_effects();
         test_transitive_recursive_and_mutual_fixed_point();
         test_generics_and_dynamic_dispatch();
         test_unresolved_dynamic_dispatch_is_unknown();

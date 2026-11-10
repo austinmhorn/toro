@@ -162,7 +162,9 @@ std::vector<MemoryExplanation> collect_facts(
         explanation.origin = allocation.origin;
         explanation.subject_identity = allocation.identity;
         explanation.decision = allocation.storage == IRStorageClass::Stack
-            ? "stack-storage" : "heap-storage";
+            ? "stack-storage"
+            : allocation.storage == IRStorageClass::Arena
+                ? "arena-storage" : "heap-storage";
         explanation.type = allocation.type;
         explanation.storage = allocation.storage;
         explanation.escape_state = allocation.escape_state;

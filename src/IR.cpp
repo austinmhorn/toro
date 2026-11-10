@@ -204,6 +204,7 @@ std::string_view ir_storage_class_name(IRStorageClass storage)
     switch (storage) {
     case IRStorageClass::Heap: return "heap";
     case IRStorageClass::Stack: return "stack";
+    case IRStorageClass::Arena: return "arena";
     }
     return "heap";
 }
@@ -437,8 +438,12 @@ std::string dump_ir(
             + std::to_string(program.escape_metrics.unknown)
             + " stack "
             + std::to_string(program.escape_metrics.stack_allocations)
+            + " arena "
+            + std::to_string(program.escape_metrics.arena_allocations)
             + " heap "
-            + std::to_string(program.escape_metrics.heap_allocations) + "\n";
+            + std::to_string(program.escape_metrics.heap_allocations)
+            + " arena-fallbacks "
+            + std::to_string(program.escape_metrics.arena_fallbacks) + "\n";
         for (const auto& allocation : program.escape_allocations) {
             output += "  allocation " + allocation.identity + " : "
                 + complete_type_name(allocation.type);
@@ -448,6 +453,9 @@ std::string dump_ir(
             output += "    storage "
                 + std::string(ir_storage_class_name(allocation.storage))
                 + " ; " + allocation.storage_reason + '\n';
+            if (!allocation.region_identity.empty()) {
+                output += "    region " + allocation.region_identity + '\n';
+            }
             for (const auto& cause : allocation.causes) {
                 output += cause.causes_escape ? "    reason " : "    constraint ";
                 output += ir_escape_reason_name(cause.reason);
@@ -456,6 +464,16 @@ std::string dump_ir(
                 append_origin(cause.origin, output);
                 output += '\n';
             }
+        }
+        for (const auto& region : program.regions) {
+            output += "  region " + region.identity + " capacity-bytes "
+                + std::to_string(region.capacity_bytes) + " max-objects "
+                + std::to_string(region.max_objects) + " allocations "
+                + std::to_string(region.arena_allocation_sites)
+                + " teardown-entries "
+                + std::to_string(region.teardown_entries)
+                + " runtime-arc-suppressions "
+                + std::to_string(region.runtime_arc_suppressions) + '\n';
         }
     }
     if (include_arc) {

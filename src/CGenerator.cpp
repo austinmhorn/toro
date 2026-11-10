@@ -82,6 +82,7 @@ struct ValueInfo {
     bool pointer{false};
     bool owned_local{false};
     bool stack_backed{false};
+    bool arena_backed{false};
 };
 
 struct FunctionInfo {
@@ -182,6 +183,7 @@ struct GeneratedExpression {
     std::string prelude;
     bool owned{false};
     bool stack_backed{false};
+    bool arena_backed{false};
     std::string stack_object;
     CValueType stack_type{CValueKind::Void};
 
@@ -594,6 +596,7 @@ public:
             throw std::runtime_error(
                 "C backend error: Toro IR lifetime operations are not ready for emission");
         }
+        has_experimental_regions_ = !ir_program.regions.empty();
         const Program program = make_emission_model(ir_program);
         collect_types(program);
         collect_functions(program);
@@ -602,11 +605,56 @@ public:
         std::string output =
             "#include <errno.h>\n"
             "#include <stdbool.h>\n"
+            "#include <stddef.h>\n"
             "#include <stdint.h>\n"
             "#include <stdio.h>\n"
             "#include <stdlib.h>\n"
             "#include <string.h>\n"
             "#include <time.h>\n\n";
+
+        if (has_experimental_regions_) {
+            output +=
+                "typedef struct toro_arena_entry\n"
+                "{\n"
+                "    void* toro_object;\n"
+                "    void (*toro_finalize)(void*);\n"
+                "} toro_arena_entry;\n\n"
+                "typedef struct toro_arena\n"
+                "{\n"
+                "    unsigned char* toro_storage;\n"
+                "    size_t toro_capacity;\n"
+                "    size_t toro_used;\n"
+                "    toro_arena_entry* toro_entries;\n"
+                "    size_t toro_entry_capacity;\n"
+                "    size_t toro_entry_count;\n"
+                "} toro_arena;\n\n"
+                "static void* toro_arena_allocate(toro_arena* toro_region, size_t toro_size, size_t toro_alignment)\n"
+                "{\n"
+                "    if (toro_alignment == 0 || (toro_alignment & (toro_alignment - 1)) != 0) { abort(); }\n"
+                "    uintptr_t toro_current = (uintptr_t)(toro_region->toro_storage + toro_region->toro_used);\n"
+                "    size_t toro_padding = (size_t)(-(uintptr_t)toro_current & (toro_alignment - 1));\n"
+                "    if (toro_padding > toro_region->toro_capacity - toro_region->toro_used\n"
+                "        || toro_size > toro_region->toro_capacity - toro_region->toro_used - toro_padding) { abort(); }\n"
+                "    toro_region->toro_used += toro_padding;\n"
+                "    void* toro_value = toro_region->toro_storage + toro_region->toro_used;\n"
+                "    toro_region->toro_used += toro_size;\n"
+                "    return toro_value;\n"
+                "}\n\n"
+                "static void toro_arena_register(toro_arena* toro_region, void* toro_object, void (*toro_finalize)(void*))\n"
+                "{\n"
+                "    if (toro_region->toro_entry_count == toro_region->toro_entry_capacity) { abort(); }\n"
+                "    toro_region->toro_entries[toro_region->toro_entry_count++] = (toro_arena_entry){toro_object, toro_finalize};\n"
+                "}\n\n"
+                "static void toro_arena_teardown(toro_arena* toro_region)\n"
+                "{\n"
+                "    while (toro_region->toro_entry_count != 0)\n"
+                "    {\n"
+                "        toro_arena_entry toro_entry = toro_region->toro_entries[--toro_region->toro_entry_count];\n"
+                "        toro_entry.toro_finalize(toro_entry.toro_object);\n"
+                "    }\n"
+                "    toro_region->toro_used = 0;\n"
+                "}\n\n";
+        }
 
         if (!class_order_.empty()) {
             output +=
@@ -2522,21 +2570,44 @@ private:
                     + release + "    }\n";
             }
             output += "    free(toro_value->toro_data);\n    free(toro_value);\n}\n\n";
+            output += "static void " + name + "_reserve_storage(" + name
+                + "* toro_value, size_t toro_capacity)\n{\n"
+                  "    if (toro_capacity <= toro_value->toro_capacity) { return; }\n"
+                  "    if (toro_capacity > SIZE_MAX / sizeof(*toro_value->toro_data)) { abort(); }\n"
+                  "    void* toro_data = realloc(toro_value->toro_data, toro_capacity * sizeof(*toro_value->toro_data));\n"
+                  "    if (toro_data == NULL) { abort(); }\n"
+                  "    toro_value->toro_data = toro_data;\n"
+                  "    toro_value->toro_capacity = toro_capacity;\n}\n\n";
+            output += "static void " + name + "_reserve(" + name
+                + "* toro_value, int64_t toro_capacity)\n{\n"
+                  "    if (toro_capacity < 0) { abort(); }\n"
+                  "    " + name + "_reserve_storage(toro_value, (size_t)toro_capacity);\n}\n\n";
+            output += "static void " + name + "_clear(" + name
+                + "* toro_value)\n{\n";
+            if (const auto release = collection_element_release(
+                    element, "toro_value->toro_data[toro_index]"); !release.empty()) {
+                output += "    for (size_t toro_index = 0; toro_index < toro_value->toro_count; ++toro_index)\n    {\n        "
+                    + release + "    }\n";
+            }
+            output += "    toro_value->toro_count = 0;\n}\n\n";
+            output += "static void " + name + "_clear_region(" + name
+                + "* toro_value)\n{\n"
+                  "    toro_value->toro_count = 0;\n}\n\n";
             output += "static void " + name + "_add(" + name + "* toro_value, "
                 + c_type_name(element) + " toro_element)\n{\n"
                   "    if (toro_value->toro_count == toro_value->toro_capacity)\n    {\n"
+                  "        if (toro_value->toro_capacity > SIZE_MAX / 2) { abort(); }\n"
                   "        size_t toro_capacity = toro_value->toro_capacity == 0 ? 4 : toro_value->toro_capacity * 2;\n"
-                  "        void* toro_data = realloc(toro_value->toro_data, toro_capacity * sizeof(*toro_value->toro_data));\n"
-                  "        if (toro_data == NULL) { abort(); }\n        toro_value->toro_data = toro_data;\n        toro_value->toro_capacity = toro_capacity;\n    }\n";
+                  "        " + name + "_reserve_storage(toro_value, toro_capacity);\n    }\n";
             output += "    " + collection_element_retain(element, "toro_element");
             output += "    toro_value->toro_data[toro_value->toro_count++] = toro_element;\n}\n\n";
             output += "static void " + name + "_add_move(" + name
                 + "* toro_value, " + c_type_name(element)
                 + " toro_element)\n{\n"
                   "    if (toro_value->toro_count == toro_value->toro_capacity)\n    {\n"
+                  "        if (toro_value->toro_capacity > SIZE_MAX / 2) { abort(); }\n"
                   "        size_t toro_capacity = toro_value->toro_capacity == 0 ? 4 : toro_value->toro_capacity * 2;\n"
-                  "        void* toro_data = realloc(toro_value->toro_data, toro_capacity * sizeof(*toro_value->toro_data));\n"
-                  "        if (toro_data == NULL) { abort(); }\n        toro_value->toro_data = toro_data;\n        toro_value->toro_capacity = toro_capacity;\n    }\n"
+                  "        " + name + "_reserve_storage(toro_value, toro_capacity);\n    }\n"
                   "    toro_value->toro_data[toro_value->toro_count++] = toro_element;\n}\n\n";
             output += "static " + c_type_name(element) + " " + name
                 + "_get(" + name + "* toro_value, int64_t toro_index)\n{\n"
@@ -3053,6 +3124,9 @@ private:
 
             output += "static void " + retain_name(name) + "(" + object
                 + "* toro_value)\n{\n";
+            output += "    if (toro_value != NULL && !"
+                + class_header_access("toro_value", name, "toro_heap_allocated")
+                + ") { return; }\n";
             output += "    if (toro_value != NULL)\n    {\n";
             output += "        if ("
                 + class_header_access("toro_value", name, "toro_strong_count")
@@ -3419,10 +3493,12 @@ private:
                 const bool transferred = statement.transfer_source.has_value();
                 if (is_managed_reference(type) && !initializer.owned
                     && !initializer.stack_backed
+                    && !initializer.arena_backed
                     && !transferred && !statement.borrowed_alias) {
                     output += prefix + retain_call(type, c_name) + ";\n";
                 }
-                if (transferred && !initializer.stack_backed) {
+                if (transferred && !initializer.stack_backed
+                    && !initializer.arena_backed) {
                     relinquish_owned_value(
                         *statement.transfer_source, statement.location);
                 }
@@ -3436,7 +3512,8 @@ private:
                             true,
                         });
                     }
-                } else if (!statement.borrowed_alias) {
+                } else if (!initializer.arena_backed
+                    && !statement.borrowed_alias) {
                     owned_reference_values_.back().push_back(
                         ValueInfo{type, c_name, false, true});
                 }
@@ -3448,8 +3525,10 @@ private:
                     c_name,
                     false,
                     is_owned_runtime_value(type) && !initializer.stack_backed
+                        && !initializer.arena_backed
                         && !statement.borrowed_alias,
                     initializer.stack_backed,
+                    initializer.arena_backed,
                 });
             return output;
         }
@@ -3611,11 +3690,35 @@ private:
                 output += indent(depth + 2) + "break;\n";
                 output += indent(depth + 1) + "}\n";
             }
+            const std::string saved_arena = current_arena_;
+            const std::string saved_region = current_arena_region_;
+            if (!loop.body->arena_region.empty()) {
+                current_arena_ = "toro_region_"
+                    + std::to_string(temporary_index_++);
+                current_arena_region_ = loop.body->arena_region;
+                const std::string storage = current_arena_ + "_storage";
+                const std::string entries = current_arena_ + "_entries";
+                output += indent(depth + 1) + "union { max_align_t toro_align; unsigned char toro_bytes["
+                    + std::to_string(loop.body->arena_capacity_bytes) + "]; } "
+                    + storage + ";\n";
+                output += indent(depth + 1) + "toro_arena_entry " + entries
+                    + "[" + std::to_string(loop.body->arena_max_objects) + "];\n";
+                output += indent(depth + 1) + "toro_arena " + current_arena_
+                    + " = {" + storage + ".toro_bytes, sizeof(" + storage
+                    + ".toro_bytes), 0, " + entries + ", "
+                    + std::to_string(loop.body->arena_max_objects) + ", 0};\n";
+            }
             loop_scope_indices_.push_back(scopes_.size() - 1);
             output += emit_statement_list(loop.body->statements, depth + 1);
             loop_scope_indices_.pop_back();
+            if (!loop.body->arena_region.empty()) {
+                output += indent(depth + 1) + "toro_arena_teardown(&"
+                    + current_arena_ + ");\n";
+            }
             output += scope_cleanup(scopes_.size() - 1, depth + 1);
             output += prefix + "}\n";
+            current_arena_ = saved_arena;
+            current_arena_region_ = saved_region;
             pop_scope();
             return output;
         }
@@ -3854,6 +3957,7 @@ private:
             value.type.kind == CValueKind::Struct || value.owned,
         };
         result.stack_backed = value.stack_backed;
+        result.arena_backed = value.arena_backed;
         result.stack_object = std::move(value.stack_object);
         result.stack_type = std::move(value.stack_type);
         return result;
@@ -3910,6 +4014,7 @@ private:
             GeneratedExpression result{
                 value.c_name, value.type, true, value.pointer};
             result.stack_backed = value.stack_backed;
+            result.arena_backed = value.arena_backed;
             return result;
         }
         case ExprKind::Unary: {
@@ -4622,7 +4727,16 @@ private:
         const std::string stack_object = temporary + "_storage";
         const std::string stack_control = temporary + "_control";
         std::string prelude;
-        if (call.stack_storage) {
+        if (call.arena_storage) {
+            if (current_arena_.empty() || call.arena_region != current_arena_region_) {
+                throw_backend_error(current_location_,
+                    "arena construction is outside its experimental region");
+            }
+            prelude += c_type_name(type) + " " + temporary
+                + " = toro_arena_allocate(&" + current_arena_
+                + ", sizeof(*" + temporary + "), _Alignof(" + class_name(name)
+                + "));\n";
+        } else if (call.stack_storage) {
             prelude += class_name(name) + " " + stack_object + ";\n";
             prelude += "toro_weak_control " + stack_control + ";\n";
             prelude += c_type_name(type) + " " + temporary + " = &"
@@ -4641,8 +4755,12 @@ private:
         prelude += strong_count + " = 1;\n";
         prelude += class_header_access(
             temporary, name, "toro_heap_allocated")
-            + (call.stack_storage ? " = false;\n" : " = true;\n");
-        if (call.stack_storage) {
+            + ((call.stack_storage || call.arena_storage)
+                    ? " = false;\n" : " = true;\n");
+        if (call.arena_storage) {
+            prelude += weak_control + " = toro_arena_allocate(&" + current_arena_
+                + ", sizeof(*" + weak_control + "), _Alignof(toro_weak_control));\n";
+        } else if (call.stack_storage) {
             prelude += weak_control + " = &" + stack_control + ";\n";
         } else {
             prelude += weak_control + " = malloc(sizeof(*" + weak_control + "));\n";
@@ -4651,6 +4769,10 @@ private:
         prelude += weak_control + "->toro_object = " + temporary + ";\n";
         prelude += weak_control + "->toro_weak_count = 1;\n";
         prelude += finalizer + " = " + finalize_name(name) + ";\n";
+        if (call.arena_storage) {
+            prelude += "toro_arena_register(&" + current_arena_ + ", "
+                + temporary + ", " + finalize_name(name) + ");\n";
+        }
         if (!virtual_slots(class_root(name)).empty()) {
             prelude += class_header_access(temporary, name, "toro_vtable")
                 + " = &" + vtable_instance_name(name) + ";\n";
@@ -4701,6 +4823,7 @@ private:
         GeneratedExpression result{
             temporary, type, true, false, std::move(prelude), true};
         result.stack_backed = call.stack_storage;
+        result.arena_backed = call.arena_storage;
         result.stack_object = temporary;
         result.stack_type = type;
         return result;
@@ -4717,7 +4840,16 @@ private:
         const std::string stack_object = temporary + "_storage";
         const std::string stack_control = temporary + "_control";
         std::string prelude;
-        if (call.stack_storage) {
+        if (call.arena_storage) {
+            if (current_arena_.empty() || call.arena_region != current_arena_region_) {
+                throw_backend_error(current_location_,
+                    "arena construction is outside its experimental region");
+            }
+            prelude += c_type_name(type) + " " + temporary
+                + " = toro_arena_allocate(&" + current_arena_
+                + ", sizeof(*" + temporary + "), _Alignof(" + class_name(name)
+                + "));\n";
+        } else if (call.stack_storage) {
             prelude += class_name(name) + " " + stack_object + ";\n";
             prelude += "toro_weak_control " + stack_control + ";\n";
             prelude += c_type_name(type) + " " + temporary + " = &"
@@ -4736,8 +4868,12 @@ private:
         prelude += strong_count + " = 1;\n";
         prelude += class_header_access(
             temporary, name, "toro_heap_allocated")
-            + (call.stack_storage ? " = false;\n" : " = true;\n");
-        if (call.stack_storage) {
+            + ((call.stack_storage || call.arena_storage)
+                    ? " = false;\n" : " = true;\n");
+        if (call.arena_storage) {
+            prelude += weak_control + " = toro_arena_allocate(&" + current_arena_
+                + ", sizeof(*" + weak_control + "), _Alignof(toro_weak_control));\n";
+        } else if (call.stack_storage) {
             prelude += weak_control + " = &" + stack_control + ";\n";
         } else {
             prelude += weak_control + " = malloc(sizeof(*" + weak_control + "));\n";
@@ -4746,6 +4882,10 @@ private:
         prelude += weak_control + "->toro_object = " + temporary + ";\n";
         prelude += weak_control + "->toro_weak_count = 1;\n";
         prelude += finalizer + " = " + finalize_name(name) + ";\n";
+        if (call.arena_storage) {
+            prelude += "toro_arena_register(&" + current_arena_ + ", "
+                + temporary + ", " + finalize_name(name) + ");\n";
+        }
         if (!virtual_slots(class_root(name)).empty()) {
             prelude += class_header_access(temporary, name, "toro_vtable")
                 + " = &" + vtable_instance_name(name) + ";\n";
@@ -4828,6 +4968,7 @@ private:
         GeneratedExpression result{
             temporary, type, true, false, std::move(prelude), true};
         result.stack_backed = call.stack_storage;
+        result.arena_backed = call.arena_storage;
         result.stack_object = temporary;
         result.stack_type = type;
         return result;
@@ -5038,6 +5179,11 @@ private:
                 *call.arguments.front().value, receiver.type.arguments[0]);
             std::string prelude = receiver.prelude + value.prelude;
             std::string value_code = value.code;
+            if (call.arena_storage) {
+                prelude += collection_name(receiver.type) + "_add_move("
+                    + receiver.code + ", " + value_code + ");\n";
+                return {"(void)0", void_type, false, false, std::move(prelude)};
+            }
             if (call.transfer_source) {
                 prelude += collection_name(receiver.type) + "_add_move("
                     + receiver.code + ", " + value_code + ");\n";
@@ -5062,6 +5208,31 @@ private:
                 false,
                 false,
                 std::move(prelude),
+            };
+        }
+        if (receiver.type.kind == CValueKind::List
+            && member.member == "reserve") {
+            const auto capacity = emit_expression(
+                *call.arguments.front().value, int_type);
+            return {
+                collection_name(receiver.type) + "_reserve(" + receiver.code
+                    + ", " + capacity.code + ")",
+                void_type,
+                false,
+                false,
+                receiver.prelude + capacity.prelude,
+            };
+        }
+        if (receiver.type.kind == CValueKind::List
+            && member.member == "clear") {
+            return {
+                collection_name(receiver.type)
+                    + (call.arena_storage ? "_clear_region(" : "_clear(")
+                    + receiver.code + ")",
+                void_type,
+                false,
+                false,
+                receiver.prelude,
             };
         }
         if (receiver.type.kind == CValueKind::Map && member.member == "contains") {
@@ -6033,6 +6204,9 @@ private:
     std::unordered_set<std::string> instantiating_types_;
     std::set<RuntimeIntrinsic> used_intrinsics_;
     std::vector<std::size_t> loop_scope_indices_;
+    bool has_experimental_regions_{false};
+    std::string current_arena_;
+    std::string current_arena_region_;
     SourceLocation current_location_{1, 1};
 };
 

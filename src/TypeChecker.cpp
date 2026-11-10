@@ -1721,6 +1721,21 @@ Type TypeChecker::check_method_call(
             require_assignable(object.arguments[0], arguments[0], current_location_);
             return void_type;
         }
+        if (object.name == "List" && callee.member == "reserve") {
+            if (arguments.size() != 1) {
+                throw_type_error(current_location_,
+                    "List.reserve expects one capacity argument");
+            }
+            require_assignable(int_type, arguments[0], current_location_);
+            return void_type;
+        }
+        if (object.name == "List" && callee.member == "clear") {
+            if (!arguments.empty()) {
+                throw_type_error(current_location_,
+                    "List.clear expects no arguments");
+            }
+            return void_type;
+        }
         if (object.name == "Map" && callee.member == "contains") {
             if (arguments.size() != 1 || object.arguments.size() != 2) {
                 throw_type_error(current_location_, "Map.contains expects one key");

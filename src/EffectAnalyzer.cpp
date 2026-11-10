@@ -285,6 +285,23 @@ private:
         return substitute_type(type, node.substitutions);
     }
 
+    bool is_managed_collection_element(
+        const Type& type,
+        const EffectNode& node) const
+    {
+        if (type.kind != TypeKind::Unknown) return false;
+        for (const auto& [name, concrete] : node.substitutions) {
+            if (type.name == name) {
+                return is_shared_reference(concrete);
+            }
+        }
+        if (type.name == "List" || type.name == "Map") return true;
+        const auto nominal = nominals_.find(type.name);
+        return nominal != nominals_.end()
+            && (nominal->second->kind == IRDeclarationKind::Class
+                || nominal->second->kind == IRDeclarationKind::Interface);
+    }
+
     void add_intrinsic_effects(
         RuntimeIntrinsic intrinsic,
         const IROperation& operation,
@@ -353,8 +370,20 @@ private:
             if (operation.name == "Array" || operation.name == "List"
                 || operation.name == "Map" || operation.name == "add"
                 || operation.name == "append" || operation.name == "clone"
-                || operation.name == "insert") {
+                || operation.name == "insert" || operation.name == "reserve") {
                 add_operation_effect(node, IREffect::Allocate, operation);
+            }
+            if (operation.name == "clear" && !operation.children.empty()
+                && operation.children.front().result_type) {
+                const auto& receiver = concrete_type(
+                    *operation.children.front().result_type, node);
+                if (receiver.type.name == "List"
+                    && receiver.type.arguments.size() == 1
+                    && is_managed_collection_element(
+                        receiver.type.arguments.front(), node)) {
+                    add_operation_effect(
+                        node, IREffect::ReleaseDestroy, operation);
+                }
             }
             if (operation.result_type
                 && owns_runtime_storage(

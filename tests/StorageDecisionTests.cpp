@@ -24,7 +24,8 @@ void expect(bool condition, std::string_view message)
     if (!condition) throw std::runtime_error(std::string(message));
 }
 
-toro::IRProgram analyze(std::string_view source, bool enable_stack = true)
+toro::IRProgram analyze(std::string_view source, bool enable_stack = true,
+    toro::ExperimentalArenaOptions arena = {})
 {
     auto program = toro::Parser(toro::Lexer(source).tokenize()).parse_program();
     toro::SemanticAnalyzer().analyze(program);
@@ -33,7 +34,7 @@ toro::IRProgram analyze(std::string_view source, bool enable_stack = true)
     toro::EffectAnalyzer().analyze(ir);
     toro::OwnershipSummaryAnalyzer().analyze(ir);
     toro::EscapeAnalyzer().analyze(ir);
-    toro::StorageDecisionAnalyzer().analyze(ir, enable_stack);
+    toro::StorageDecisionAnalyzer().analyze(ir, enable_stack, std::move(arena));
     return ir;
 }
 
@@ -263,6 +264,89 @@ void test_storage_decisions_do_not_change_effect_output()
         "storage decisions changed effect-analysis output");
 }
 
+void test_experimental_arena_region_and_fallbacks()
+{
+    const toro::ExperimentalArenaOptions arena{
+        true, "Item", "tick", 4096, 16};
+    const auto ir = analyze(
+        "class Item {\n"
+        "    public value: int\n"
+        "    init(value: int) { self.value = value }\n"
+        "    destroy() { print(self.value) }\n"
+        "}\n"
+        "function work(limit: int) {\n"
+        "    values := List<Item>()\n"
+        "    index := 0\n"
+        "    while index < limit {\n"
+        "        first := Item(index)\n"
+        "        alias := first\n"
+        "        print(alias.value)\n"
+        "        values.add(first)\n"
+        "        second := Item(index + 1)\n"
+        "        values.add(second)\n"
+        "        values.clear()\n"
+        "        index = index + 1\n"
+        "    }\n"
+        "}\n",
+        true, arena);
+    expect(ir.escape_metrics.arena_allocations == 2
+            && ir.escape_metrics.heap_allocations == 0
+            && ir.regions.size() == 1,
+        "bounded List-owned objects were not assigned to one arena region");
+    expect(ir.regions.front().capacity_bytes == 4096
+            && ir.regions.front().max_objects == 16
+            && ir.regions.front().teardown_entries == 2,
+        "arena capacity or teardown metadata was not retained");
+    for (const auto& candidate : ir.escape_allocations) {
+        expect(candidate.storage == toro::IRStorageClass::Arena
+                && !candidate.region_identity.empty(),
+            "arena allocation lacked storage or provenance");
+    }
+    const auto dump = toro::dump_ir(ir, false, false, true);
+    expect(dump.find("storage arena") != std::string::npos
+            && dump.find("region experimental.tick") != std::string::npos,
+        "arena decision was absent from IR inspection");
+
+    const auto fallback = analyze(
+        "class Item {}\n"
+        "class Watcher { public weak item: Item? }\n"
+        "function work(watcher: Watcher, limit: int) {\n"
+        "    values := List<Item>()\n"
+        "    index := 0\n"
+        "    while index < limit {\n"
+        "        item := Item()\n"
+        "        watcher.item = item\n"
+        "        values.add(item)\n"
+        "        values.clear()\n"
+        "        index = index + 1\n"
+        "    }\n"
+        "}\n",
+        true, arena);
+    expect(fallback.escape_metrics.arena_allocations == 0
+            && fallback.escape_metrics.heap_allocations == 1
+            && fallback.escape_metrics.arena_fallbacks == 1,
+        "weak-observed candidate did not conservatively fall back to heap");
+
+    const auto persistent = analyze(
+        "class Item {}\n"
+        "function work(limit: int) {\n"
+        "    transient := List<Item>()\n"
+        "    persistent := List<Item>()\n"
+        "    index := 0\n"
+        "    while index < limit {\n"
+        "        item := Item()\n"
+        "        transient.add(item)\n"
+        "        persistent.add(item)\n"
+        "        transient.clear()\n"
+        "        index = index + 1\n"
+        "    }\n"
+        "}\n",
+        true, arena);
+    expect(persistent.escape_metrics.arena_allocations == 0
+            && persistent.escape_metrics.arena_fallbacks == 1,
+        "candidate stored in an uncleared collection did not fall back");
+}
+
 } // namespace
 
 int main()
@@ -275,6 +359,7 @@ int main()
         test_foreign_barrier_and_reassignment_fall_back();
         test_dump_determinism();
         test_storage_decisions_do_not_change_effect_output();
+        test_experimental_arena_region_and_fallbacks();
     } catch (const std::exception& error) {
         std::cerr << "storage decision test failure: " << error.what() << '\n';
         return 1;

@@ -29,7 +29,8 @@ void expect(bool condition, std::string_view message)
     if (!condition) throw std::runtime_error(std::string(message));
 }
 
-toro::IRProgram analyze(std::string_view source)
+toro::IRProgram analyze(std::string_view source,
+    toro::ExperimentalArenaOptions arena = {})
 {
     auto tokens = toro::Lexer(source).tokenize();
     auto program = toro::Parser(std::move(tokens)).parse_program();
@@ -40,7 +41,7 @@ toro::IRProgram analyze(std::string_view source)
     toro::OwnershipSummaryAnalyzer().analyze(ir);
     toro::StrongCycleAnalyzer().analyze(ir);
     toro::EscapeAnalyzer().analyze(ir);
-    toro::StorageDecisionAnalyzer().analyze(ir);
+    toro::StorageDecisionAnalyzer().analyze(ir, true, std::move(arena));
     toro::ArcMaterializer().materialize(ir);
     toro::OwnershipTransferAnalyzer().analyze(ir);
     toro::BorrowInferenceAnalyzer().analyze(ir);
@@ -360,6 +361,32 @@ void test_read_only_and_generated_c_stability()
         "memory explanation changed generated C");
 }
 
+void test_arena_explanation()
+{
+    const auto ir = analyze(
+        "class Item {}\n"
+        "function work(limit: int) {\n"
+        "    values := List<Item>()\n"
+        "    index := 0\n"
+        "    while index < limit {\n"
+        "        item := Item()\n"
+        "        values.add(item)\n"
+        "        values.clear()\n"
+        "        index = index + 1\n"
+        "    }\n"
+        "}\n",
+        toro::ExperimentalArenaOptions{true, "Item", "tick", 4096, 8});
+    const auto memory = toro::MemoryReporter().inspect(ir);
+    const auto result = explain_origin(
+        ir, memory, memory.allocations.front().origin);
+    const auto formatted = toro::MemoryExplainer().format(result);
+    expect(formatted.find("decision arena-storage") != std::string::npos
+            && formatted.find("storage arena") != std::string::npos
+            && formatted.find("general-heap-allocation no")
+                != std::string::npos,
+        "memory explanation omitted the arena decision");
+}
+
 } // namespace
 
 int main()
@@ -370,6 +397,7 @@ int main()
         test_arc_borrow_transfer_and_dynamic_explanations();
         test_generic_identity_ambiguity_and_no_result();
         test_read_only_and_generated_c_stability();
+        test_arena_explanation();
     } catch (const std::exception& error) {
         std::cerr << "memory explainer test failure: " << error.what() << '\n';
         return 1;

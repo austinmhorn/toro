@@ -104,6 +104,8 @@ struct CallExpr final : Expr {
     const InterfaceMethod* resolved_interface_method{nullptr};
     std::optional<std::string> transfer_source;
     bool stack_storage{false};
+    bool arena_storage{false};
+    std::string arena_region;
 };
 struct IndexExpr final : Expr {
     IndexExpr(std::unique_ptr<Expr> object, std::unique_ptr<Expr> index)
@@ -210,6 +212,9 @@ struct BlockStmt final : Stmt {
     BlockStmt(SourceLocation location, std::vector<std::unique_ptr<Stmt>> statements)
         : Stmt(StmtKind::Block, location), statements(std::move(statements)) {}
     std::vector<std::unique_ptr<Stmt>> statements;
+    std::string arena_region;
+    std::size_t arena_capacity_bytes{0};
+    std::size_t arena_max_objects{0};
 };
 struct FunctionDeclarationStmt final : Stmt {
     FunctionDeclarationStmt(SourceLocation location, std::string name,

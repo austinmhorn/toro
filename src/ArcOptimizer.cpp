@@ -68,7 +68,8 @@ void materialize_operation(
     switch (operation.kind) {
     case IROperationKind::Construction:
         if (operation.result_type && is_shared_reference(*operation.result_type)) {
-            if (operation.storage != IRStorageClass::Stack) {
+            if (operation.storage == IRStorageClass::Heap
+                || !operation.storage) {
                 append_operation(schedule, IRArcOperationKind::OwnedTemporary,
                     operation.name, operation.origin, "class construction result");
             }
@@ -82,7 +83,8 @@ void materialize_operation(
                     ? &*operation.children.back().result_type
                     : nullptr);
         if (assigned_type && owns_runtime_storage(*assigned_type)
-            && operation.storage != IRStorageClass::Stack) {
+            && operation.storage != IRStorageClass::Stack
+            && operation.storage != IRStorageClass::Arena) {
             append_operation(schedule, IRArcOperationKind::ManagedAssignment,
                 operation.name, operation.origin,
                 operation.kind == IROperationKind::Declare
@@ -141,6 +143,7 @@ void materialize_operation(
     case IROperationKind::InterfaceCall:
         break;
     case IROperationKind::CollectionOperation:
+        if (operation.storage == IRStorageClass::Arena) break;
         if (operation.name == "Array" || operation.name == "List"
             || operation.name == "Map" || operation.name == "add"
             || operation.name == "append" || operation.name == "insert") {
@@ -316,7 +319,8 @@ private:
                     destination = operation.name;
                     eligible = source && operation.result_type
                         && is_shared_reference(*operation.result_type)
-                        && operation.storage != IRStorageClass::Stack;
+                        && operation.storage != IRStorageClass::Stack
+                        && operation.storage != IRStorageClass::Arena;
                 }
                 break;
             case IROperationKind::Assign:
@@ -379,7 +383,9 @@ private:
             }
             if (operation.kind == IROperationKind::Declare
                 && operation.result_type
-                && is_shared_reference(*operation.result_type)) {
+                && is_shared_reference(*operation.result_type)
+                && operation.storage != IRStorageClass::Stack
+                && operation.storage != IRStorageClass::Arena) {
                 owned.insert_or_assign(operation.name, operation.origin);
             }
 

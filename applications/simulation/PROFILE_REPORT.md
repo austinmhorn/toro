@@ -344,3 +344,27 @@ Phase 12.2 recommendation:
 The study identifies theoretically independent work but not a material
 parallel bottleneck or measured benefit. Concurrency, atomic ARC, and
 local/shared ARC specialization remain unauthorized.
+
+## 23. Phase 12.1C follow-up
+
+The collection alternative requested by this study has been measured. See
+`COLLECTION_REUSE_REPORT.md` for the full A/B evidence. Reservation and tick-list
+reuse removed 25,996 allocator invocations and reduced reallocations from
+22,006 to 8, but left all 96,000 `FrameEffect` object/control allocations and
+an approximately 35.5% sampled effect allocation/teardown path. Its resulting
+recommendation is **Prototype arena** as a separate, explicitly authorized
+narrow milestone. No arena implementation is part of the follow-up, and Phase
+12.2 remains **Defer**.
+
+## 24. Phase 12.1D prototype follow-up
+
+The separately authorized narrow implementation and re-profile are documented
+in `ARENA_PROTOTYPE_REPORT.md`. Fixed tick-local region storage eliminated the
+96,000 `FrameEffect` object/control allocator calls and reduced total generated
+allocator invocations to 272. The amplified sampled region
+allocation/registration/clear/teardown path was approximately 11.7%, versus
+35.5% for the post-collection effect lifecycle. Output remained identical,
+memory remained bounded, and leak checking reported zero leaks.
+
+The prototype recommendation is **Proceed to language design**; it does not add
+public syntax or general arena semantics. Phase 12.2 remains **Defer**.

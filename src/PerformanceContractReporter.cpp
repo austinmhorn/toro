@@ -248,7 +248,7 @@ private:
         if (site.effect != IREffect::Allocate) return true;
         if (site.operation_kind != IROperationKind::Construction) return true;
         const auto* allocation = allocation_at(callable, site.origin);
-        return !allocation || allocation->storage == IRStorageClass::Heap;
+        return !allocation || allocation->storage != IRStorageClass::Stack;
     }
 
     std::optional<Explanation> find_explanation(

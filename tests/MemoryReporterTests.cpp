@@ -28,7 +28,8 @@ void expect(bool condition, std::string_view message)
     if (!condition) throw std::runtime_error(std::string(message));
 }
 
-toro::IRProgram analyze(std::string_view source)
+toro::IRProgram analyze(std::string_view source,
+    toro::ExperimentalArenaOptions arena = {})
 {
     auto tokens = toro::Lexer(source).tokenize();
     auto program = toro::Parser(std::move(tokens)).parse_program();
@@ -39,7 +40,7 @@ toro::IRProgram analyze(std::string_view source)
     toro::OwnershipSummaryAnalyzer().analyze(ir);
     toro::StrongCycleAnalyzer().analyze(ir);
     toro::EscapeAnalyzer().analyze(ir);
-    toro::StorageDecisionAnalyzer().analyze(ir);
+    toro::StorageDecisionAnalyzer().analyze(ir, true, std::move(arena));
     toro::ArcMaterializer().materialize(ir);
     toro::OwnershipTransferAnalyzer().analyze(ir);
     toro::BorrowInferenceAnalyzer().analyze(ir);
@@ -51,12 +52,15 @@ toro::IRProgram analyze(std::string_view source)
 void expect_summary_matches_details(const toro::MemoryReport& report)
 {
     std::size_t stack = 0;
+    std::size_t arena = 0;
     std::size_t heap = 0;
     std::size_t non_escaping = 0;
     std::size_t escaping = 0;
     std::size_t unknown = 0;
     for (const auto& allocation : report.allocations) {
-        allocation.storage == toro::IRStorageClass::Stack ? ++stack : ++heap;
+        if (allocation.storage == toro::IRStorageClass::Stack) ++stack;
+        else if (allocation.storage == toro::IRStorageClass::Arena) ++arena;
+        else ++heap;
         if (allocation.escape_state == toro::IREscapeState::DoesNotEscape) {
             ++non_escaping;
         } else if (allocation.escape_state == toro::IREscapeState::Escapes) {
@@ -78,6 +82,7 @@ void expect_summary_matches_details(const toro::MemoryReport& report)
     expect(report.summary.managed_allocation_sites
                 == report.allocations.size()
             && report.summary.stack_allocation_sites == stack
+            && report.summary.arena_allocation_sites == arena
             && report.summary.heap_allocation_sites == heap,
         "allocation summary did not equal detailed allocation records");
     expect(report.summary.non_escaping_sites == non_escaping
@@ -93,6 +98,35 @@ void expect_summary_matches_details(const toro::MemoryReport& report)
                 == arc.ownership_transfers
             && report.summary.arc.inferred_borrows == arc.inferred_borrows,
         "ARC summary did not equal per-callable records");
+}
+
+void test_arena_runtime_facts()
+{
+    const auto ir = analyze(
+        "class Item {}\n"
+        "function work(limit: int) {\n"
+        "    values := List<Item>()\n"
+        "    index := 0\n"
+        "    while index < limit {\n"
+        "        item := Item()\n"
+        "        values.add(item)\n"
+        "        values.clear()\n"
+        "        index = index + 1\n"
+        "    }\n"
+        "}\n",
+        toro::ExperimentalArenaOptions{true, "Item", "tick", 4096, 8});
+    const auto report = toro::MemoryReporter().inspect(ir);
+    expect(report.summary.arena_allocation_sites == 1
+            && report.summary.arena_teardown_entries == 1
+            && report.allocations.front().storage
+                == toro::IRStorageClass::Arena
+            && !report.allocations.front().region_identity.empty(),
+        "memory report omitted arena storage/runtime facts");
+    const auto formatted = toro::MemoryReporter().format(report);
+    expect(formatted.find("runtime-storage arena") != std::string::npos
+            && formatted.find("general-heap-allocation no") != std::string::npos
+            && formatted.find("region experimental.tick") != std::string::npos,
+        "formatted memory report omitted arena provenance");
 }
 
 void expect_final_arc_order_matches(
@@ -362,6 +396,7 @@ int main()
         test_owned_storage_collections_and_interface_borrows();
         test_weak_fields_and_cycles();
         test_generics_determinism_and_non_mutation();
+        test_arena_runtime_facts();
     } catch (const std::exception& error) {
         std::cerr << "memory reporter test failure: " << error.what() << '\n';
         return 1;

@@ -934,14 +934,60 @@ Completed conclusions:
   storage decisions, cleanup obligations, and capacity classification;
 - no performance-contract policy changes are made.
 
-Recommendation: **Prototype alternative first.** A separately authorized
-Phase 12.1C should measure `List<T>` reservation, clear, and reuse against the
-saved A2 workload. A narrow internal arena prototype remains conditional on
-the post-alternative effect allocation/finalization path remaining material and
-requires separate authorization. See `docs/ARENA_DESIGN.md`.
+Historical recommendation: **Prototype alternative first.** The separately
+authorized Phase 12.1C, recorded immediately below, measured `List<T>`
+reservation, clear, and reuse against the saved A2 workload. A narrow internal
+arena prototype still requires separate authorization. See
+`docs/ARENA_DESIGN.md`.
 
 Phase 12.1B adds no arena syntax, frontend changes, IR operations, runtime
 allocator, backend lowering, or performance-policy behavior.
+
+## 12.1C Collection reservation and reuse experiment — completed
+
+The authorized alternative-first experiment added the minimal
+`List<T>.reserve(capacity)` and `List<T>.clear()` APIs, preserved shared List
+identity and managed-element cleanup, and changed the representative simulation
+to retain and reuse its tick event/effect lists.
+
+Using the saved A2 methodology:
+
+- total generated allocator invocations fell from 122,268 to 96,272, a
+  reduction of 25,996 (21.26%);
+- reallocations fell from 22,006 to 8;
+- per-tick List object creation fell from 4,000 objects to two persistent
+  objects;
+- all 96,000 `FrameEffect` object/control allocations remained;
+- effect allocation plus final teardown remained approximately 35.5% of the
+  allocation-amplified native sample, above Phase 12.1B's 10% gate;
+- deterministic output, strict C11, ownership behavior, bounded memory, and
+  zero-leak results were preserved.
+
+Recommendation: **Prototype arena.** This means a separate narrow internal
+prototype milestone may be proposed. It does not authorize arena syntax, IR,
+runtime support, or lowering in 12.1C. The canonical evidence is
+`applications/simulation/COLLECTION_REUSE_REPORT.md`. Phase 12.2 remains
+**Defer**.
+
+## 12.1D Narrow internal arena prototype — completed
+
+The explicitly authorized simulation-scoped prototype adds an experimental
+manifest opt-in, typed-IR `Arena` storage and region provenance, conservative
+cleared-List lifetime proof, structured ARC suppression, and a fixed aligned
+C11 bump region with reverse-order finalization. It is not stable source syntax
+or a general project feature.
+
+Measured against the same workload, generated allocator invocations fell from
+96,272 after 12.1C to 272. All 96,000 `FrameEffect` object/control allocator
+calls were eliminated. The amplified sampled region storage/lifecycle path was
+approximately 11.7%, down from 35.5%, while output stayed byte-identical,
+memory stayed bounded, and leak checking remained zero.
+
+Recommendation: **Proceed to language design.** A later milestone may specify
+real region semantics and user experience; this prototype does not authorize
+public syntax, arbitrary arenas, weak/FFI arena references, threads, or broad
+inference. See `applications/simulation/ARENA_PROTOTYPE_REPORT.md`. Phase 12.2
+remains **Defer**.
 
 ## 12.2 Concurrency model
 

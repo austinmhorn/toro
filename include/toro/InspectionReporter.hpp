@@ -16,6 +16,7 @@ struct IRInspectionAllocation {
     IREscapeState escape_state{IREscapeState::Unknown};
     IRStorageClass storage{IRStorageClass::Heap};
     std::string reason;
+    std::string region_identity;
 };
 
 struct IRInspectionDispatch {

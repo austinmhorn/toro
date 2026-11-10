@@ -1573,8 +1573,10 @@ void test_core_collection_types()
         "    values[0] = 4\n"
         "    first: int = values[0]\n"
         "    list := List<string>(\"Toro\")\n"
+        "    list.reserve(8)\n"
         "    list.add(\"native\")\n"
         "    copy: List<string> = list.clone()\n"
+        "    list.clear()\n"
         "    count: int = copy.count\n"
         "    map := Map<string, int>()\n"
         "    map[\"answer\"] = 42\n"
@@ -1588,6 +1590,18 @@ void test_core_collection_types()
         "    values[\"bad\"] = 2\n"
         "}\n",
         "cannot assign value of type 'string' to type 'int'");
+    expect_error(
+        "function main() {\n values := List<int>()\n values.reserve()\n}\n",
+        "List.reserve expects one capacity argument");
+    expect_error(
+        "function main() {\n values := List<int>()\n values.reserve(1.0)\n}\n",
+        "cannot assign value of type 'dec' to type 'int'");
+    expect_error(
+        "function main() {\n values := List<int>()\n values.clear(1)\n}\n",
+        "List.clear expects no arguments");
+    expect_error(
+        "function main() {\n values := Array<int>(1)\n values.clear()\n}\n",
+        "collection type 'Array' has no method named 'clear'");
     expect_error(
         "function main() {\n"
         "    values := List<int>()\n"
