@@ -740,3 +740,32 @@ This does not finalize syntax or make the prototype production-ready.
 Destructor timing, capacity/fallback policy, diagnostics, inference boundaries,
 and any user-facing region model require a later canonical design milestone.
 Phase 12.2 remains deferred.
+
+## 26. Phase 12.1E language-design outcome
+
+The later canonical language-design milestone is complete in
+`docs/ARENA_LANGUAGE_DESIGN.md`. It evaluated explicit, named, value-based,
+hinted, and fully inferred source models and selected one future spelling:
+
+```toro
+arena {
+    // ordinary construction and references
+}
+```
+
+The block expresses a lexical lifetime boundary, not manual allocator
+selection. Construction remains ordinary, and the storage pass retains
+Stack -> Arena -> Heap authority. Unproven or escaping allocations use a
+compatible outer arena or heap from the start; valid ordinary Toro is not
+rejected merely because arena optimization fails.
+
+The design preserves logical last-owner destruction, exactly-once lifecycle,
+derived-to-base cleanup, and reverse construction order for objects still live
+at teardown. Weak-observed targets remain heap-backed. Collection backing
+storage, FFI arena references, public capacity controls, performance-policy
+changes, and concurrency are deferred.
+
+Final decision: **Authorize production implementation** for the narrow Phase
+12.1F slice specified in that document. This section does not implement or
+activate the syntax, and the 12.1D manifest remains experimental until replaced
+by that future milestone.

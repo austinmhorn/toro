@@ -149,8 +149,14 @@ Long term:
   `applications/simulation/ARENA_PROTOTYPE_REPORT.md`, and its recommendation
   is `Proceed to language design`. This does not authorize public arena syntax,
   arbitrary arenas, general region inference, weak/FFI arena references,
-  concurrency, or production use. Do not broaden the prototype without a later
-  canonical design milestone.
+  concurrency, or production use. Phase 12.1E is that canonical design
+  milestone. It selects the future `arena { ... }` lexical lifetime-intent
+  block, ordinary construction with compiler-selected Stack -> Arena -> Heap
+  storage, conservative heap fallback, and exactly-once lifecycle semantics.
+  The design is recorded in `docs/ARENA_LANGUAGE_DESIGN.md` and authorizes only
+  the narrow Phase 12.1F implementation slice described there. The syntax is
+  not implemented yet. Do not broaden the prototype or treat the experimental
+  manifest mechanism as stable.
 - Application Milestone A1 provides the representative simulation and static
   evidence. A2 adds external timing, sampling, allocation, memory, and leak
   evidence in `applications/simulation/PROFILE_REPORT.md`. Its arena
@@ -158,8 +164,9 @@ Long term:
   Phase 12.1C's evidence is recorded in
   `applications/simulation/COLLECTION_REUSE_REPORT.md`; Phase 12.1D's measured
   prototype evidence is recorded in `ARENA_PROTOTYPE_REPORT.md`. The prototype
-  is not authorization for concurrency, atomic ARC, local/shared ARC
-  specialization, or stable language semantics. Phase 12.2 remains `Defer`.
+  and Phase 12.1E design are not authorization for concurrency, atomic ARC,
+  local/shared ARC specialization, or arena syntax beyond the future 12.1F
+  lexical block. Phase 12.2 remains `Defer`.
 
 `performance function` is the canonical compiler-enforced execution contract,
 not merely an optimization hint. Its syntax and typed IR marker are active.

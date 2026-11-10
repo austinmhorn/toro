@@ -440,3 +440,18 @@ Its recommendation is **Proceed to language design**. That advances the work to
 a future semantics/design milestone only. The internal manifest opt-in is not
 Toro syntax, and general arenas, weak/FFI participation, threads, and broad
 region inference remain unauthorized. Phase 12.2 remains **Defer**.
+
+## 21. Phase 12.1E language-design result
+
+The authorized semantic design is complete in
+`docs/ARENA_LANGUAGE_DESIGN.md`. It selects a future lexical `arena { ... }`
+block that expresses bounded lifetime intent while leaving Stack/Arena/Heap
+placement to compiler analysis. Escaping or unproven candidates fall back from
+the start rather than making otherwise valid code fail or relocating an
+existing identity.
+
+The final design decision is **Authorize production implementation** for a
+narrow Phase 12.1F slice. The syntax is not implemented in 12.1E, the prototype
+manifest is not stable, and weak arena targets, collection backing storage,
+FFI arena references, performance-policy changes, and concurrency remain
+deferred. Phase 12.2 remains **Defer**.

@@ -989,6 +989,60 @@ public syntax, arbitrary arenas, weak/FFI arena references, threads, or broad
 inference. See `applications/simulation/ARENA_PROTOTYPE_REPORT.md`. Phase 12.2
 remains **Defer**.
 
+## 12.1E Arena language design specification — completed
+
+The canonical design is recorded in `docs/ARENA_LANGUAGE_DESIGN.md`.
+
+Completed decisions:
+
+- one future user-facing spelling: `arena { ... }`;
+- an explicit lexical lifetime-intent boundary rather than a named allocator,
+  arena value, per-construction placement operator, or lifetime-annotated
+  reference type;
+- ordinary construction with compiler-selected Stack -> Arena -> Heap storage;
+- semantic cleanup and non-escape guarantees for arena-selected objects, while
+  physical placement remains an optimization and unproven candidates fall back
+  to compatible outer arena or heap storage;
+- one logical lifetime per dynamic block entry, including one per loop
+  iteration, with physical storage reuse permitted only after cleanup;
+- exactly-once logical destruction, derived-to-base cleanup, and reverse
+  construction order for objects still live at arena teardown;
+- same-arena ARC suppression only where proven, ordinary ownership for heap
+  targets, and no longer-lived owner retaining an arena object;
+- weak-observed targets remain heap-backed; FFI arena references, concurrency,
+  public capacity controls, and arena-backed collection buffers remain deferred;
+- ordinary List backing may remain heap-backed while holding arena references
+  only when its aliases/elements are proved bounded by the same lifetime;
+- no current `performance function` policy change;
+- retirement, not stabilization, of Phase 12.1D's experimental manifest keys.
+
+Final decision: **Authorize production implementation** for only the narrow
+Phase 12.1F slice below. Phase 12.1E changes documentation and design only; the
+compiler does not yet accept `arena` syntax. Phase 12.2 remains **Defer**.
+
+## 12.1F Core lexical arena semantics — authorized, not implemented
+
+Implement the minimal production slice specified by Phase 12.1E:
+
+- parse and format `arena { ... }` as a lexical block statement;
+- represent begin/end cleanup on every exit in typed IR;
+- preserve ordinary class construction and Stack -> Arena -> Heap selection;
+- initially select Arena only for directly constructed class graphs whose
+  ownership ends at block exit, including the proven cleared-List pattern;
+- preserve init, identity, inheritance, dispatch, exactly-once destroy,
+  derived-to-base cleanup, strong heap fields, and reverse-order teardown;
+- use heap fallback for returns, persistent owners, weak targets, FFI/unknown
+  calls, incompatible region edges, early-death cases not yet represented, or
+  uncertain proof;
+- keep collection backing storage ordinary and keep performance policy
+  unchanged;
+- replace the experimental simulation manifest path before completion;
+- provide deterministic inspection/explanation and differential native tests.
+
+Do not begin weak arena targets, collection-buffer arenas, hidden
+interprocedural region propagation, public capacity syntax, performance-policy
+integration, or concurrency as part of 12.1F.
+
 ## 12.2 Concurrency model
 
 Define Toro concurrency before optimizing for it.

@@ -198,3 +198,15 @@ Phase 12.2 recommendation:
 
 No concurrency, atomic ARC, or local/shared ARC specialization evidence was
 added by this experiment.
+
+## 21. Phase 12.1E design follow-up
+
+The authorized language-design milestone is now complete in
+`docs/ARENA_LANGUAGE_DESIGN.md`. It selects the future `arena { ... }` lexical
+lifetime-intent block with ordinary construction and compiler-selected
+Stack/Arena/Heap placement. Its decision is **Authorize production
+implementation** for a narrow Phase 12.1F slice.
+
+That later design does not make this prototype's `[experimental]` manifest
+configuration stable. The current compiler still does not accept arena source
+syntax, and Phase 12.2 remains **Defer**.

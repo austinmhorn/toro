@@ -171,7 +171,13 @@ allocations intact. Phase 12.1D then implemented the separately authorized
 narrow internal prototype. It removed those allocator calls with fixed bounded
 storage while preserving tested lifecycle semantics, so the recommendation is
 to proceed to a later language-design milestone. This is evidence for design,
-not public syntax or permission to generalize the experimental path.
+not permission to generalize the experimental path. Phase 12.1E now completes
+that design milestone: the future source model is one lexical `arena { ... }`
+lifetime-intent block, ordinary construction, and compiler-selected
+Stack/Arena/Heap placement with conservative heap fallback. This adds one
+bounded-lifetime concept without turning individual references into ownership
+programming. The design authorizes only a narrow future implementation; the
+syntax is not active yet.
 
 ### References
 

@@ -382,3 +382,12 @@ invocations from 96,272 to 272. The amplified sampled region
 storage/lifecycle path is approximately 11.7%, down from 35.5%; memory remains
 bounded and leak checking reports zero leaks. The recommendation is **Proceed
 to language design**. Phase 12.2 remains **Defer**.
+
+## 21. Phase 12.1E language-design supplement
+
+The canonical design is now recorded in `docs/ARENA_LANGUAGE_DESIGN.md`. The
+future source model is one lexical `arena { ... }` block; ordinary construction
+remains unchanged and compiler analysis selects Stack, Arena, or Heap. The
+design authorizes only the narrow future Phase 12.1F implementation. No arena
+syntax is implemented by 12.1E, the simulation manifest path remains
+experimental, and Phase 12.2 remains **Defer**.
