@@ -150,13 +150,15 @@ logical lifetime ends every tick, while ownership transfer already removes
 part of the ARC traffic. That is a useful candidate pattern, not runtime cost
 proof by itself. Application Milestone A2 then measured that path externally:
 effect allocation and final lifecycle were material native CPU categories while
-peak memory stayed bounded. That evidence reopens arena design investigation,
-but not implementation; alternatives such as collection reuse, value
-representation, scalar replacement, and collection-aware storage still require
-comparison. The same profile did not demonstrate a concurrency benefit, so
-execution-model design remains deferred. This is the intended evidence-first
-progression: build applications, observe real constraints, profile separately,
-and only then authorize narrowly scoped design work.
+peak memory stayed bounded. At that stage, the evidence reopened arena design
+investigation but did not authorize implementation; alternatives such as
+collection reuse, value representation, scalar replacement, and
+collection-aware storage still required comparison. The later Phase 12.1B
+through 12.1F sequence completed that evidence-driven work. The same profile
+did not demonstrate a concurrency benefit, so execution-model design remains
+deferred. This is the intended evidence-first progression: build applications,
+observe real constraints, profile separately, and only then authorize narrowly
+scoped design work.
 
 Phase 12.1B applies that discipline to the reopened gate. Its preferred
 eventual region model is inferred and lexically anchored, preserving ordinary

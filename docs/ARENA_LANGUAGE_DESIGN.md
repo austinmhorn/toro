@@ -39,11 +39,11 @@ The final decision is:
 Authorize production implementation
 ```
 
-The authorized next milestone is the narrow Phase 12.1F slice specified in
-section 31. It does not authorize arbitrary arena values, manual reset,
-per-reference lifetime syntax, weak arena targets, arena-backed collection
-buffers, FFI arena references, concurrency, or performance-contract policy
-changes.
+The authorized implementation milestone was the narrow Phase 12.1F slice
+specified in section 31, and that milestone is now complete. Its authorization
+does not extend to arbitrary arena values, manual reset, per-reference lifetime
+syntax, weak arena targets, arena-backed collection buffers, FFI arena
+references, concurrency, or performance-contract policy changes.
 
 ## 2. Evidence and motivation
 
@@ -647,7 +647,7 @@ There is no source migration alias and no permanent manifest arena API.
 
 ### Phase 12.1F — core lexical arena semantics
 
-This is the exact authorized next implementation milestone:
+This was the exact authorized implementation milestone and is now complete:
 
 - add the `arena { ... }` statement to lexer, parser, AST, formatter, semantic
   checking, and typed IR;

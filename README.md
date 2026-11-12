@@ -34,9 +34,11 @@ references, lifecycle behavior, and performance-contracted numeric helpers.
 Its evidence report records current memory and ergonomics findings. The
 follow-up external profiling study is recorded in
 `applications/simulation/PROFILE_REPORT.md`. It found material bounded
-tick-local allocation/lifecycle cost and reopens arena *design investigation*
-without authorizing an arena implementation. It found no evidence sufficient
-to reopen concurrency design.
+tick-local allocation/lifecycle cost and, at that stage, reopened arena
+*design investigation* without authorizing implementation. The later
+Phase 12.1B through 12.1F milestones completed the resulting design and narrow
+production implementation. The profile found no evidence sufficient to reopen
+concurrency design, so Phase 12.2 remains deferred.
 
 The first compiler implementation is written in C++23.
 It currently loads and tokenizes `.toro` source files and can parse expressions,

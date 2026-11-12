@@ -1120,11 +1120,13 @@ Completed as an evidence-gathering milestone:
 - found no measured parallel speedup or sufficiently dominant parallel region.
 
 The resulting arena recommendation was **Reopen** for the now-completed Phase
-12.1B design/alternatives investigation. Phase 12.1B recommends **Prototype
-alternative first**, pending separate authorization. No arena syntax, IR,
-runtime, or lowering is authorized. Phase 12.2 remains **Defer**; concurrency,
-atomic ARC, and local/shared ARC specialization remain unauthorized. See
-`applications/simulation/PROFILE_REPORT.md` and `docs/ARENA_DESIGN.md`.
+12.1B design/alternatives investigation. Its historical recommendation was
+**Prototype alternative first**; the separately authorized Phase 12.1C through
+12.1F milestones subsequently completed that experiment, prototype, language
+design, and narrow production implementation. Phase 12.2 remains **Defer**;
+concurrency, atomic ARC, and local/shared ARC specialization remain
+unauthorized. See `applications/simulation/PROFILE_REPORT.md` and
+`docs/ARENA_DESIGN.md`.
 
 Before 1.0, build representative real applications in target domains.
 

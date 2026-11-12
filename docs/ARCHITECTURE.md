@@ -987,7 +987,8 @@ FFI crossings, unproven escapes, and unsupported lifetime shapes remain Heap.
 
 Later phases may explore, when evidence justifies them:
 
-- arenas/scoped bulk allocation;
+- broader arena/scoped-allocation capabilities beyond the completed lexical
+  Phase 12.1F slice;
 - local vs shared/thread-safe ARC;
 - deeper instance/path cycle proofs and optional ownership-graph inspection;
 - broader consumers of the current interprocedural ownership summaries;
