@@ -450,8 +450,8 @@ placement to compiler analysis. Escaping or unproven candidates fall back from
 the start rather than making otherwise valid code fail or relocating an
 existing identity.
 
-The final design decision is **Authorize production implementation** for a
-narrow Phase 12.1F slice. The syntax is not implemented in 12.1E, the prototype
-manifest is not stable, and weak arena targets, collection backing storage,
-FFI arena references, performance-policy changes, and concurrency remain
-deferred. Phase 12.2 remains **Defer**.
+The final design decision was **Authorize production implementation** for a
+narrow Phase 12.1F slice. Phase 12.1F subsequently implemented the lexical
+syntax and replaced the unstable prototype manifest. Weak arena targets,
+collection backing storage, FFI arena references, performance-policy changes,
+and concurrency remain deferred. Phase 12.2 remains **Defer**.

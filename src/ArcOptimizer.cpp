@@ -66,6 +66,8 @@ void materialize_operation(
     std::size_t& next_pair)
 {
     switch (operation.kind) {
+    case IROperationKind::Region:
+        break;
     case IROperationKind::Construction:
         if (operation.result_type && is_shared_reference(*operation.result_type)) {
             if (operation.storage == IRStorageClass::Heap

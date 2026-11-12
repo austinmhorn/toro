@@ -1,9 +1,10 @@
 # Phase 12.1E — arena language design specification
 
-> **Design status:** approved language design, not implemented syntax.
+> **Design status:** approved and implemented for the narrow Phase 12.1F slice.
 >
-> The current compiler does not accept the examples in this document. Phase
-> 12.1D's manifest-controlled implementation remains an internal prototype.
+> The compiler accepts the canonical `arena { ... }` syntax. Phase 12.1D's
+> manifest-controlled prototype has been retired; exclusions in this document
+> remain authoritative for the initial production feature.
 
 ## 1. Executive summary
 
@@ -629,15 +630,15 @@ they never infer placement independently.
 
 ## 30. Experimental-prototype migration
 
-Phase 12.1D's `[experimental]` manifest keys are not canonical and receive no
-compatibility guarantee. During Phase 12.1F they may remain only as a test
-oracle for differential comparison. Before the production milestone completes:
+Phase 12.1D's `[experimental]` manifest keys were never canonical and received
+no compatibility guarantee. Phase 12.1F removed them from normal project
+configuration after differential comparison. The completed migration:
 
-1. the simulation source adopts the canonical `arena {}` block;
-2. the experimental type-name/region/capacity manifest entries are removed;
-3. ordinary project configuration stops accepting those entries;
-4. any retained fixed prototype path lives only in compiler test fixtures;
-5. generated region identity derives from logical source/IR identity, never a
+1. migrated the simulation source to the canonical `arena {}` block;
+2. removed the experimental type-name/region/capacity manifest entries;
+3. stopped ordinary project configuration from accepting those entries;
+4. replaced the fixed prototype runtime with growable production chunks; and
+5. derives generated region identity from logical source/IR identity, never a
    machine path or manifest-selected type name.
 
 There is no source migration alias and no permanent manifest arena API.

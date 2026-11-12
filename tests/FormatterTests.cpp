@@ -185,6 +185,24 @@ void test_comments_fail_without_modification()
         "formatter modified a source containing unsupported comments");
 }
 
+void test_arena_blocks()
+{
+    const toro::Formatter formatter;
+    const std::string formatted = formatter.format(
+        "function main(){arena{arena{print(1)}}}\n");
+    constexpr std::string_view expected =
+        "function main() {\n"
+        "    arena {\n"
+        "        arena {\n"
+        "            print(1)\n"
+        "        }\n"
+        "    }\n"
+        "}\n";
+    expect(formatted == expected, "arena blocks were not formatted canonically");
+    expect(formatter.format(formatted) == formatted,
+        "arena formatting was not idempotent");
+}
+
 } // namespace
 
 int main()
@@ -194,6 +212,7 @@ int main()
         test_current_language_constructs();
         test_check_write_and_parse_safety();
         test_comments_fail_without_modification();
+        test_arena_blocks();
     } catch (const std::exception& error) {
         std::cerr << "formatter test failure: " << error.what() << '\n';
         return 1;

@@ -151,6 +151,7 @@ enum class StmtKind {
     IndexAssignment, Expression, FunctionDeclaration, Return, Block, If,
     While, ForIn, Stop, Continue, EnumDeclaration, Handle,
     StructDeclaration, ClassDeclaration, InterfaceDeclaration,
+    Arena,
 };
 struct Stmt {
     Stmt(StmtKind value_kind, SourceLocation value_location)
@@ -212,9 +213,14 @@ struct BlockStmt final : Stmt {
     BlockStmt(SourceLocation location, std::vector<std::unique_ptr<Stmt>> statements)
         : Stmt(StmtKind::Block, location), statements(std::move(statements)) {}
     std::vector<std::unique_ptr<Stmt>> statements;
-    std::string arena_region;
-    std::size_t arena_capacity_bytes{0};
-    std::size_t arena_max_objects{0};
+};
+struct ArenaStmt final : Stmt {
+    ArenaStmt(SourceLocation location, std::unique_ptr<BlockStmt> body,
+        std::string region_identity)
+        : Stmt(StmtKind::Arena, location), body(std::move(body)),
+          region_identity(std::move(region_identity)) {}
+    std::unique_ptr<BlockStmt> body;
+    std::string region_identity;
 };
 struct FunctionDeclarationStmt final : Stmt {
     FunctionDeclarationStmt(SourceLocation location, std::string name,

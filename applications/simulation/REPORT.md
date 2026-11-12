@@ -385,9 +385,8 @@ to language design**. Phase 12.2 remains **Defer**.
 
 ## 21. Phase 12.1E language-design supplement
 
-The canonical design is now recorded in `docs/ARENA_LANGUAGE_DESIGN.md`. The
-future source model is one lexical `arena { ... }` block; ordinary construction
-remains unchanged and compiler analysis selects Stack, Arena, or Heap. The
-design authorizes only the narrow future Phase 12.1F implementation. No arena
-syntax is implemented by 12.1E, the simulation manifest path remains
-experimental, and Phase 12.2 remains **Defer**.
+The canonical design is recorded in `docs/ARENA_LANGUAGE_DESIGN.md`. Its source
+model is one lexical `arena { ... }` block; ordinary construction remains
+unchanged and compiler analysis selects Stack, Arena, or Heap. Phase 12.1F
+subsequently implemented that narrow slice, migrated this simulation, and
+removed the experimental manifest path. Phase 12.2 remains **Defer**.

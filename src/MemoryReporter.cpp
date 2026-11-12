@@ -128,6 +128,8 @@ MemoryReport MemoryReporter::inspect(const IRProgram& program) const
     report.entry_module = program.entry_module;
 
     for (const auto& allocation : program.escape_allocations) {
+        const auto region = std::ranges::find(
+            program.regions, allocation.region_identity, &IRRegionInfo::identity);
         auto causes = allocation.causes;
         std::ranges::sort(causes,
             [](const auto& left, const auto& right) {
@@ -154,6 +156,8 @@ MemoryReport MemoryReporter::inspect(const IRProgram& program) const
             allocation.storage,
             allocation.storage_reason,
             allocation.region_identity,
+            region == program.regions.end()
+                ? std::string{} : region->parent_identity,
             std::move(causes),
         });
     }
@@ -326,6 +330,10 @@ std::string MemoryReporter::format(const MemoryReport& report) const
         }
         if (!allocation.region_identity.empty()) {
             output += "    region " + allocation.region_identity + "\n";
+            if (!allocation.parent_region_identity.empty()) {
+                output += "    parent-region "
+                    + allocation.parent_region_identity + "\n";
+            }
         }
         output += "    escape-causes\n";
         if (allocation.escape_causes.empty()) output += "      none\n";

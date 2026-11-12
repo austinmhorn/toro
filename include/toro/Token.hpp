@@ -44,6 +44,7 @@ enum class TokenType {
     As,
     Weak,
     Performance,
+    Arena,
 
     Plus,
     Minus,
@@ -120,6 +121,7 @@ struct Token {
     case TokenType::As: return "As";
     case TokenType::Weak: return "Weak";
     case TokenType::Performance: return "Performance";
+    case TokenType::Arena: return "Arena";
     case TokenType::Plus: return "Plus";
     case TokenType::Minus: return "Minus";
     case TokenType::Star: return "Star";

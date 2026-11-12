@@ -1816,6 +1816,29 @@ void test_performance_function_failures()
         "expected '{' before method body");
 }
 
+void test_arena_blocks()
+{
+    expect_program_dump(
+        "function main() { arena { arena { print(1) } } }\n",
+        "FunctionDeclaration(main)\n"
+        "  Parameters\n"
+        "  Block\n"
+        "    Arena\n"
+        "      Block\n"
+        "        Arena\n"
+        "          Block\n"
+        "            ExpressionStatement\n"
+        "              Call\n"
+        "                Identifier(print)\n"
+        "                Integer(1)\n");
+    expect_program_error(
+        "function main() { arena named {} }\n",
+        "expected '{' after 'arena'");
+    expect_program_error(
+        "function main() { arena() {} }\n",
+        "expected '{' after 'arena'");
+}
+
 } // namespace
 
 int main()
@@ -1903,6 +1926,7 @@ int main()
         test_conversion_failures();
         test_external_c_declarations();
         test_performance_function_failures();
+        test_arena_blocks();
     } catch (const std::exception& error) {
         std::cerr << "parser test failure: " << error.what() << '\n';
         return 1;

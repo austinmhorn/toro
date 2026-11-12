@@ -4,11 +4,3 @@ name = "toro-simulation"
 [source]
 root = "src"
 entry = "main.toro"
-
-# Phase 12.1D internal prototype configuration. This is not stable Toro syntax
-# or a general project-manifest feature.
-[experimental]
-arena_type = "FrameEffect"
-arena_region = "tick"
-arena_capacity_bytes = "32768"
-arena_max_objects = "256"

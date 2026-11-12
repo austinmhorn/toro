@@ -27,8 +27,7 @@ void expect(bool condition, std::string_view message)
     if (!condition) throw std::runtime_error(std::string(message));
 }
 
-toro::IRProgram analyze(std::string_view source,
-    toro::ExperimentalArenaOptions arena = {})
+toro::IRProgram analyze(std::string_view source)
 {
     auto tokens = toro::Lexer(source).tokenize();
     auto program = toro::Parser(std::move(tokens)).parse_program();
@@ -39,7 +38,7 @@ toro::IRProgram analyze(std::string_view source,
     toro::OwnershipSummaryAnalyzer().analyze(ir);
     toro::StrongCycleAnalyzer().analyze(ir);
     toro::EscapeAnalyzer().analyze(ir);
-    toro::StorageDecisionAnalyzer().analyze(ir, true, std::move(arena));
+    toro::StorageDecisionAnalyzer().analyze(ir);
     toro::ArcMaterializer().materialize(ir);
     toro::OwnershipTransferAnalyzer().analyze(ir);
     toro::BorrowInferenceAnalyzer().analyze(ir);
@@ -146,18 +145,23 @@ void test_arena_inspection()
         "    values := List<Item>()\n"
         "    index := 0\n"
         "    while index < limit {\n"
+        "      arena {\n"
+        "       arena {\n"
         "        item := Item()\n"
         "        values.add(item)\n"
         "        values.clear()\n"
         "        index = index + 1\n"
+        "       }\n"
+        "      }\n"
         "    }\n"
-        "}\n",
-        toro::ExperimentalArenaOptions{true, "Item", "tick", 4096, 8});
+        "}\n");
     const auto output = toro::InspectionReporter().report(ir);
     expect(output.find("allocations stack 0 arena 1 heap 0")
                 != std::string::npos
             && output.find("storage arena") != std::string::npos
-            && output.find("region experimental.tick") != std::string::npos,
+            && output.find("region <direct>.arena@") != std::string::npos
+            && output.find("parent-region <direct>.arena@")
+                != std::string::npos,
         "general inspection omitted arena storage or region provenance");
 }
 

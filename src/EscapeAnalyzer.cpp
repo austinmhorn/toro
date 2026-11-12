@@ -505,6 +505,11 @@ private:
         case IROperationKind::Block:
             analyze_scoped_block(operation, aliases, callable);
             return;
+        case IROperationKind::Region:
+            if (!operation.children.empty()) {
+                analyze_scoped_block(operation.children.front(), aliases, callable);
+            }
+            return;
         case IROperationKind::Branch:
             analyze_branch(operation, aliases, callable);
             return;

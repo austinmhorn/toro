@@ -2,9 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
-#include <charconv>
 #include <fstream>
-#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -74,22 +72,6 @@ std::string parse_string(
             "string escapes and embedded quotes are not supported");
     }
     return std::string(value);
-}
-
-std::size_t parse_positive_size(
-    const std::filesystem::path& path,
-    std::string_view field,
-    const std::string& value)
-{
-    std::size_t result = 0;
-    const auto [end, error] = std::from_chars(
-        value.data(), value.data() + value.size(), result);
-    if (error != std::errc{} || end != value.data() + value.size()
-        || result == 0) {
-        throw_manifest_error(path, 0,
-            std::string(field) + " must be a positive decimal integer string");
-    }
-    return result;
 }
 
 std::vector<std::string> parse_string_array(
@@ -257,11 +239,7 @@ ProjectConfig ProjectConfigLoader::load(
             continue;
         }
         if (qualified != "project.name" && qualified != "source.root"
-            && qualified != "source.entry"
-            && qualified != "experimental.arena_type"
-            && qualified != "experimental.arena_region"
-            && qualified != "experimental.arena_capacity_bytes"
-            && qualified != "experimental.arena_max_objects") {
+            && qualified != "source.entry") {
             throw_manifest_error(absolute_manifest, line_number,
                 "unknown configuration key '" + qualified + "'");
         }
@@ -329,34 +307,6 @@ ProjectConfig ProjectConfigLoader::load(
             "source.entry resolves outside the configured source root");
     }
 
-    std::optional<ExperimentalArenaConfig> experimental_arena;
-    const bool any_arena = values.contains("experimental.arena_type")
-        || values.contains("experimental.arena_region")
-        || values.contains("experimental.arena_capacity_bytes")
-        || values.contains("experimental.arena_max_objects");
-    if (any_arena) {
-        for (const std::string required : {
-                 "experimental.arena_type",
-                 "experimental.arena_region",
-                 "experimental.arena_capacity_bytes",
-                 "experimental.arena_max_objects"}) {
-            if (!values.contains(required)) {
-                throw_manifest_error(absolute_manifest, 0,
-                    "experimental arena prototype requires '" + required + "'");
-            }
-        }
-        experimental_arena = ExperimentalArenaConfig{
-            values.at("experimental.arena_type"),
-            values.at("experimental.arena_region"),
-            parse_positive_size(absolute_manifest,
-                "experimental.arena_capacity_bytes",
-                values.at("experimental.arena_capacity_bytes")),
-            parse_positive_size(absolute_manifest,
-                "experimental.arena_max_objects",
-                values.at("experimental.arena_max_objects")),
-        };
-    }
-
     return ProjectConfig{
         values.at("project.name"),
         absolute_manifest,
@@ -364,7 +314,6 @@ ProjectConfig ProjectConfigLoader::load(
         source_root,
         entry_path,
         std::move(c_libraries),
-        std::move(experimental_arena),
     };
 }
 

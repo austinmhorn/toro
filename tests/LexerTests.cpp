@@ -55,7 +55,7 @@ void test_keywords_and_identifiers()
     constexpr std::string_view source =
         "import extern function return if else while for in stop continue handle "
         "public private class struct enum interface virtual override abstract implements overload "
-        "true false null self and or as weak performance function_name";
+        "true false null self and or as weak performance arena function_name";
     constexpr std::array expected{
         TokenType::Import, TokenType::Extern, TokenType::Function, TokenType::Return, TokenType::If, TokenType::Else,
         TokenType::While, TokenType::For, TokenType::In, TokenType::Stop,
@@ -65,7 +65,7 @@ void test_keywords_and_identifiers()
         TokenType::Overload, TokenType::True,
         TokenType::False, TokenType::Null, TokenType::Self, TokenType::And, TokenType::Or,
         TokenType::As, TokenType::Weak,
-        TokenType::Performance, TokenType::Identifier,
+        TokenType::Performance, TokenType::Arena, TokenType::Identifier,
     };
 
     const auto tokens = tokenize(source);

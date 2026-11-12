@@ -1,0 +1,24 @@
+class Item {
+    public value: int
+
+    init(value: int) {
+        self.value = value
+    }
+
+    destroy() {
+        print(self.value)
+    }
+}
+
+function main() {
+    values := List<Item>()
+    index := 0
+    arena {
+        while index < 300 {
+            item := Item(index)
+            values.add(item)
+            index = index + 1
+        }
+        values.clear()
+    }
+}

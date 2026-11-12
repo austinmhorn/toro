@@ -973,13 +973,17 @@ prototype adds explicit IR `Arena` storage, region identity and fixed-capacity
 metadata, structured lifetime suppression, and backend-consumed fixed C11 bump
 storage only for the simulation's proven tick-local `FrameEffect` path. It
 eliminated all 96,000 measured object/control allocator calls. Phase 12.1E now
-specifies the future source model in `docs/ARENA_LANGUAGE_DESIGN.md`: one
+specifies the source model in `docs/ARENA_LANGUAGE_DESIGN.md`: one
 explicit `arena { ... }` lexical lifetime-intent block, ordinary construction,
 and compiler-selected Stack -> Arena -> Heap placement with explicit IR
 provenance and conservative heap fallback. The design authorizes a narrow
-12.1F implementation, but no arena syntax or general-purpose runtime feature
-exists yet; the current implementation remains an experimental
-application-only path.
+12.1F implementation. That production slice is now active: the lexer/parser
+retain a first-class `arena` statement, lowering emits explicit deterministic
+region operations, `StorageDecisionAnalyzer` remains the sole Stack/Arena/Heap
+authority, and the C11 backend consumes finalized region and cleanup facts. The
+runtime uses stable-address growable chunks and growable reverse-order finalizer
+metadata. The former simulation manifest switch has been removed. Weak targets,
+FFI crossings, unproven escapes, and unsupported lifetime shapes remain Heap.
 
 Later phases may explore, when evidence justifies them:
 

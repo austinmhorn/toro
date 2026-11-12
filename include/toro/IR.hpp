@@ -63,6 +63,7 @@ enum class IROperationKind {
     Return,
     Stop,
     Continue,
+    Region,
 };
 
 struct IROwnershipTransfer {
@@ -114,8 +115,8 @@ struct IROperation {
     std::string allocation_identity;
     std::optional<IRStorageClass> storage;
     std::string region_identity;
-    std::size_t region_capacity_bytes{0};
-    std::size_t region_max_objects{0};
+    std::string parent_region_identity;
+    bool region_cleanup_required{false};
 };
 
 struct IRGenericParameter {
@@ -436,10 +437,12 @@ struct IRAllocationEscape {
 
 struct IRRegionInfo {
     std::string identity;
+    std::string parent_identity;
     IROrigin origin;
     std::size_t capacity_bytes{0};
     std::size_t max_objects{0};
     std::vector<std::string> allocation_identities;
+    std::vector<std::string> teardown_order;
     std::size_t arena_allocation_sites{0};
     std::size_t teardown_entries{0};
     std::size_t runtime_arc_suppressions{0};

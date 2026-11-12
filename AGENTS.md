@@ -128,8 +128,8 @@ Long term:
 - Ownership/escape/borrow analysis belongs behind the toro IR layer, not as
   ad-hoc logic spread through the C generator. The current `EscapeAnalyzer`
   annotates managed allocation sites, and `StorageDecisionAnalyzer` is the sole
-  authority that promotes proven direct local owners to stack storage and, for
-  the explicitly scoped 12.1D experiment, selects the configured arena region.
+  authority that promotes proven direct local owners to stack storage or selects
+  Arena storage inside a canonical source `arena { ... }` lifetime.
   Backends consume that IR decision and must not independently infer storage.
 - Avoid source-level ownership syntax unless real programs prove it necessary.
 - Do not prematurely implement arenas, atomic ARC, ownership annotations, or other advanced memory features before the roadmap reaches them.
@@ -150,13 +150,13 @@ Long term:
   is `Proceed to language design`. This does not authorize public arena syntax,
   arbitrary arenas, general region inference, weak/FFI arena references,
   concurrency, or production use. Phase 12.1E is that canonical design
-  milestone. It selects the future `arena { ... }` lexical lifetime-intent
+  milestone. It selected the `arena { ... }` lexical lifetime-intent
   block, ordinary construction with compiler-selected Stack -> Arena -> Heap
   storage, conservative heap fallback, and exactly-once lifecycle semantics.
   The design is recorded in `docs/ARENA_LANGUAGE_DESIGN.md` and authorizes only
-  the narrow Phase 12.1F implementation slice described there. The syntax is
-  not implemented yet. Do not broaden the prototype or treat the experimental
-  manifest mechanism as stable.
+  the narrow Phase 12.1F implementation slice described there. Phase 12.1F is
+  now implemented; the experimental manifest mechanism is removed. Do not
+  broaden the production slice beyond the documented exclusions.
 - Application Milestone A1 provides the representative simulation and static
   evidence. A2 adds external timing, sampling, allocation, memory, and leak
   evidence in `applications/simulation/PROFILE_REPORT.md`. Its arena
@@ -165,7 +165,7 @@ Long term:
   `applications/simulation/COLLECTION_REUSE_REPORT.md`; Phase 12.1D's measured
   prototype evidence is recorded in `ARENA_PROTOTYPE_REPORT.md`. The prototype
   and Phase 12.1E design are not authorization for concurrency, atomic ARC,
-  local/shared ARC specialization, or arena syntax beyond the future 12.1F
+  local/shared ARC specialization, or arena syntax beyond the implemented 12.1F
   lexical block. Phase 12.2 remains `Defer`.
 
 `performance function` is the canonical compiler-enforced execution contract,

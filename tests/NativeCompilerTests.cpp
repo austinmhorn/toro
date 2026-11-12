@@ -56,8 +56,7 @@ std::string generate_with_storage(std::string_view source, bool enable_stack)
     return toro::CGenerator().generate(ir);
 }
 
-std::string generate_with_arena(
-    std::string_view source, bool enabled, std::size_t max_objects = 16)
+std::string generate_with_arena(std::string_view source)
 {
     auto tokens = toro::Lexer(source).tokenize();
     const auto program = toro::Parser(std::move(tokens)).parse_program();
@@ -67,9 +66,7 @@ std::string generate_with_arena(
     toro::EffectAnalyzer().analyze(ir);
     toro::OwnershipSummaryAnalyzer().analyze(ir);
     toro::EscapeAnalyzer().analyze(ir);
-    toro::StorageDecisionAnalyzer().analyze(ir, true,
-        toro::ExperimentalArenaOptions{
-            enabled, "Item", "tick", 4096, max_objects});
+    toro::StorageDecisionAnalyzer().analyze(ir);
     toro::ArcMaterializer().materialize(ir);
     toro::OwnershipTransferAnalyzer().analyze(ir);
     toro::BorrowInferenceAnalyzer().analyze(ir);
@@ -1103,7 +1100,7 @@ void test_temporary_cleanup()
     expect(before == after, "native run left temporary artifacts behind");
 }
 
-void test_experimental_arena_runtime_and_differential_behavior()
+void test_arena_runtime_and_lifecycle_behavior()
 {
     constexpr std::string_view source =
         "class Base {\n"
@@ -1129,6 +1126,7 @@ void test_experimental_arena_runtime_and_differential_behavior()
         "    second_values := List<Item>()\n"
         "    index := 0\n"
         "    while index < 2 {\n"
+        "      arena {\n"
         "        first_child := Child(value: index * 10 + 1)\n"
         "        first := Item(index * 10 + 1, first_child)\n"
         "        first_values.add(first)\n"
@@ -1139,10 +1137,10 @@ void test_experimental_arena_runtime_and_differential_behavior()
         "        second_values.clear()\n"
         "        first_values.clear()\n"
         "        index = index + 1\n"
+        "      }\n"
         "    }\n"
         "}\n";
-    const auto arena_c = generate_with_arena(source, true);
-    const auto heap_c = generate_with_arena(source, false);
+    const auto arena_c = generate_with_arena(source);
     expect(arena_c.find("toro_arena_allocate") != std::string::npos
             && arena_c.find("toro_arena_teardown") != std::string::npos,
         "arena runtime helpers were not emitted");
@@ -1151,46 +1149,123 @@ void test_experimental_arena_runtime_and_differential_behavior()
         "arena-backed Item still used per-object heap allocation");
     const toro::NativeCompiler compiler;
     const auto [arena_status, arena_output] = capture_run(compiler, arena_c);
-    const auto [heap_status, heap_output] = capture_run(compiler, heap_c);
-    expect(arena_status == 0 && heap_status == 0,
-        "arena/heap differential program failed");
-    if (arena_output != heap_output) {
+    expect(arena_status == 0, "arena lifecycle program failed");
+    const std::string expected =
+        "1\n2\n999\n102\n1\n999\n101\n"
+        "11\n12\n999\n112\n11\n999\n111\n";
+    if (arena_output != expected) {
         throw std::runtime_error(
-            "arena storage changed observable output or lifecycle behavior\n"
-            "arena:\n" + arena_output + "heap:\n" + heap_output);
+            "arena teardown was not reverse-order or exactly once\nactual:\n"
+            + arena_output);
     }
-    expect(arena_output
-            == "1\n2\n999\n1\n999\n102\n101\n"
-               "11\n12\n999\n11\n999\n112\n111\n",
-        "arena teardown was not reverse-order or exactly once");
 }
 
-void test_experimental_arena_capacity_failure()
+void test_arena_grows_beyond_one_chunk()
 {
     constexpr std::string_view source =
         "class Item {}\n"
         "function main() {\n"
         "    values := List<Item>()\n"
         "    index := 0\n"
-        "    while index < 1 {\n"
-        "        first := Item()\n"
-        "        values.add(first)\n"
-        "        second := Item()\n"
-        "        values.add(second)\n"
-        "        values.clear()\n"
+        "    arena {\n"
+        "      while index < 300 {\n"
+        "        item := Item()\n"
+        "        values.add(item)\n"
         "        index = index + 1\n"
+        "      }\n"
+        "        values.clear()\n"
         "    }\n"
         "}\n";
-    try {
-        static_cast<void>(toro::NativeCompiler().run(
-            generate_with_arena(source, true, 1)));
-    } catch (const std::runtime_error& error) {
-        expect(std::string_view(error.what()).find("runtime process failure")
-                != std::string_view::npos,
-            "arena capacity exhaustion lacked a deterministic runtime failure");
-        return;
-    }
-    throw std::runtime_error("arena capacity exhaustion unexpectedly succeeded");
+    const auto generated = generate_with_arena(source);
+    expect(generated.find("toro_arena_chunk") != std::string::npos
+            && generated.find("realloc(toro_region->toro_entries")
+                != std::string::npos,
+        "growable arena runtime was not emitted");
+    expect(toro::NativeCompiler().run(generated) == 0,
+        "multi-chunk arena program failed");
+}
+
+void test_arena_cleanup_on_control_flow_exits()
+{
+    constexpr std::string_view source =
+        "class Child {\n"
+        "  public marker: int\n"
+        "  destroy() { print(self.marker) }\n"
+        "}\n"
+        "class Owner {\n"
+        "  public child: Child\n"
+        "  public marker: int\n"
+        "  init(child: Child, marker: int) {\n"
+        "    self.child = child\n"
+        "    self.marker = marker\n"
+        "  }\n"
+        "  destroy() { print(self.marker) }\n"
+        "}\n"
+        "function direct_return() {\n"
+        "  arena {\n"
+        "    child := Child(marker: 1)\n"
+        "    owner := Owner(child, 10)\n"
+        "    return\n"
+        "  }\n"
+        "}\n"
+        "function branch_return(exit: bool) {\n"
+        "  arena {\n"
+        "    child := Child(marker: 2)\n"
+        "    owner := Owner(child, 20)\n"
+        "    if exit { return }\n"
+        "  }\n"
+        "}\n"
+        "function loop_control() {\n"
+        "  index := 0\n"
+        "  while index < 2 {\n"
+        "    arena {\n"
+        "      child := Child(marker: index + 3)\n"
+        "      owner := Owner(child, (index + 3) * 10)\n"
+        "      index = index + 1\n"
+        "      continue\n"
+        "    }\n"
+        "  }\n"
+        "  while true {\n"
+        "    arena {\n"
+        "      child := Child(marker: 5)\n"
+        "      owner := Owner(child, 50)\n"
+        "      stop\n"
+        "    }\n"
+        "  }\n"
+        "}\n"
+        "function source(fail: bool) -> Result<int, string> {\n"
+        "  if fail { return error(\"problem\") }\n"
+        "  return ok(7)\n"
+        "}\n"
+        "function propagate(fail: bool) -> Result<int, string> {\n"
+        "  arena {\n"
+        "    child := Child(marker: 6)\n"
+        "    owner := Owner(child, 60)\n"
+        "    value := source(fail)?\n"
+        "    return ok(value)\n"
+        "  }\n"
+        "}\n"
+        "function main() {\n"
+        "  direct_return()\n"
+        "  branch_return(true)\n"
+        "  loop_control()\n"
+        "  handle propagate(false) {\n"
+        "    ok(value) { print(value) }\n"
+        "    error(problem) { print(problem) }\n"
+        "  }\n"
+        "  handle propagate(true) {\n"
+        "    ok(value) { print(value) }\n"
+        "    error(problem) { print(problem) }\n"
+        "  }\n"
+        "}\n";
+    const auto generated = generate_with_arena(source);
+    const auto [status, output] = capture_run(toro::NativeCompiler(), generated);
+    expect(status == 0, "arena control-flow cleanup program failed");
+    const std::string expected =
+        "10\n1\n20\n2\n30\n3\n40\n4\n50\n5\n"
+        "60\n6\n7\n60\n6\nproblem\n";
+    expect(output == expected,
+        "arena cleanup did not run on return/continue/stop/? exits: " + output);
 }
 
 } // namespace
@@ -1221,8 +1296,9 @@ int main()
         test_backend_integration_runtime_behavior();
         test_collection_bounds_failure();
         test_negative_list_reserve_failure();
-        test_experimental_arena_runtime_and_differential_behavior();
-        test_experimental_arena_capacity_failure();
+        test_arena_runtime_and_lifecycle_behavior();
+        test_arena_grows_beyond_one_chunk();
+        test_arena_cleanup_on_control_flow_exits();
         test_temporary_cleanup();
     } catch (const std::exception& error) {
         std::cerr << "native compiler test failure: " << error.what() << '\n';

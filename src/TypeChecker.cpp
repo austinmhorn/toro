@@ -795,6 +795,9 @@ void TypeChecker::check_statement(const Stmt& statement)
     case StmtKind::Block:
         check_block(static_cast<const BlockStmt&>(statement));
         return;
+    case StmtKind::Arena:
+        check_block(*static_cast<const ArenaStmt&>(statement).body);
+        return;
     case StmtKind::If: {
         const auto& if_statement = static_cast<const IfStmt&>(statement);
         require_condition(check_expression(*if_statement.condition), statement.location);
@@ -2452,6 +2455,9 @@ bool TypeChecker::statement_guarantees_return(const Stmt& statement) const
     case StmtKind::Block:
         return statements_guarantee_return(
             static_cast<const BlockStmt&>(statement).statements);
+    case StmtKind::Arena:
+        return statements_guarantee_return(
+            static_cast<const ArenaStmt&>(statement).body->statements);
     case StmtKind::If: {
         const auto& conditional = static_cast<const IfStmt&>(statement);
         return conditional.else_branch

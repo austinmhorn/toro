@@ -847,6 +847,34 @@ supports inherited fields when no base initializer call is required. Base
 initializer chaining remains unimplemented. Concrete generic construction uses
 the same field- or `init`-based runtime rules after substitution.
 
+### Arena lifetime blocks
+
+`arena` establishes a lexical lifetime and cleanup boundary while ordinary
+construction syntax remains unchanged:
+
+```toro
+arena {
+    effect := FrameEffect()
+    process(effect)
+}
+```
+
+Each dynamic entry creates a distinct logical region. The compiler selects
+storage in `Stack -> Arena -> Heap` order: eligible ordinary stack promotion
+still wins, region-bounded class objects may use Arena storage, and uncertain or
+escaping objects safely use Heap storage. Arena objects still run `destroy()`
+exactly once, with reverse semantic construction order at region exit and the
+normal derived-to-base lifecycle order. Cleanup runs on fallthrough, `return`,
+`stop`, `continue`, and Result propagation with `?`.
+
+Phase 12.1F initially supports directly constructed class graphs and the proven
+cleared-`List` pattern. Collection backing storage remains ordinary. Objects
+that escape by return or persistent ownership, are weak-observed, cross C FFI,
+or cannot be proven region-bounded remain Heap-backed without a warning.
+Named arenas, arena values/parameters, manual reset, capacity syntax, weak arena
+targets, arena-backed collection buffers, and performance-contract arena
+allowance are not supported.
+
 ### Nullable types
 
 Types are non-nullable unless followed by `?`. A nullable type accepts its

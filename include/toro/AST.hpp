@@ -266,6 +266,7 @@ enum class StmtKind {
     StructDeclaration,
     ClassDeclaration,
     InterfaceDeclaration,
+    Arena,
 };
 
 struct Stmt {
@@ -394,6 +395,16 @@ struct BlockStmt final : Stmt {
     }
 
     std::vector<std::unique_ptr<Stmt>> statements;
+};
+
+struct ArenaStmt final : Stmt {
+    ArenaStmt(SourceLocation location, std::unique_ptr<BlockStmt> body)
+        : Stmt(StmtKind::Arena, location)
+        , body(std::move(body))
+    {
+    }
+
+    std::unique_ptr<BlockStmt> body;
 };
 
 struct FunctionDeclarationStmt final : Stmt {

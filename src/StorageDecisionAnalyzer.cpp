@@ -12,18 +12,19 @@ namespace {
 
 class Analysis {
 public:
-    Analysis(
-        IRProgram& program,
-        bool enable_stack,
-        ExperimentalArenaOptions arena)
+    Analysis(IRProgram& program, bool enable_stack)
         : program_(program)
         , enable_stack_(enable_stack)
-        , arena_(std::move(arena))
     {
         for (auto& allocation : program_.escape_allocations) {
             allocations_.emplace(allocation.identity, &allocation);
             allocation.storage = IRStorageClass::Heap;
             allocation.storage_reason = fallback_reason(allocation);
+        }
+        for (const auto& declaration : program_.declarations) {
+            for (const auto& field : declaration.fields) {
+                if (field.is_weak) weak_field_names_.insert(field.name);
+            }
         }
     }
 
@@ -44,7 +45,7 @@ public:
         for (auto& operation : program_.top_level_operations) {
             apply_storage(operation);
         }
-        apply_arena_prototype();
+        apply_source_arenas();
         for (auto& declaration : program_.declarations) {
             if (declaration.body) apply_storage(*declaration.body);
         }
@@ -152,6 +153,11 @@ private:
         } else if (operation.kind == IROperationKind::Block) {
             analyze_block(operation);
             return;
+        } else if (operation.kind == IROperationKind::Region
+            && operation.children.size() == 1
+            && operation.children.front().kind == IROperationKind::Block) {
+            analyze_block(operation.children.front());
+            return;
         } else if (operation.kind == IROperationKind::Branch
             || operation.kind == IROperationKind::Loop
             || operation.kind == IROperationKind::ForEach
@@ -203,14 +209,10 @@ private:
                 ++program_.escape_metrics.arena_allocations;
             } else {
                 ++program_.escape_metrics.heap_allocations;
-                if (arena_.enabled
-                    && type_name(allocation.type.type) == arena_.type_name) {
+                if (arena_candidates_.contains(allocation.identity)) {
                     ++program_.escape_metrics.arena_fallbacks;
                 }
             }
-        }
-        for (auto& region : program_.regions) {
-            region.heap_fallbacks = program_.escape_metrics.arena_fallbacks;
         }
     }
 
@@ -239,34 +241,18 @@ private:
             [](const auto& child) { return contains_unsafe_exit(child); });
     }
 
-    bool clears_target_list(const IROperation& operation) const
-    {
-        if (operation.kind == IROperationKind::CollectionOperation
-            && operation.name == "clear" && !operation.children.empty()
-            && operation.children.front().result_type) {
-            const auto& type = operation.children.front().result_type->type;
-            if (type_name(type).starts_with("List<")
-                && type.arguments.size() == 1
-                && type_name(type.arguments.front()) == arena_.type_name) {
-                return true;
-            }
-        }
-        return std::ranges::any_of(operation.children,
-            [&](const auto& child) { return clears_target_list(child); });
-    }
-
     void collect_cleared_lists(
         const IROperation& operation,
         std::unordered_set<std::string>& result) const
     {
+        if (operation.kind == IROperationKind::Region) return;
         if (operation.kind == IROperationKind::CollectionOperation
             && operation.name == "clear" && !operation.children.empty()
             && operation.children.front().kind == IROperationKind::Load
             && operation.children.front().result_type) {
             const auto& type = operation.children.front().result_type->type;
             if (type_name(type).starts_with("List<")
-                && type.arguments.size() == 1
-                && type_name(type.arguments.front()) == arena_.type_name) {
+                && type.arguments.size() == 1) {
                 result.insert(operation.children.front().name);
             }
         }
@@ -279,6 +265,7 @@ private:
         const IROperation& operation,
         std::unordered_map<std::string, std::string>& result)
     {
+        if (operation.kind == IROperationKind::Region) return;
         if (operation.kind == IROperationKind::Declare
             && !operation.children.empty()
             && operation.children.front().kind == IROperationKind::Construction
@@ -296,6 +283,7 @@ private:
         const std::unordered_map<std::string, std::string>& bindings,
         std::unordered_map<std::string, std::unordered_set<std::string>>& result)
     {
+        if (operation.kind == IROperationKind::Region) return;
         if (operation.kind == IROperationKind::CollectionOperation
             && (operation.name == "add" || operation.name == "append")
             && operation.children.size() == 2
@@ -311,25 +299,117 @@ private:
         }
     }
 
+    static void add_dependency(
+        std::string_view value,
+        std::string_view owner,
+        std::unordered_map<std::string, std::unordered_set<std::string>>& result)
+    {
+        result[std::string(value)].insert(std::string(owner));
+    }
+
+    void collect_strong_dependencies(
+        const IROperation& operation,
+        const std::unordered_map<std::string, std::string>& bindings,
+        std::unordered_map<std::string, std::unordered_set<std::string>>& result) const
+    {
+        if (operation.kind == IROperationKind::Region) return;
+        if (operation.kind == IROperationKind::Construction) {
+            for (const auto& child : operation.children) {
+                if (child.kind != IROperationKind::Load) continue;
+                const auto binding = bindings.find(child.name);
+                if (binding != bindings.end()) {
+                    add_dependency(binding->second,
+                        operation.allocation_identity, result);
+                }
+            }
+        } else if (operation.kind == IROperationKind::MemberAssign
+            && !weak_field_names_.contains(operation.name)
+            && operation.children.size() == 2
+            && operation.children.back().kind == IROperationKind::Load) {
+            const auto value = bindings.find(operation.children.back().name);
+            if (value != bindings.end()) {
+                std::string owner = "<longer-lived>";
+                if (operation.children.front().kind == IROperationKind::Load) {
+                    const auto target = bindings.find(
+                        operation.children.front().name);
+                    if (target != bindings.end()) owner = target->second;
+                }
+                add_dependency(value->second, owner, result);
+            }
+        }
+        for (const auto& child : operation.children) {
+            collect_strong_dependencies(child, bindings, result);
+        }
+    }
+
+    static void collect_cloned_collections(
+        const IROperation& operation,
+        std::unordered_set<std::string>& result)
+    {
+        if (operation.kind == IROperationKind::Region) return;
+        if (operation.kind == IROperationKind::CollectionOperation
+            && operation.name == "clone" && !operation.children.empty()
+            && operation.children.front().kind == IROperationKind::Load) {
+            result.insert(operation.children.front().name);
+        }
+        for (const auto& child : operation.children) {
+            collect_cloned_collections(child, result);
+        }
+    }
+
+    static void collect_reassigned_bindings(
+        const IROperation& operation,
+        const std::unordered_map<std::string, std::string>& bindings,
+        std::unordered_set<std::string>& result)
+    {
+        if (operation.kind == IROperationKind::Region) return;
+        if (operation.kind == IROperationKind::Assign) {
+            const auto binding = bindings.find(operation.name);
+            if (binding != bindings.end()) result.insert(binding->second);
+        }
+        for (const auto& child : operation.children) {
+            collect_reassigned_bindings(child, bindings, result);
+        }
+    }
+
+    void collect_weak_observations(
+        const IROperation& operation,
+        const std::unordered_map<std::string, std::string>& bindings,
+        std::unordered_set<std::string>& result) const
+    {
+        if (operation.kind == IROperationKind::Region) return;
+        if (operation.kind == IROperationKind::MemberAssign
+            && weak_field_names_.contains(operation.name)
+            && !operation.children.empty()
+            && operation.children.back().kind == IROperationKind::Load) {
+            const auto binding = bindings.find(operation.children.back().name);
+            if (binding != bindings.end()) result.insert(binding->second);
+        }
+        for (const auto& child : operation.children) {
+            collect_weak_observations(child, bindings, result);
+        }
+    }
+
     static void mark_region_collection_operations(
         IROperation& operation,
         const std::unordered_map<std::string, std::string>& bindings,
         const std::unordered_set<std::string>& eligible_allocations,
-        const std::unordered_set<std::string>& cleared_lists,
+        const std::unordered_set<std::string>& region_lists,
         std::string_view region_identity,
         std::size_t& arc_suppressions)
     {
+        if (operation.kind == IROperationKind::Region) return;
         if (operation.kind == IROperationKind::CollectionOperation
             && operation.name == "clear" && !operation.children.empty()
             && operation.children.front().kind == IROperationKind::Load
-            && cleared_lists.contains(operation.children.front().name)) {
+            && region_lists.contains(operation.children.front().name)) {
             operation.storage = IRStorageClass::Arena;
             operation.region_identity = region_identity;
         } else if (operation.kind == IROperationKind::CollectionOperation
             && (operation.name == "add" || operation.name == "append")
             && operation.children.size() == 2
             && operation.children.front().kind == IROperationKind::Load
-            && cleared_lists.contains(operation.children.front().name)
+            && region_lists.contains(operation.children.front().name)
             && operation.children.back().kind == IROperationKind::Load) {
             const auto binding = bindings.find(operation.children.back().name);
             if (binding != bindings.end()
@@ -341,152 +421,322 @@ private:
         }
         for (auto& child : operation.children) {
             mark_region_collection_operations(child, bindings,
-                eligible_allocations, cleared_lists, region_identity,
+                eligible_allocations, region_lists, region_identity,
                 arc_suppressions);
         }
     }
 
-    void collect_target_constructions(
+    static void collect_region_constructions(
         IROperation& operation,
         std::vector<IROperation*>& result)
     {
+        if (operation.kind == IROperationKind::Region) return;
         if (operation.kind == IROperationKind::Construction
             && operation.result_type
-            && type_name(operation.result_type->type) == arena_.type_name
+            && operation.result_type->category == IRValueCategory::ManagedReference
             && !operation.allocation_identity.empty()) {
             result.push_back(&operation);
         }
         for (auto& child : operation.children) {
-            collect_target_constructions(child, result);
+            collect_region_constructions(child, result);
         }
     }
 
-    bool arena_eligible(const IRAllocationEscape& allocation) const
+    bool source_arena_eligible(
+        const IRAllocationEscape& allocation,
+        bool stored_in_cleared_collection) const
     {
-        if (allocation.storage == IRStorageClass::Stack
+        if ((allocation.storage == IRStorageClass::Stack
+                && !stored_in_cleared_collection)
             || has_weak_constraint(allocation)
-            || declaration_has_weak_field(arena_.type_name)) {
+            || declaration_has_weak_field(
+                declaration_source_name(allocation.type.type.name))) {
             return false;
         }
-        bool collection_storage = false;
+        if (allocation.state == IREscapeState::DoesNotEscape) return true;
+        bool compatible_storage = false;
         for (const auto& cause : allocation.causes) {
             if (!cause.causes_escape) continue;
-            if (cause.reason != IREscapeReason::CollectionStorage
-                || cause.uncertain) {
+            const bool region_bounded_cause = stored_in_cleared_collection
+                && (cause.reason == IREscapeReason::CollectionStorage
+                    || cause.reason == IREscapeReason::StrongField
+                    || cause.reason == IREscapeReason::CallArgument);
+            if (!region_bounded_cause) {
                 return false;
             }
-            collection_storage = true;
+            compatible_storage = true;
         }
-        return collection_storage;
+        return compatible_storage;
     }
 
-    void consider_loop(IROperation& operation)
+    void consider_source_region(
+        IROperation& operation,
+        std::string_view parent_region)
     {
-        if (operation.kind == IROperationKind::Loop
-            && operation.children.size() >= 2) {
-            auto& body = operation.children[1];
-            if (clears_target_list(body) && !contains_unsafe_exit(body)) {
-                std::unordered_set<std::string> cleared_lists;
-                collect_cleared_lists(body, cleared_lists);
-                std::unordered_map<std::string, std::string> bindings;
-                collect_candidate_bindings(body, bindings);
-                std::unordered_map<std::string,
-                    std::unordered_set<std::string>> destinations;
-                collect_collection_destinations(body, bindings, destinations);
-                std::vector<IROperation*> candidates;
-                collect_target_constructions(body, candidates);
-                std::vector<IROperation*> eligible;
-                for (auto* candidate : candidates) {
-                    const auto found = allocations_.find(
-                        candidate->allocation_identity);
-                    const auto stored = destinations.find(
-                        candidate->allocation_identity);
-                    const bool proven_cleared = stored != destinations.end()
-                        && !stored->second.empty()
-                        && std::ranges::all_of(stored->second,
-                            [&](const auto& list) {
-                                return cleared_lists.contains(list);
-                            });
-                    if (found != allocations_.end()
-                        && proven_cleared
-                        && arena_eligible(*found->second)) {
-                        eligible.push_back(candidate);
-                    }
+        if (operation.kind == IROperationKind::Region) {
+            operation.parent_region_identity = parent_region;
+            if (operation.children.size() != 1
+                || operation.children.front().kind != IROperationKind::Block) {
+                return;
+            }
+            auto& body = operation.children.front();
+            const std::string identity = operation.region_identity;
+            body.region_identity = identity;
+            body.parent_region_identity = std::string(parent_region);
+            IRRegionInfo region;
+            region.identity = identity;
+            region.parent_identity = std::string(parent_region);
+            region.origin = operation.origin;
+
+            std::vector<IROperation*> candidates;
+            collect_region_constructions(body, candidates);
+            std::unordered_map<std::string, std::string> bindings;
+            collect_candidate_bindings(body, bindings);
+            std::unordered_set<std::string> cleared_lists;
+            collect_cleared_lists(body, cleared_lists);
+            std::unordered_map<std::string,
+                std::unordered_set<std::string>> destinations;
+            collect_collection_destinations(body, bindings, destinations);
+            std::unordered_map<std::string,
+                std::unordered_set<std::string>> strong_dependencies;
+            collect_strong_dependencies(body, bindings, strong_dependencies);
+            std::unordered_set<std::string> weak_observations;
+            collect_weak_observations(body, bindings, weak_observations);
+            std::unordered_set<std::string> cloned_collections;
+            collect_cloned_collections(body, cloned_collections);
+            std::unordered_set<std::string> reassigned_bindings;
+            collect_reassigned_bindings(body, bindings, reassigned_bindings);
+            std::unordered_set<std::string> candidate_identities;
+            for (const auto* candidate : candidates) {
+                candidate_identities.insert(candidate->allocation_identity);
+            }
+            const auto compatible_region_owner = [&](const std::string& owner) {
+                if (!candidate_identities.contains(owner)
+                    || weak_observations.contains(owner)
+                    || reassigned_bindings.contains(owner)) {
+                    return false;
                 }
-                if (!eligible.empty()) {
-                    const std::string identity = "experimental." + arena_.region_name
-                        + '@' + operation.origin.module_name + ':'
-                        + std::to_string(operation.origin.location.line) + ':'
-                        + std::to_string(operation.origin.location.column);
-                    body.region_identity = identity;
-                    body.region_capacity_bytes = arena_.capacity_bytes;
-                    body.region_max_objects = arena_.max_objects;
-                    IRRegionInfo region{
-                        identity,
-                        operation.origin,
-                        arena_.capacity_bytes,
-                        arena_.max_objects,
-                        {},
-                        0,
-                        0,
-                        0,
-                        0,
-                    };
-                    std::unordered_set<std::string> eligible_allocations;
-                    for (auto* candidate : eligible) {
-                        auto& allocation = *allocations_.at(
-                            candidate->allocation_identity);
-                        allocation.storage = IRStorageClass::Arena;
-                        allocation.storage_reason =
-                            "experimental region-bounded collection lifetime";
-                        allocation.region_identity = identity;
-                        candidate->storage = IRStorageClass::Arena;
-                        candidate->region_identity = identity;
-                        region.allocation_identities.push_back(
-                            candidate->allocation_identity);
-                        eligible_allocations.insert(candidate->allocation_identity);
+                const auto allocation = allocations_.find(owner);
+                if (allocation == allocations_.end()
+                    || !source_arena_eligible(*allocation->second, true)) {
+                    return false;
+                }
+                const auto owner_destinations = destinations.find(owner);
+                if (owner_destinations == destinations.end()) return true;
+                return !contains_unsafe_exit(body)
+                    && std::ranges::all_of(owner_destinations->second,
+                        [&](const auto& list) {
+                            return cleared_lists.contains(list)
+                                && !cloned_collections.contains(list);
+                        });
+            };
+            std::unordered_set<std::string> eligible_allocations;
+            for (auto* candidate : candidates) {
+                arena_candidates_.insert(candidate->allocation_identity);
+                const auto found = allocations_.find(candidate->allocation_identity);
+                if (found != allocations_.end()) {
+                    found->second->region_identity = identity;
+                    candidate->region_identity = identity;
+                }
+                const auto stored = destinations.find(
+                    candidate->allocation_identity);
+                const bool stored_in_collection = stored != destinations.end()
+                    && !stored->second.empty();
+                const bool collection_was_cloned = stored_in_collection
+                    && std::ranges::any_of(stored->second,
+                        [&](const auto& list) {
+                            return cloned_collections.contains(list);
+                        });
+                const auto owners = strong_dependencies.find(
+                    candidate->allocation_identity);
+                const bool stored_in_region_graph =
+                    owners != strong_dependencies.end()
+                    && !owners->second.empty()
+                    && std::ranges::all_of(owners->second,
+                        compatible_region_owner);
+                const bool stored_in_cleared_collection =
+                    stored_in_region_graph || (stored_in_collection
+                    && std::ranges::all_of(stored->second,
+                        [&](const auto& list) {
+                            return cleared_lists.contains(list);
+                        }));
+                const bool unsafe_collection_exit = stored_in_collection
+                    && contains_unsafe_exit(body);
+                if ((stored_in_collection && !stored_in_cleared_collection)
+                    || collection_was_cloned || unsafe_collection_exit) {
+                    if (found != allocations_.end()) {
+                        found->second->storage = IRStorageClass::Heap;
+                        found->second->storage_reason =
+                            collection_was_cloned
+                            ? "arena candidate escapes through a cloned collection"
+                            : unsafe_collection_exit
+                            ? "arena collection lifetime is not proven across an early exit"
+                            : "arena candidate escapes through an uncleared collection";
                     }
-                    std::size_t arc_suppressions = 0;
-                    mark_region_collection_operations(body, bindings,
-                        eligible_allocations, cleared_lists, identity,
-                        arc_suppressions);
-                    region.arena_allocation_sites = eligible.size();
-                    region.teardown_entries = eligible.size();
-                    region.runtime_arc_suppressions = arc_suppressions;
-                    program_.regions.push_back(std::move(region));
+                    continue;
+                }
+                if (reassigned_bindings.contains(candidate->allocation_identity)) {
+                    if (found != allocations_.end()) {
+                        found->second->storage = IRStorageClass::Heap;
+                        found->second->storage_reason =
+                            "arena candidate has unsupported early logical death";
+                    }
+                    continue;
+                }
+                if (owners != strong_dependencies.end()
+                    && !stored_in_region_graph) {
+                    if (found != allocations_.end()) {
+                        found->second->storage = IRStorageClass::Heap;
+                        found->second->storage_reason =
+                            "arena candidate is retained by a longer-lived strong field";
+                    }
+                    continue;
+                }
+                if (weak_observations.contains(candidate->allocation_identity)) {
+                    if (found != allocations_.end()) {
+                        found->second->storage = IRStorageClass::Heap;
+                        found->second->storage_reason =
+                            "weak target requires heap control-block lifetime";
+                    }
+                    continue;
+                }
+                if (found == allocations_.end()) {
+                    continue;
+                }
+                if (!source_arena_eligible(
+                        *found->second, stored_in_cleared_collection)) {
+                    if (found->second->storage == IRStorageClass::Stack
+                        && stored_in_cleared_collection) {
+                        found->second->storage = IRStorageClass::Heap;
+                        found->second->storage_reason = fallback_reason(
+                            *found->second);
+                    }
+                    continue;
+                }
+                auto& allocation = *found->second;
+                allocation.storage = IRStorageClass::Arena;
+                allocation.storage_reason =
+                    "construction is bounded by source arena lifetime";
+                allocation.region_identity = identity;
+                candidate->storage = IRStorageClass::Arena;
+                candidate->region_identity = identity;
+                region.allocation_identities.push_back(
+                    candidate->allocation_identity);
+                eligible_allocations.insert(candidate->allocation_identity);
+            }
+
+            bool changed = true;
+            while (changed) {
+                changed = false;
+                for (auto* candidate : candidates) {
+                    const std::string& candidate_identity =
+                        candidate->allocation_identity;
+                    if (!eligible_allocations.contains(candidate_identity)) {
+                        continue;
+                    }
+                    bool incompatible = false;
+                    if (const auto owners = strong_dependencies.find(
+                            candidate_identity);
+                        owners != strong_dependencies.end()) {
+                        incompatible = std::ranges::any_of(owners->second,
+                            [&](const auto& owner) {
+                                return candidate_identities.contains(owner)
+                                    && !eligible_allocations.contains(owner);
+                            });
+                    }
+                    if (const auto lists = destinations.find(candidate_identity);
+                        !incompatible && lists != destinations.end()) {
+                        incompatible = std::ranges::any_of(lists->second,
+                            [&](const auto& list) {
+                                return std::ranges::any_of(destinations,
+                                    [&](const auto& entry) {
+                                        return entry.second.contains(list)
+                                            && !eligible_allocations.contains(
+                                                entry.first);
+                                    });
+                            });
+                    }
+                    if (!incompatible) continue;
+                    eligible_allocations.erase(candidate_identity);
+                    region.allocation_identities.erase(std::remove(
+                        region.allocation_identities.begin(),
+                        region.allocation_identities.end(), candidate_identity),
+                        region.allocation_identities.end());
+                    candidate->storage = IRStorageClass::Heap;
+                    if (const auto allocation = allocations_.find(candidate_identity);
+                        allocation != allocations_.end()) {
+                        allocation->second->storage = IRStorageClass::Heap;
+                        allocation->second->storage_reason =
+                            "arena ownership graph includes heap-backed storage";
+                    }
+                    changed = true;
                 }
             }
-        }
-        for (auto& child : operation.children) consider_loop(child);
-    }
 
-    void apply_arena_prototype()
-    {
-        program_.regions.clear();
-        if (!arena_.enabled || arena_.type_name.empty()
-            || arena_.capacity_bytes == 0 || arena_.max_objects == 0) {
+            std::unordered_set<std::string> region_lists;
+            for (const auto& list : cleared_lists) {
+                std::vector<std::string> stored_allocations;
+                for (const auto& [allocation, lists] : destinations) {
+                    if (lists.contains(list)) stored_allocations.push_back(allocation);
+                }
+                if (!stored_allocations.empty()
+                    && std::ranges::all_of(stored_allocations,
+                        [&](const auto& allocation) {
+                            return eligible_allocations.contains(allocation);
+                        })) {
+                    region_lists.insert(list);
+                }
+            }
+            std::size_t arc_suppressions = 0;
+            mark_region_collection_operations(body, bindings,
+                eligible_allocations, region_lists, identity,
+                arc_suppressions);
+            region.arena_allocation_sites = eligible_allocations.size();
+            region.teardown_entries = eligible_allocations.size();
+            region.teardown_order.assign(
+                region.allocation_identities.rbegin(),
+                region.allocation_identities.rend());
+            region.runtime_arc_suppressions = arc_suppressions;
+            region.heap_fallbacks = candidates.size() - eligible_allocations.size();
+            program_.regions.push_back(std::move(region));
+
+            for (auto& child : body.children) {
+                consider_source_region(child, identity);
+            }
             return;
         }
+        for (auto& child : operation.children) {
+            consider_source_region(child, parent_region);
+        }
+    }
+
+    void apply_source_arenas()
+    {
+        program_.regions.clear();
+        arena_candidates_.clear();
         for (auto& declaration : program_.declarations) {
-            if (declaration.body) consider_loop(*declaration.body);
+            if (declaration.body) consider_source_region(*declaration.body, {});
+        }
+        for (auto& operation : program_.top_level_operations) {
+            consider_source_region(operation, {});
         }
     }
 
     IRProgram& program_;
     bool enable_stack_;
-    ExperimentalArenaOptions arena_;
     bool callable_has_managed_reassignment_{false};
     std::unordered_map<std::string, IRAllocationEscape*> allocations_;
+    std::unordered_set<std::string> arena_candidates_;
+    std::unordered_set<std::string> weak_field_names_;
 };
 
 } // namespace
 
 void StorageDecisionAnalyzer::analyze(
     IRProgram& program,
-    bool enable_stack,
-    ExperimentalArenaOptions arena) const
+    bool enable_stack) const
 {
-    Analysis(program, enable_stack, std::move(arena)).run();
+    Analysis(program, enable_stack).run();
 }
 
 } // namespace toro

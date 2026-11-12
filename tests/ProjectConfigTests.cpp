@@ -82,12 +82,7 @@ void test_valid_project_pipeline()
     tree.write("toro.toml",
         "[project]\nname = \"sample-app\"\n"
         "[source]\nroot = \"source\"\nentry = \"app/main.toro\"\n"
-        "[ffi]\nlibraries = [\"m\"]\n"
-        "[experimental]\n"
-        "arena_type = \"FrameEffect\"\n"
-        "arena_region = \"tick\"\n"
-        "arena_capacity_bytes = \"32768\"\n"
-        "arena_max_objects = \"256\"\n");
+        "[ffi]\nlibraries = [\"m\"]\n");
     tree.write("source/game/player.toro",
         "public struct Player { name: string }\n");
     tree.write("source/app/main.toro",
@@ -106,11 +101,6 @@ void test_valid_project_pipeline()
         "configured entry was not retained");
     expect(project.c_libraries == std::vector<std::string>({"m"}),
         "configured C libraries were not retained in order");
-    expect(project.experimental_arena
-            && project.experimental_arena->type_name == "FrameEffect"
-            && project.experimental_arena->capacity_bytes == 32768
-            && project.experimental_arena->max_objects == 256,
-        "experimental arena configuration was not retained");
 
     auto program = toro::ModuleLoader().load(
         project.entry_path, project.source_root);
@@ -207,7 +197,7 @@ void test_manifest_diagnostics()
             "[experimental]\narena_type = \"Item\"\n");
         tree.write("src/main.toro", "function main() {}\n");
         expect_error(tree.root() / "toro.toml",
-            "experimental arena prototype requires");
+            "unknown configuration key 'experimental.arena_type'");
     }
 }
 

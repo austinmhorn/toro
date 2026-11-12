@@ -18,12 +18,14 @@ material. The separately authorized Phase 12.1D internal prototype is recorded
 in `applications/simulation/ARENA_PROTOTYPE_REPORT.md`. It eliminated the
 96,000 measured `FrameEffect` object/control allocator calls with fixed,
 compiler-bounded region storage and recommends **Proceed to language design**.
-Phase 12.1E now records that design in `docs/ARENA_LANGUAGE_DESIGN.md`: the
-future canonical model is an `arena { ... }` lexical lifetime-intent block with
-ordinary construction and compiler-selected Stack -> Arena -> Heap placement.
-The design authorizes a narrow future Phase 12.1F implementation, but the syntax
-is not accepted today. Toro still has no production arena feature; the current
-runtime path remains simulation-scoped and experimental.
+Phase 12.1E records the canonical design in
+`docs/ARENA_LANGUAGE_DESIGN.md`. Phase 12.1F now implements its first production
+slice: `arena { ... }` is a lexical lifetime/cleanup boundary with ordinary
+construction and compiler-selected Stack -> Arena -> Heap placement. The
+runtime uses stable-address growable chunks and deterministic reverse-order
+finalization. Unsafe or uncertain candidates remain Heap-backed. Weak arena
+targets, arena-backed collection buffers, FFI arena references, public capacity
+controls, and performance-contract arena allowance remain deferred.
 
 The first representative application lives in `applications/simulation/`.
 It is a deterministic multi-module simulation with persistent actors,

@@ -356,6 +356,13 @@ private:
             indent(depth);
             write_block(static_cast<const BlockStmt&>(statement), depth);
             return;
+        case StmtKind::Arena: {
+            const auto& arena = static_cast<const ArenaStmt&>(statement);
+            indent(depth);
+            output_ << "arena ";
+            write_block(*arena.body, depth);
+            return;
+        }
         case StmtKind::If:
             write_if(static_cast<const IfStmt&>(statement), depth, false);
             return;

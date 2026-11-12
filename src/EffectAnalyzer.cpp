@@ -357,6 +357,8 @@ private:
     void analyze_operation(const IROperation& operation, EffectNode& node)
     {
         switch (operation.kind) {
+        case IROperationKind::Region:
+            break;
         case IROperationKind::Construction:
             if (operation.result_type
                 && concrete_type(*operation.result_type, node).category

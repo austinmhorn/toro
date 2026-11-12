@@ -146,6 +146,9 @@ void SemanticAnalyzer::analyze_statement(const Stmt& statement)
     case StmtKind::Block:
         analyze_block(static_cast<const BlockStmt&>(statement));
         return;
+    case StmtKind::Arena:
+        analyze_block(static_cast<const ArenaStmt&>(statement).body.operator*());
+        return;
     case StmtKind::If: {
         const auto& if_statement = static_cast<const IfStmt&>(statement);
         analyze_expression(*if_statement.condition);

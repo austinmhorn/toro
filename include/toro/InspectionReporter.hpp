@@ -17,6 +17,7 @@ struct IRInspectionAllocation {
     IRStorageClass storage{IRStorageClass::Heap};
     std::string reason;
     std::string region_identity;
+    std::string parent_region_identity;
 };
 
 struct IRInspectionDispatch {

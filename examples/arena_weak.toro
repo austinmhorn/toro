@@ -1,0 +1,28 @@
+class Item {
+}
+
+class Watcher {
+    public weak item: Item?
+}
+
+function work(watcher: Watcher, limit: int) {
+    values := List<Item>()
+    index := 0
+    while index < limit {
+        arena {
+            item := Item()
+            watcher.item = item
+            values.add(item)
+            values.clear()
+            index = index + 1
+        }
+    }
+}
+
+function main() {
+    watcher := Watcher()
+    work(watcher, 1)
+    if watcher.item == null {
+        print("weak cleared")
+    }
+}

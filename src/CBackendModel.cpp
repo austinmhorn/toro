@@ -439,6 +439,8 @@ private:
     std::unique_ptr<Expr> expression(const IROperation& operation)
     {
         switch (operation.kind) {
+        case IROperationKind::Region:
+            fail(operation.origin, "arena region cannot be used as an expression");
         case IROperationKind::Constant:
             if (!operation.result_type) fail(operation.origin, "constant has no type");
             switch (operation.result_type->type.kind) {
@@ -604,9 +606,6 @@ private:
         auto value = std::make_unique<BlockStmt>(
             operation.origin.location, std::move(statements));
         value->module_name = operation.origin.module_name;
-        value->arena_region = operation.region_identity;
-        value->arena_capacity_bytes = operation.region_capacity_bytes;
-        value->arena_max_objects = operation.region_max_objects;
         return value;
     }
 
@@ -655,6 +654,17 @@ private:
             break;
         case IROperationKind::Block:
             result = block(operation);
+            break;
+        case IROperationKind::Region:
+            if (operation.children.size() != 1) {
+                fail(operation.origin, "arena region requires exactly one block");
+            }
+            if (!operation.region_cleanup_required) {
+                fail(operation.origin, "arena region is missing its cleanup obligation");
+            }
+            result = std::make_unique<ArenaStmt>(
+                operation.origin.location, block(operation.children.front()),
+                operation.region_identity);
             break;
         case IROperationKind::Branch:
             result = std::make_unique<IfStmt>(

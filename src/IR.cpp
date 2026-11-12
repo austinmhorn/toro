@@ -53,6 +53,7 @@ std::string_view operation_name(IROperationKind kind)
     case IROperationKind::Return: return "return";
     case IROperationKind::Stop: return "stop";
     case IROperationKind::Continue: return "continue";
+    case IROperationKind::Region: return "region";
     }
     return "unknown";
 }
@@ -137,6 +138,13 @@ void append_operation(
                 ? "<positional>" : operation.argument_names[index];
         }
         output += ')';
+    }
+    if (!operation.region_identity.empty()) {
+        output += " region=" + operation.region_identity;
+        if (!operation.parent_region_identity.empty()) {
+            output += " parent=" + operation.parent_region_identity;
+        }
+        if (operation.region_cleanup_required) output += " cleanup=required";
     }
     append_origin(operation.origin, output);
     output += '\n';
@@ -466,7 +474,11 @@ std::string dump_ir(
             }
         }
         for (const auto& region : program.regions) {
-            output += "  region " + region.identity + " capacity-bytes "
+            output += "  region " + region.identity;
+            if (!region.parent_identity.empty()) {
+                output += " parent " + region.parent_identity;
+            }
+            output += " cleanup required capacity-bytes "
                 + std::to_string(region.capacity_bytes) + " max-objects "
                 + std::to_string(region.max_objects) + " allocations "
                 + std::to_string(region.arena_allocation_sites)

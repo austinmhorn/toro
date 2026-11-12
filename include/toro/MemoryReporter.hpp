@@ -44,6 +44,7 @@ struct MemoryAllocationReport {
     IRStorageClass storage{IRStorageClass::Heap};
     std::string storage_reason;
     std::string region_identity;
+    std::string parent_region_identity;
     std::vector<IREscapeCause> escape_causes;
 };
 

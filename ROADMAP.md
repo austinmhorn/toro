@@ -995,7 +995,7 @@ The canonical design is recorded in `docs/ARENA_LANGUAGE_DESIGN.md`.
 
 Completed decisions:
 
-- one future user-facing spelling: `arena { ... }`;
+- one user-facing spelling: `arena { ... }`;
 - an explicit lexical lifetime-intent boundary rather than a named allocator,
   arena value, per-construction placement operator, or lifetime-annotated
   reference type;
@@ -1017,10 +1017,9 @@ Completed decisions:
 - retirement, not stabilization, of Phase 12.1D's experimental manifest keys.
 
 Final decision: **Authorize production implementation** for only the narrow
-Phase 12.1F slice below. Phase 12.1E changes documentation and design only; the
-compiler does not yet accept `arena` syntax. Phase 12.2 remains **Defer**.
+Phase 12.1F slice below. Phase 12.2 remains **Defer**.
 
-## 12.1F Core lexical arena semantics — authorized, not implemented
+## 12.1F Core lexical arena semantics — completed
 
 Implement the minimal production slice specified by Phase 12.1E:
 
@@ -1042,6 +1041,12 @@ Implement the minimal production slice specified by Phase 12.1E:
 Do not begin weak arena targets, collection-buffer arenas, hidden
 interprocedural region propagation, public capacity syntax, performance-policy
 integration, or concurrency as part of 12.1F.
+
+Implemented: first-class syntax/AST/typed-IR regions; deterministic nested
+region identities; Stack -> Arena -> Heap selection; conservative fallback;
+growable stable-address C11 chunks and teardown registration; cleanup on every
+lowered exit; cleared-List integration; read-only inspection/explanation; and
+simulation migration away from `[experimental]` manifest configuration.
 
 ## 12.2 Concurrency model
 

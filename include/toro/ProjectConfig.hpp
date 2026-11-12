@@ -1,18 +1,10 @@
 #pragma once
 
 #include <filesystem>
-#include <optional>
 #include <string>
 #include <vector>
 
 namespace toro {
-
-struct ExperimentalArenaConfig {
-    std::string type_name;
-    std::string region_name;
-    std::size_t capacity_bytes{0};
-    std::size_t max_objects{0};
-};
 
 struct ProjectConfig {
     std::string name;
@@ -21,7 +13,6 @@ struct ProjectConfig {
     std::filesystem::path source_root;
     std::filesystem::path entry_path;
     std::vector<std::string> c_libraries;
-    std::optional<ExperimentalArenaConfig> experimental_arena;
 };
 
 class ProjectConfigLoader {

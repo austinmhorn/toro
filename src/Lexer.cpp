@@ -11,7 +11,7 @@ namespace {
 
 using Keyword = std::pair<std::string_view, TokenType>;
 
-constexpr std::array<Keyword, 32> keywords{{
+constexpr std::array<Keyword, 33> keywords{{
     {"import", TokenType::Import},
     {"extern", TokenType::Extern},
     {"function", TokenType::Function},
@@ -44,6 +44,7 @@ constexpr std::array<Keyword, 32> keywords{{
     {"as", TokenType::As},
     {"weak", TokenType::Weak},
     {"performance", TokenType::Performance},
+    {"arena", TokenType::Arena},
 }};
 
 bool is_identifier_start(char character)

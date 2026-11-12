@@ -28,8 +28,7 @@ void expect(bool condition, std::string_view message)
     if (!condition) throw std::runtime_error(std::string(message));
 }
 
-toro::IRProgram analyze(std::string_view source,
-    toro::ExperimentalArenaOptions arena = {})
+toro::IRProgram analyze(std::string_view source)
 {
     auto tokens = toro::Lexer(source).tokenize();
     auto program = toro::Parser(std::move(tokens)).parse_program();
@@ -40,7 +39,7 @@ toro::IRProgram analyze(std::string_view source,
     toro::OwnershipSummaryAnalyzer().analyze(ir);
     toro::StrongCycleAnalyzer().analyze(ir);
     toro::EscapeAnalyzer().analyze(ir);
-    toro::StorageDecisionAnalyzer().analyze(ir, true, std::move(arena));
+    toro::StorageDecisionAnalyzer().analyze(ir);
     toro::ArcMaterializer().materialize(ir);
     toro::OwnershipTransferAnalyzer().analyze(ir);
     toro::BorrowInferenceAnalyzer().analyze(ir);
@@ -108,13 +107,16 @@ void test_arena_runtime_facts()
         "    values := List<Item>()\n"
         "    index := 0\n"
         "    while index < limit {\n"
+        "      arena {\n"
+        "       arena {\n"
         "        item := Item()\n"
         "        values.add(item)\n"
         "        values.clear()\n"
         "        index = index + 1\n"
+        "       }\n"
+        "      }\n"
         "    }\n"
-        "}\n",
-        toro::ExperimentalArenaOptions{true, "Item", "tick", 4096, 8});
+        "}\n");
     const auto report = toro::MemoryReporter().inspect(ir);
     expect(report.summary.arena_allocation_sites == 1
             && report.summary.arena_teardown_entries == 1
@@ -125,7 +127,9 @@ void test_arena_runtime_facts()
     const auto formatted = toro::MemoryReporter().format(report);
     expect(formatted.find("runtime-storage arena") != std::string::npos
             && formatted.find("general-heap-allocation no") != std::string::npos
-            && formatted.find("region experimental.tick") != std::string::npos,
+            && formatted.find("region <direct>.arena@") != std::string::npos
+            && formatted.find("parent-region <direct>.arena@")
+                != std::string::npos,
         "formatted memory report omitted arena provenance");
 }
 

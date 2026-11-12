@@ -593,6 +593,17 @@ private:
         }
         case StmtKind::Block:
             return lower_block(static_cast<const BlockStmt&>(statement), module);
+        case StmtKind::Arena: {
+            const auto& arena = static_cast<const ArenaStmt&>(statement);
+            operation.kind = IROperationKind::Region;
+            operation.region_identity = std::string(
+                module.empty() ? "<direct>" : module) + ".arena@"
+                + std::to_string(statement.location.line) + ":"
+                + std::to_string(statement.location.column);
+            operation.region_cleanup_required = true;
+            operation.children.push_back(lower_block(*arena.body, module));
+            return operation;
+        }
         case StmtKind::If: {
             const auto& branch = static_cast<const IfStmt&>(statement);
             operation.kind = IROperationKind::Branch;

@@ -24,8 +24,7 @@ void expect(bool condition, std::string_view message)
     if (!condition) throw std::runtime_error(std::string(message));
 }
 
-toro::IRProgram analyze(std::string_view source, bool enable_stack = true,
-    toro::ExperimentalArenaOptions arena = {})
+toro::IRProgram analyze(std::string_view source, bool enable_stack = true)
 {
     auto program = toro::Parser(toro::Lexer(source).tokenize()).parse_program();
     toro::SemanticAnalyzer().analyze(program);
@@ -34,7 +33,7 @@ toro::IRProgram analyze(std::string_view source, bool enable_stack = true,
     toro::EffectAnalyzer().analyze(ir);
     toro::OwnershipSummaryAnalyzer().analyze(ir);
     toro::EscapeAnalyzer().analyze(ir);
-    toro::StorageDecisionAnalyzer().analyze(ir, enable_stack, std::move(arena));
+    toro::StorageDecisionAnalyzer().analyze(ir, enable_stack);
     return ir;
 }
 
@@ -234,7 +233,7 @@ void test_foreign_barrier_and_reassignment_fall_back()
 void test_dump_determinism()
 {
     constexpr std::string_view source =
-        "class Item {}\n"
+        "class Item { public marker: int }\n"
         "function main() { value := Item() }\n";
     const auto first = analyze(source);
     const auto second = analyze(source);
@@ -264,10 +263,8 @@ void test_storage_decisions_do_not_change_effect_output()
         "storage decisions changed effect-analysis output");
 }
 
-void test_experimental_arena_region_and_fallbacks()
+void test_source_arena_region_and_fallbacks()
 {
-    const toro::ExperimentalArenaOptions arena{
-        true, "Item", "tick", 4096, 16};
     const auto ir = analyze(
         "class Item {\n"
         "    public value: int\n"
@@ -278,6 +275,7 @@ void test_experimental_arena_region_and_fallbacks()
         "    values := List<Item>()\n"
         "    index := 0\n"
         "    while index < limit {\n"
+        "      arena {\n"
         "        first := Item(index)\n"
         "        alias := first\n"
         "        print(alias.value)\n"
@@ -286,17 +284,18 @@ void test_experimental_arena_region_and_fallbacks()
         "        values.add(second)\n"
         "        values.clear()\n"
         "        index = index + 1\n"
+        "      }\n"
         "    }\n"
-        "}\n",
-        true, arena);
+        "}\n");
     expect(ir.escape_metrics.arena_allocations == 2
             && ir.escape_metrics.heap_allocations == 0
             && ir.regions.size() == 1,
         "bounded List-owned objects were not assigned to one arena region");
-    expect(ir.regions.front().capacity_bytes == 4096
-            && ir.regions.front().max_objects == 16
-            && ir.regions.front().teardown_entries == 2,
-        "arena capacity or teardown metadata was not retained");
+    expect(ir.regions.front().capacity_bytes == 0
+            && ir.regions.front().max_objects == 0
+            && ir.regions.front().teardown_entries == 2
+            && ir.regions.front().teardown_order.size() == 2,
+        "production arena teardown metadata was not retained");
     for (const auto& candidate : ir.escape_allocations) {
         expect(candidate.storage == toro::IRStorageClass::Arena
                 && !candidate.region_identity.empty(),
@@ -304,7 +303,7 @@ void test_experimental_arena_region_and_fallbacks()
     }
     const auto dump = toro::dump_ir(ir, false, false, true);
     expect(dump.find("storage arena") != std::string::npos
-            && dump.find("region experimental.tick") != std::string::npos,
+            && dump.find("region=<direct>.arena@") != std::string::npos,
         "arena decision was absent from IR inspection");
 
     const auto fallback = analyze(
@@ -314,17 +313,21 @@ void test_experimental_arena_region_and_fallbacks()
         "    values := List<Item>()\n"
         "    index := 0\n"
         "    while index < limit {\n"
+        "      arena {\n"
         "        item := Item()\n"
+        "        ordinary := Item()\n"
         "        watcher.item = item\n"
         "        values.add(item)\n"
+        "        values.add(ordinary)\n"
         "        values.clear()\n"
         "        index = index + 1\n"
+        "      }\n"
         "    }\n"
-        "}\n",
-        true, arena);
+        "}\n");
     expect(fallback.escape_metrics.arena_allocations == 0
-            && fallback.escape_metrics.heap_allocations == 1
-            && fallback.escape_metrics.arena_fallbacks == 1,
+            && fallback.escape_metrics.heap_allocations == 2
+            && fallback.escape_metrics.arena_fallbacks == 2
+            && fallback.regions.front().runtime_arc_suppressions == 0,
         "weak-observed candidate did not conservatively fall back to heap");
 
     const auto persistent = analyze(
@@ -334,17 +337,152 @@ void test_experimental_arena_region_and_fallbacks()
         "    persistent := List<Item>()\n"
         "    index := 0\n"
         "    while index < limit {\n"
+        "      arena {\n"
         "        item := Item()\n"
         "        transient.add(item)\n"
         "        persistent.add(item)\n"
         "        transient.clear()\n"
         "        index = index + 1\n"
+        "      }\n"
         "    }\n"
-        "}\n",
-        true, arena);
+        "}\n");
     expect(persistent.escape_metrics.arena_allocations == 0
             && persistent.escape_metrics.arena_fallbacks == 1,
         "candidate stored in an uncleared collection did not fall back");
+
+    const auto cloned = analyze(
+        "class Item {}\n"
+        "function work() {\n"
+        "  arena {\n"
+        "    values := List<Item>()\n"
+        "    item := Item()\n"
+        "    values.add(item)\n"
+        "    copy := values.clone()\n"
+        "    values.clear()\n"
+        "    copy.clear()\n"
+        "  }\n"
+        "}\n");
+    expect(cloned.escape_metrics.arena_allocations == 0
+            && cloned.escape_allocations.front().storage_reason.find("cloned")
+                != std::string::npos,
+        "candidate reachable through a cloned collection did not fall back");
+
+    const auto strong_graph = analyze(
+        "class Item {}\n"
+        "class Owner {\n"
+        "  public child: Item\n"
+        "  init(child: Item) { self.child = child }\n"
+        "}\n"
+        "function work() {\n"
+        "  arena {\n"
+        "    owners := List<Owner>()\n"
+        "    child := Item()\n"
+        "    owner := Owner(child)\n"
+        "    owners.add(owner)\n"
+        "    owners.clear()\n"
+        "  }\n"
+        "}\n");
+    expect(strong_graph.escape_metrics.arena_allocations == 2
+            && strong_graph.escape_metrics.stack_allocations == 0,
+        "same-region strong owner and child were not both arena-backed");
+
+    const auto incompatible_nested = analyze(
+        "class Item {}\n"
+        "class Owner { public child: Item? }\n"
+        "function work() {\n"
+        "  arena {\n"
+        "    owners := List<Owner>()\n"
+        "    owner := Owner()\n"
+        "    owners.add(owner)\n"
+        "    arena {\n"
+        "      child := Item()\n"
+        "      owner.child = child\n"
+        "    }\n"
+        "    owners.clear()\n"
+        "  }\n"
+        "}\n");
+    expect(incompatible_nested.regions.size() == 2
+            && incompatible_nested.escape_metrics.arena_allocations == 1
+            && incompatible_nested.escape_metrics.heap_allocations == 1,
+        "outer owner retained incompatible inner arena storage");
+    expect(incompatible_nested.regions.back().parent_identity
+            == incompatible_nested.regions.front().identity,
+        "nested arena parent identity was not recorded");
+
+    const auto early_exit = analyze(
+        "class Item {}\n"
+        "function work(exit: bool) {\n"
+        "  arena {\n"
+        "    values := List<Item>()\n"
+        "    item := Item()\n"
+        "    values.add(item)\n"
+        "    if exit { return }\n"
+        "    values.clear()\n"
+        "  }\n"
+        "}\n");
+    expect(early_exit.escape_metrics.arena_allocations == 0
+            && early_exit.escape_allocations.front().storage_reason.find(
+                "early exit") != std::string::npos,
+        "collection clear bypassed by an early exit did not fall back");
+
+    const auto foreign = analyze(
+        "extern \"C\" function puts(text: c_string) -> c_int\n"
+        "class Item { public marker: int }\n"
+        "class Owner {\n"
+        "  public item: Item\n"
+        "  init(item: Item) { self.item = item }\n"
+        "}\n"
+        "function work() {\n"
+        "  arena {\n"
+        "    item := Item()\n"
+        "    owner := Owner(item)\n"
+        "    puts(\"foreign\" as c_string)\n"
+        "    print(owner.item.marker)\n"
+        "  }\n"
+        "}\n");
+    expect(foreign.escape_metrics.arena_allocations == 0
+            && foreign.escape_metrics.heap_allocations
+                + foreign.escape_metrics.stack_allocations == 2,
+        "foreign-call uncertainty allowed arena storage");
+
+    const auto generic = analyze(
+        "class Box<T> {\n"
+        "  public value: T\n"
+        "  init(value: T) { self.value = value }\n"
+        "}\n"
+        "function work() {\n"
+        "  arena {\n"
+        "    values := List<Box<int>>()\n"
+        "    box := Box<int>(10)\n"
+        "    values.add(box)\n"
+        "    values.clear()\n"
+        "  }\n"
+        "}\n");
+    expect(generic.escape_metrics.arena_allocations == 1
+            && generic.escape_allocations.front().type.type.arguments.size() == 1,
+        "concrete generic arena eligibility lost its substitution identity");
+
+    const auto transported = analyze(
+        "class Item {}\n"
+        "enum Payload { item(Item) }\n"
+        "function result_value() -> Result<Item, string> {\n"
+        "  arena {\n"
+        "    item := Item()\n"
+        "    return ok(item)\n"
+        "  }\n"
+        "}\n"
+        "function enum_value() -> Payload {\n"
+        "  arena {\n"
+        "    item := Item()\n"
+        "    return Payload::item(item)\n"
+        "  }\n"
+        "}\n");
+    expect(transported.escape_metrics.arena_allocations == 0
+            && transported.escape_metrics.heap_allocations == 2,
+        "Result/enum transport beyond an arena did not preserve heap fallback: heap="
+            + std::to_string(transported.escape_metrics.heap_allocations)
+            + " stack=" + std::to_string(transported.escape_metrics.stack_allocations)
+            + " arena=" + std::to_string(transported.escape_metrics.arena_allocations));
 }
 
 } // namespace
@@ -359,7 +497,7 @@ int main()
         test_foreign_barrier_and_reassignment_fall_back();
         test_dump_determinism();
         test_storage_decisions_do_not_change_effect_output();
-        test_experimental_arena_region_and_fallbacks();
+        test_source_arena_region_and_fallbacks();
     } catch (const std::exception& error) {
         std::cerr << "storage decision test failure: " << error.what() << '\n';
         return 1;

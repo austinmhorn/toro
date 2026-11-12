@@ -203,6 +203,12 @@ void append_statement_dump(const Stmt& statement, std::size_t depth, std::string
         append_dump(*expression.expression, depth + 1, output);
         return;
     }
+    case StmtKind::Arena: {
+        const auto& arena = static_cast<const ArenaStmt&>(statement);
+        output += indentation + "Arena\n";
+        append_statement_dump(*arena.body, depth + 1, output);
+        return;
+    }
     case StmtKind::FunctionDeclaration: {
         const auto& function = static_cast<const FunctionDeclarationStmt&>(statement);
         output += indentation;
@@ -575,6 +581,9 @@ std::unique_ptr<Stmt> Parser::parse_statement()
     if (check(TokenType::Handle)) {
         return parse_handle_statement();
     }
+    if (check(TokenType::Arena)) {
+        return parse_arena_statement();
+    }
     if (check(TokenType::Stop) || check(TokenType::Continue)) {
         return parse_loop_control_statement();
     }
@@ -628,6 +637,18 @@ std::unique_ptr<Stmt> Parser::parse_statement()
 
     require_statement_end();
     return std::make_unique<ExpressionStmt>(location, std::move(expression));
+}
+
+std::unique_ptr<Stmt> Parser::parse_arena_statement()
+{
+    const Token keyword = consume(TokenType::Arena, "expected 'arena'");
+    if (!check(TokenType::LeftBrace)) {
+        throw_parse_error(peek(), "expected '{' after 'arena'");
+    }
+    auto body = parse_block_statement();
+    require_statement_end();
+    return std::make_unique<ArenaStmt>(
+        SourceLocation{keyword.line, keyword.column}, std::move(body));
 }
 
 std::unique_ptr<Stmt> Parser::parse_variable_declaration()

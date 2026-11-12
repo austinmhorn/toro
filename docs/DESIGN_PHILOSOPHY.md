@@ -172,12 +172,13 @@ narrow internal prototype. It removed those allocator calls with fixed bounded
 storage while preserving tested lifecycle semantics, so the recommendation is
 to proceed to a later language-design milestone. This is evidence for design,
 not permission to generalize the experimental path. Phase 12.1E now completes
-that design milestone: the future source model is one lexical `arena { ... }`
+that design milestone: the source model is one lexical `arena { ... }`
 lifetime-intent block, ordinary construction, and compiler-selected
 Stack/Arena/Heap placement with conservative heap fallback. This adds one
 bounded-lifetime concept without turning individual references into ownership
-programming. The design authorizes only a narrow future implementation; the
-syntax is not active yet.
+programming. Phase 12.1F implements that narrow production slice. Placement
+remains analysis-selected and conservatively falls back to Heap; the feature
+does not expose allocators, capacities, or ownership annotations.
 
 ### References
 

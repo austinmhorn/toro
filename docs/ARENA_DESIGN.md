@@ -765,7 +765,7 @@ at teardown. Weak-observed targets remain heap-backed. Collection backing
 storage, FFI arena references, public capacity controls, performance-policy
 changes, and concurrency are deferred.
 
-Final decision: **Authorize production implementation** for the narrow Phase
-12.1F slice specified in that document. This section does not implement or
-activate the syntax, and the 12.1D manifest remains experimental until replaced
-by that future milestone.
+Final design decision: **Authorize production implementation** for the narrow
+Phase 12.1F slice specified in that document. Phase 12.1F subsequently
+implemented that syntax and removed the 12.1D manifest path. This document
+retains the alternatives analysis as historical design evidence.

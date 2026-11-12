@@ -207,6 +207,7 @@ lifetime-intent block with ordinary construction and compiler-selected
 Stack/Arena/Heap placement. Its decision is **Authorize production
 implementation** for a narrow Phase 12.1F slice.
 
-That later design does not make this prototype's `[experimental]` manifest
-configuration stable. The current compiler still does not accept arena source
-syntax, and Phase 12.2 remains **Defer**.
+That later design did not make this prototype's `[experimental]` manifest
+configuration stable. Phase 12.1F subsequently replaced it with canonical
+`arena { ... }` source syntax and a growable production runtime. The measurements
+above remain historical prototype evidence; Phase 12.2 remains **Defer**.
