@@ -1,0 +1,144 @@
+entity Node00 {
+    weight: 100
+    label: [node-00]
+    next: Node01
+}
+entity Node01 {
+    weight: 101
+    label: [node-01]
+    next: Node02
+}
+entity Node02 {
+    weight: 102
+    label: [node-02]
+    next: Node03
+}
+entity Node03 {
+    weight: 103
+    label: [node-03]
+    next: Node04
+}
+entity Node04 {
+    weight: 104
+    label: [node-04]
+    next: Node05
+}
+entity Node05 {
+    weight: 105
+    label: [node-05]
+    next: Node06
+}
+entity Node06 {
+    weight: 106
+    label: [node-06]
+    next: Node07
+}
+entity Node07 {
+    weight: 107
+    label: [node-07]
+    next: Node08
+}
+entity Node08 {
+    weight: 108
+    label: [node-08]
+    next: Node09
+}
+entity Node09 {
+    weight: 109
+    label: [node-09]
+    next: Node10
+}
+entity Node10 {
+    weight: 110
+    label: [node-10]
+    next: Node11
+}
+entity Node11 {
+    weight: 111
+    label: [node-11]
+    next: Node12
+}
+entity Node12 {
+    weight: 112
+    label: [node-12]
+    next: Node13
+}
+entity Node13 {
+    weight: 113
+    label: [node-13]
+    next: Node14
+}
+entity Node14 {
+    weight: 114
+    label: [node-14]
+    next: Node15
+}
+entity Node15 {
+    weight: 115
+    label: [node-15]
+    next: Node16
+}
+entity Node16 {
+    weight: 116
+    label: [node-16]
+    next: Node17
+}
+entity Node17 {
+    weight: 117
+    label: [node-17]
+    next: Node18
+}
+entity Node18 {
+    weight: 118
+    label: [node-18]
+    next: Node19
+}
+entity Node19 {
+    weight: 119
+    label: [node-19]
+    next: Node20
+}
+entity Node20 {
+    weight: 120
+    label: [node-20]
+    next: Node21
+}
+entity Node21 {
+    weight: 121
+    label: [node-21]
+    next: Node22
+}
+entity Node22 {
+    weight: 122
+    label: [node-22]
+    next: Node23
+}
+entity Node23 {
+    weight: 123
+    label: [node-23]
+    next: Node00
+}
+link Node00 -> Node01
+link Node01 -> Node02
+link Node02 -> Node03
+link Node03 -> Node04
+link Node04 -> Node05
+link Node05 -> Node06
+link Node06 -> Node07
+link Node07 -> Node08
+link Node08 -> Node09
+link Node09 -> Node10
+link Node10 -> Node11
+link Node11 -> Node12
+link Node12 -> Node13
+link Node13 -> Node14
+link Node14 -> Node15
+link Node15 -> Node16
+link Node16 -> Node17
+link Node17 -> Node18
+link Node18 -> Node19
+link Node19 -> Node20
+link Node20 -> Node21
+link Node21 -> Node22
+link Node22 -> Node23
+link Node23 -> Node00

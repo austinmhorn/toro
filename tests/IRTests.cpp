@@ -201,6 +201,20 @@ void test_standard_library_calls()
         "typed standard-library call");
 }
 
+void test_imported_result_payload_identity()
+{
+    const auto root = std::filesystem::path(TORO_TEST_SOURCE_DIR);
+    const auto source_root = root / "applications/parser_tool/src";
+    auto program = load_and_check(source_root / "main.toro", source_root);
+    const auto dump = toro::dump_ir(toro::IRLowerer().lower(program));
+
+    expect_contains(
+        dump,
+        "load report : AnalysisReport "
+        "{module__11_parser_tool__5_model__14_AnalysisReport} [value]",
+        "imported Result payload declaration identity");
+}
+
 void test_backend_uses_detached_ir_only()
 {
     auto ir = lower_detached(
@@ -271,6 +285,7 @@ int main()
         test_result_propagation();
         test_modules_and_foreign_calls();
         test_standard_library_calls();
+        test_imported_result_payload_identity();
         test_backend_uses_detached_ir_only();
         test_performance_contract_marker();
     } catch (const std::exception& error) {

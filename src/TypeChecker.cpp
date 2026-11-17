@@ -2604,6 +2604,9 @@ Type TypeChecker::substitute_type(
             }
             return result;
         }
+        if (reference.resolved_type) {
+            return *reference.resolved_type;
+        }
         return resolve_type(reference);
     }
 

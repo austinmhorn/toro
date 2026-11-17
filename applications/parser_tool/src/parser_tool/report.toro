@@ -1,0 +1,23 @@
+import io
+import parser_tool.model
+
+public function print_report(report: AnalysisReport) {
+    write_line("analysis")
+    write_line(report.label)
+    write_line("tokens")
+    print(report.tokens)
+    write_line("entities")
+    print(report.entities)
+    write_line("fields")
+    print(report.fields)
+    write_line("integer values")
+    print(report.integer_values)
+    write_line("text values")
+    print(report.text_values)
+    write_line("references")
+    print(report.references)
+    write_line("links")
+    print(report.links)
+    write_line("checksum")
+    print(report.checksum)
+}

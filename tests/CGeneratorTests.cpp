@@ -765,6 +765,9 @@ void test_unsupported_features()
         "function consume(result: Result<Resource, string>) {}\n",
         "class-reference Result payloads are not supported by the C backend");
     expect_backend_error(
+        "function consume(result: Result<List<int>, string>) {}\n",
+        "List/Map Result payloads are not supported by the C backend");
+    expect_backend_error(
         "class Resource {\n"
         "    destroy() {}\n"
         "    function invoke() { self.destroy() }\n"

@@ -1,0 +1,9 @@
+import parser_tool.runner
+
+function main() {
+    run_fixture("fixtures/small.entity", "small")
+    run_fixture("fixtures/stress.entity", "stress")
+    run_fixture("fixtures/small.entity", "small-repeat")
+    run_fixture("fixtures/malformed.entity", "malformed")
+    run_fixture("fixtures/invalid.entity", "invalid")
+}

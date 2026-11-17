@@ -1,0 +1,150 @@
+import strings
+import parser_tool.model
+
+public performance function is_digit(value: string) -> bool {
+    return value == "0" or value == "1" or value == "2" or value == "3" or value == "4" or value == "5" or value == "6" or value == "7" or value == "8" or value == "9"
+}
+
+public performance function is_identifier_start(value: string) -> bool {
+    return value == "_" or value == "a" or value == "b" or value == "c" or value == "d" or value == "e" or value == "f" or value == "g" or value == "h" or value == "i" or value == "j" or value == "k" or value == "l" or value == "m" or value == "n" or value == "o" or value == "p" or value == "q" or value == "r" or value == "s" or value == "t" or value == "u" or value == "v" or value == "w" or value == "x" or value == "y" or value == "z" or value == "A" or value == "B" or value == "C" or value == "D" or value == "E" or value == "F" or value == "G" or value == "H" or value == "I" or value == "J" or value == "K" or value == "L" or value == "M" or value == "N" or value == "O" or value == "P" or value == "Q" or value == "R" or value == "S" or value == "T" or value == "U" or value == "V" or value == "W" or value == "X" or value == "Y" or value == "Z"
+}
+
+public performance function is_identifier_continue(value: string) -> bool {
+    return is_identifier_start(value) or is_digit(value)
+}
+
+function token_kind(identifier: string) -> TokenKind {
+    if identifier == "entity" {
+        return TokenKind::entity_keyword
+    }
+    if identifier == "link" {
+        return TokenKind::link_keyword
+    }
+    return TokenKind::identifier
+}
+
+function character(source: string, index: int) -> Result<string, string> {
+    return substring(source, index, 1)
+}
+
+public function tokenize(source: string, tokens: List<Token>) -> Result<bool, string> {
+    tokens.reserve(length(source))
+    index := 0
+    line := 1
+    column := 1
+    count := length(source)
+    while index < count {
+        current := character(source, index)?
+        if current == " " {
+            index = index + 1
+            column = column + 1
+        } else if is_identifier_start(current) {
+            start := index
+            start_column := column
+            lexeme := ""
+            while index < count and is_identifier_continue(character(source, index)?) {
+                lexeme = concat(lexeme, character(source, index)?)
+                index = index + 1
+                column = column + 1
+            }
+            tokens.add(Token(kind: token_kind(lexeme), lexeme: lexeme, line: line, column: start_column))
+        } else if is_digit(current) {
+            start_column := column
+            lexeme := ""
+            while index < count and is_digit(character(source, index)?) {
+                lexeme = concat(lexeme, character(source, index)?)
+                index = index + 1
+                column = column + 1
+            }
+            tokens.add(Token(kind: TokenKind::integer, lexeme: lexeme, line: line, column: start_column))
+        } else if current == "[" {
+            start_column := column
+            index = index + 1
+            column = column + 1
+            lexeme := ""
+            terminated := false
+            while index < count and terminated == false {
+                next := character(source, index)?
+                if next == "]" {
+                    terminated = true
+                    index = index + 1
+                    column = column + 1
+                } else {
+                    lexeme = concat(lexeme, next)
+                    index = index + 1
+                    column = column + 1
+                }
+            }
+            if terminated == false {
+                return error("unterminated string literal")
+            }
+            tokens.add(Token(kind: TokenKind::text, lexeme: lexeme, line: line, column: start_column))
+        } else if current == "{" {
+            tokens.add(Token(kind: TokenKind::left_brace, lexeme: current, line: line, column: column))
+            index = index + 1
+            column = column + 1
+        } else if current == "}" {
+            tokens.add(Token(kind: TokenKind::right_brace, lexeme: current, line: line, column: column))
+            index = index + 1
+            column = column + 1
+        } else if current == ":" {
+            tokens.add(Token(kind: TokenKind::colon, lexeme: current, line: line, column: column))
+            index = index + 1
+            column = column + 1
+        } else if current == "-" and index + 1 < count and character(source, index + 1)? == ">" {
+            tokens.add(Token(kind: TokenKind::arrow, lexeme: "->", line: line, column: column))
+            index = index + 2
+            column = column + 2
+        } else {
+            index = index + 1
+            column = column + 1
+        }
+    }
+    tokens.add(Token(kind: TokenKind::end_of_file, lexeme: "", line: line, column: column))
+    return ok(true)
+}
+
+function digit_value(value: string) -> int {
+    if value == "1" {
+        return 1
+    }
+    if value == "2" {
+        return 2
+    }
+    if value == "3" {
+        return 3
+    }
+    if value == "4" {
+        return 4
+    }
+    if value == "5" {
+        return 5
+    }
+    if value == "6" {
+        return 6
+    }
+    if value == "7" {
+        return 7
+    }
+    if value == "8" {
+        return 8
+    }
+    if value == "9" {
+        return 9
+    }
+    return 0
+}
+
+public function parse_integer(value: string) -> Result<int, string> {
+    result := 0
+    index := 0
+    while index < length(value) {
+        current := character(value, index)?
+        if is_digit(current) == false {
+            return error("invalid integer")
+        }
+        result = result * 10 + digit_value(current)
+        index = index + 1
+    }
+    return ok(result)
+}

@@ -1,0 +1,28 @@
+import fs
+import io
+import parser_tool.parser
+import parser_tool.report
+
+public function run_fixture(path: string, label: string) {
+    handle read_text(path) {
+        ok(source) {
+            handle parse_and_analyze(source, label) {
+                ok(report) {
+                    print_report(report)
+                }
+
+                error(problem) {
+                    write_line("analysis error")
+                    write_line(label)
+                    write_line(problem)
+                }
+            }
+        }
+
+        error(problem) {
+            write_line("file error")
+            write_line(label)
+            write_line(problem)
+        }
+    }
+}

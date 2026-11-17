@@ -1,0 +1,60 @@
+analysis
+small
+tokens
+28
+entities
+2
+fields
+5
+integer values
+2
+text values
+2
+references
+1
+links
+1
+checksum
+-823866677982632197
+analysis
+stress
+tokens
+409
+entities
+24
+fields
+72
+integer values
+24
+text values
+24
+references
+24
+links
+24
+checksum
+1423665770392516241
+analysis
+small-repeat
+tokens
+28
+entities
+2
+fields
+5
+integer values
+2
+text values
+2
+references
+1
+links
+1
+checksum
+-823866677982632197
+analysis error
+malformed
+unexpected token
+analysis error
+invalid
+duplicate entity declaration

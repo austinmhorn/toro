@@ -1,0 +1,74 @@
+import parser_tool.model
+import parser_tool.lexer
+import parser_tool.analyzer
+
+function expected(tokens: List<Token>, index: int, kind_code: int) -> Result<Token, string> {
+    if index >= tokens.count or token_kind_code(tokens[index].kind) != kind_code {
+        return error("unexpected token")
+    }
+    return ok(tokens[index])
+}
+
+public function parse_and_analyze(source: string, label: string) -> Result<AnalysisReport, string> {
+    tokens := List<Token>()
+    tokenize(source, tokens)?
+    return parse_tokens_and_analyze(tokens, label)
+}
+
+public function parse_tokens_and_analyze(tokens: List<Token>, label: string) -> Result<AnalysisReport, string> {
+    arena {
+        entities := List<EntityNode>()
+        fields := List<FieldNode>()
+        links := List<LinkNode>()
+        entities.reserve(32)
+        fields.reserve(96)
+        links.reserve(32)
+        index := 0
+        while token_kind_code(tokens[index].kind) != 10 {
+            if token_kind_code(tokens[index].kind) == 1 {
+                index = index + 1
+                name := expected(tokens, index, 3)?.lexeme
+                index = index + 1
+                expected(tokens, index, 6)?
+                index = index + 1
+                field_start := fields.count
+                while token_kind_code(tokens[index].kind) != 7 {
+                    field_name := expected(tokens, index, 3)?.lexeme
+                    index = index + 1
+                    expected(tokens, index, 8)?
+                    index = index + 1
+                    value_token := tokens[index]
+                    if token_kind_code(value_token.kind) == 4 {
+                        value := parse_integer(value_token.lexeme)?
+                        fields.add(FieldNode(name: field_name, value: FieldValue::integer(value)))
+                    } else if token_kind_code(value_token.kind) == 5 {
+                        fields.add(FieldNode(name: field_name, value: FieldValue::text(value_token.lexeme)))
+                    } else if token_kind_code(value_token.kind) == 3 {
+                        fields.add(FieldNode(name: field_name, value: FieldValue::reference(value_token.lexeme)))
+                    } else {
+                        return error("expected field value")
+                    }
+                    index = index + 1
+                }
+                index = index + 1
+                entities.add(EntityNode(name: name, field_start: field_start, field_count: fields.count - field_start))
+            } else if token_kind_code(tokens[index].kind) == 2 {
+                index = index + 1
+                source := expected(tokens, index, 3)?.lexeme
+                index = index + 1
+                expected(tokens, index, 9)?
+                index = index + 1
+                target := expected(tokens, index, 3)?.lexeme
+                index = index + 1
+                links.add(LinkNode(source: source, target: target))
+            } else {
+                return error("expected entity or link declaration")
+            }
+        }
+        report := analyze(label, tokens.count, entities, fields, links)?
+        entities.clear()
+        fields.clear()
+        links.clear()
+        return ok(report)
+    }
+}

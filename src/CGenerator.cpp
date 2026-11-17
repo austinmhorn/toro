@@ -1017,6 +1017,18 @@ private:
             });
     }
 
+    static bool contains_reference_collection(const CValueType& type)
+    {
+        if (type.kind == CValueKind::List || type.kind == CValueKind::Map) {
+            return true;
+        }
+        return std::ranges::any_of(
+            type.arguments,
+            [](const CValueType& argument) {
+                return contains_reference_collection(argument);
+            });
+    }
+
     bool is_class_base_of(
         const std::string& base_name,
         const std::string& derived_name) const
@@ -1970,6 +1982,10 @@ private:
         if (contains_interface_value(type)) {
             throw_backend_error(location,
                 "interface-valued Result payloads are not supported by the C backend");
+        }
+        if (contains_reference_collection(type)) {
+            throw_backend_error(location,
+                "List/Map Result payloads are not supported by the C backend");
         }
         if (std::ranges::none_of(
                 result_order_,

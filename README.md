@@ -40,6 +40,17 @@ Phase 12.1B through 12.1F milestones completed the resulting design and narrow
 production implementation. The profile found no evidence sufficient to reopen
 concurrency design, so Phase 12.2 remains deferred.
 
+The second representative application lives in `applications/parser_tool/`.
+It is a multi-module source-language tokenizer, parser, class-backed AST,
+symbol/reference analyzer, and deterministic reporter with small, stress, and
+invalid fixtures. Its A3 evidence confirms that lexical `arena {}` is natural
+for a parse-unit lifetime, but all five AST allocation sites currently remain
+Heap because collection insertion is conservatively escaping. Profiling found
+tokenization dominated by allocation-heavy substring/concatenation work and
+identified nonallocating character iteration plus reclaimable temporary-string
+ownership as higher-priority needs than concurrency. The full evidence is in
+`applications/parser_tool/REPORT.md`; Phase 12.2 remains deferred.
+
 The first compiler implementation is written in C++23.
 It currently loads and tokenizes `.toro` source files and can parse expressions,
 variable declarations, assignments, calls, functions, returns, blocks, conditional

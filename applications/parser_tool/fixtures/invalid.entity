@@ -1,0 +1,7 @@
+entity Player {
+    health: 100
+}
+
+entity Player {
+    health: 50
+}

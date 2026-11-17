@@ -1,0 +1,128 @@
+public enum TokenKind {
+    entity_keyword
+    link_keyword
+    identifier
+    integer
+    text
+    left_brace
+    right_brace
+    colon
+    arrow
+    end_of_file
+}
+
+public performance function token_kind_code(kind: TokenKind) -> int {
+    handle kind {
+        entity_keyword {
+            return 1
+        }
+
+        link_keyword {
+            return 2
+        }
+
+        identifier {
+            return 3
+        }
+
+        integer {
+            return 4
+        }
+
+        text {
+            return 5
+        }
+
+        left_brace {
+            return 6
+        }
+
+        right_brace {
+            return 7
+        }
+
+        colon {
+            return 8
+        }
+
+        arrow {
+            return 9
+        }
+
+        end_of_file {
+            return 10
+        }
+    }
+}
+
+public struct Token {
+    kind: TokenKind
+
+    lexeme: string
+
+    line: int
+
+    column: int
+}
+
+public enum FieldValue {
+    integer(int)
+    text(string)
+    reference(string)
+}
+
+public class FieldNode {
+    public name: string
+
+    public value: FieldValue
+
+    init(name: string, value: FieldValue) {
+        self.name = name
+        self.value = value
+    }
+}
+
+public class EntityNode {
+    public name: string
+
+    public field_start: int
+
+    public field_count: int
+
+    init(name: string, field_start: int, field_count: int) {
+        self.name = name
+        self.field_start = field_start
+        self.field_count = field_count
+    }
+}
+
+public class LinkNode {
+    public source: string
+
+    public target: string
+
+    init(source: string, target: string) {
+        self.source = source
+        self.target = target
+    }
+}
+
+public struct AnalysisReport {
+    label: string
+
+    tokens: int
+
+    entities: int
+
+    fields: int
+
+    integer_values: int
+
+    text_values: int
+
+    references: int
+
+    links: int
+
+    checksum: int
+}

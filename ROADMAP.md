@@ -1128,6 +1128,33 @@ concurrency, atomic ARC, and local/shared ARC specialization remain
 unauthorized. See `applications/simulation/PROFILE_REPORT.md` and
 `docs/ARENA_DESIGN.md`.
 
+## Application Milestone A3 — representative parser/compiler-style tool
+
+Completed as an application and evidence milestone:
+
+- added a real multi-module tokenizer, parser, class-backed AST, symbol table,
+  reference analyzer, deterministic reports, and correctness/stress fixtures
+  under `applications/parser_tool/`;
+- used `Result`, postfix propagation, `List`, `Map`, filesystem I/O,
+  performance contracts, and canonical `arena {}` in a non-simulation domain;
+- found that all five AST allocation sites remain Heap because `List` storage
+  is conservatively escaping, despite their bounded parse-unit arena region;
+- measured tokenization at approximately 95.8% of the staged profile, with
+  substring/concatenation allocation and current process-lifetime native
+  string retention as the dominant CPU and memory pressure;
+- found zero leaks, but a high repeated-tokenization memory watermark, making
+  nonallocating character iteration and reclaimable temporary strings the
+  highest-priority application finding;
+- fixed two conservative compiler correctness defects with regressions:
+  cross-module nominal identity during substitution, and unsafe reference-
+  collection payloads in generated `Result` values;
+- found no measured parallel speedup or representative multi-file workload.
+
+The A3 Phase 12.2 recommendation is **Defer**. Independent-file processing is
+the only credible future task boundary, but this application supplies neither
+the workload nor the benefit evidence required to reopen concurrency design.
+See `applications/parser_tool/REPORT.md`.
+
 Before 1.0, build representative real applications in target domains.
 
 Suggested validation projects:

@@ -1,0 +1,74 @@
+import fs
+import io
+import time
+import parser_tool.lexer
+import parser_tool.model
+import parser_tool.parser
+
+function main() {
+    handle read_text("fixtures/stress.entity") {
+        ok(source) {
+            iteration := 0
+            token_count := 0
+            tokenize_start := wall_millis()
+            while iteration < 4000 {
+                tokens := List<Token>()
+                handle tokenize(source, tokens) {
+                    ok(valid) {
+                        if valid {
+                            token_count = tokens.count
+                        }
+                    }
+
+                    error(problem) {
+                        write_line(problem)
+                    }
+                }
+                iteration = iteration + 1
+            }
+            tokenize_millis := elapsed_millis(tokenize_start)
+            tokens := List<Token>()
+            handle tokenize(source, tokens) {
+                ok(valid) {
+                    if valid == false {
+                        write_line("tokenization failed")
+                    }
+                }
+
+                error(problem) {
+                    write_line(problem)
+                }
+            }
+            iteration = 0
+            checksum := 0
+            parse_start := wall_millis()
+            while iteration < 4000 {
+                handle parse_tokens_and_analyze(tokens, "profile") {
+                    ok(report) {
+                        checksum = report.checksum
+                    }
+
+                    error(problem) {
+                        write_line(problem)
+                    }
+                }
+                iteration = iteration + 1
+            }
+            parse_millis := elapsed_millis(parse_start)
+            write_line("profile parses")
+            print(iteration)
+            write_line("profile tokens")
+            print(token_count)
+            write_line("profile checksum")
+            print(checksum)
+            write_line("tokenize millis")
+            print(tokenize_millis)
+            write_line("parse analyze millis")
+            print(parse_millis)
+        }
+
+        error(problem) {
+            write_line(problem)
+        }
+    }
+}

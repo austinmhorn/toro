@@ -985,6 +985,17 @@ runtime uses stable-address growable chunks and growable reverse-order finalizer
 metadata. The former simulation manifest switch has been removed. Weak targets,
 FFI crossings, unproven escapes, and unsupported lifetime shapes remain Heap.
 
+Application Milestone A3 tested the production model in a parser/analyzer
+domain. A lexical arena naturally bounds one tokenize/parse/analyze unit, but
+all five class-backed AST construction sites are stored in Lists and therefore
+remain Heap under the current conservative `collection-storage` escape rule.
+The backend performs no independent placement reasoning, and the milestone did
+not broaden arena or collection semantics. The same application exposed that
+the native-string bridge's process-lifetime storage and allocating
+single-character substring/concat path are unsuitable for long-running parser
+workloads. Those are recorded application pressures, not architectural changes
+authorized by A3. See `applications/parser_tool/REPORT.md`.
+
 Later phases may explore, when evidence justifies them:
 
 - broader arena/scoped-allocation capabilities beyond the completed lexical

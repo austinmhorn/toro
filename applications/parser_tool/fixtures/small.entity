@@ -1,0 +1,12 @@
+entity Player {
+    health: 100
+    name: [Austin]
+    target: Enemy
+}
+
+entity Enemy {
+    health: 50
+    name: [Goblin]
+}
+
+link Player -> Enemy

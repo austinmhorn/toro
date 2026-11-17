@@ -1,0 +1,58 @@
+import strings
+import parser_tool.model
+
+public performance function mix_checksum(current: int, value: int) -> int {
+    return (current * 131 + value * 17 + 7) / 3
+}
+
+public function analyze(label: string, token_count: int, entities: List<EntityNode>, fields_list: List<FieldNode>, links: List<LinkNode>) -> Result<AnalysisReport, string> {
+    symbols := Map<string, int>()
+    fields := 0
+    integer_values := 0
+    text_values := 0
+    references := 0
+    checksum := 11
+    for entity in entities {
+        if symbols.contains(entity.name) {
+            return error("duplicate entity declaration")
+        }
+        symbols[entity.name] = entity.field_count
+        fields = fields + entity.field_count
+        checksum = mix_checksum(checksum, length(entity.name) + entity.field_count)
+    }
+    for entity in entities {
+        field_index := entity.field_start
+        field_end := entity.field_start + entity.field_count
+        while field_index < field_end {
+            field := fields_list[field_index]
+            checksum = mix_checksum(checksum, length(field.name))
+            handle field.value {
+                integer(value) {
+                    integer_values = integer_values + 1
+                    checksum = mix_checksum(checksum, value)
+                }
+
+                text(value) {
+                    text_values = text_values + 1
+                    checksum = mix_checksum(checksum, length(value))
+                }
+
+                reference(name) {
+                    references = references + 1
+                    if symbols.contains(name) == false {
+                        return error("unknown entity reference")
+                    }
+                    checksum = mix_checksum(checksum, symbols[name])
+                }
+            }
+            field_index = field_index + 1
+        }
+    }
+    for link in links {
+        if symbols.contains(link.source) == false or symbols.contains(link.target) == false {
+            return error("unknown link endpoint")
+        }
+        checksum = mix_checksum(checksum, symbols[link.source] + symbols[link.target])
+    }
+    return ok(AnalysisReport(label: label, tokens: token_count, entities: entities.count, fields: fields, integer_values: integer_values, text_values: text_values, references: references, links: links.count, checksum: checksum))
+}
