@@ -547,7 +547,7 @@ std::string c_type_name(CValueType type)
     case CValueKind::Int: return "int64_t";
     case CValueKind::Dec: return "double";
     case CValueKind::Bool: return "bool";
-    case CValueKind::String: return "const char*";
+    case CValueKind::String: return "toro_string";
     case CValueKind::CInt: return "int";
     case CValueKind::CInt64: return "int64_t";
     case CValueKind::CDouble: return "double";
@@ -611,6 +611,43 @@ public:
             "#include <stdlib.h>\n"
             "#include <string.h>\n"
             "#include <time.h>\n\n";
+
+        output +=
+            "typedef struct toro_string_control\n"
+            "{\n"
+            "    uint64_t toro_ref_count;\n"
+            "    char* toro_data;\n"
+            "} toro_string_control;\n\n"
+            "typedef struct toro_string\n"
+            "{\n"
+            "    const char* toro_data;\n"
+            "    toro_string_control* toro_control;\n"
+            "} toro_string;\n\n"
+            "static uint64_t toro_string_live_allocations = 0;\n\n"
+            "static toro_string toro_string_literal(const char* toro_data)\n"
+            "{\n"
+            "    return (toro_string){.toro_data = toro_data, .toro_control = NULL};\n"
+            "}\n\n"
+            "static toro_string toro_string_adopt(char* toro_data)\n"
+            "{\n"
+            "    toro_string_control* toro_control = malloc(sizeof(*toro_control));\n"
+            "    if (toro_control == NULL) { free(toro_data); abort(); }\n"
+            "    toro_control->toro_ref_count = 1;\n"
+            "    toro_control->toro_data = toro_data;\n"
+            "    ++toro_string_live_allocations;\n"
+            "    return (toro_string){.toro_data = toro_data, .toro_control = toro_control};\n"
+            "}\n\n"
+            "static void toro_string_retain(toro_string toro_value)\n"
+            "{\n"
+            "    if (toro_value.toro_control != NULL) { ++toro_value.toro_control->toro_ref_count; }\n"
+            "}\n\n"
+            "static void toro_string_release(toro_string toro_value)\n"
+            "{\n"
+            "    if (toro_value.toro_control == NULL || --toro_value.toro_control->toro_ref_count != 0) { return; }\n"
+            "    free(toro_value.toro_control->toro_data);\n"
+            "    free(toro_value.toro_control);\n"
+            "    --toro_string_live_allocations;\n"
+            "}\n\n";
 
         if (has_experimental_regions_) {
             output +=
@@ -771,6 +808,18 @@ public:
             output += "typedef struct " + collection_name(collection) + " "
                 + collection_name(collection) + ";\n";
         }
+        for (const auto& type : nominal_order_) {
+            if ((type.kind == CValueKind::Struct
+                    || type.kind == CValueKind::Enum)
+                && is_owned_runtime_value(type)) {
+                output += value_lifetime_declarations(type);
+            }
+        }
+        for (const auto& result : result_order_) {
+            if (is_owned_runtime_value(result.type)) {
+                output += value_lifetime_declarations(result.type);
+            }
+        }
         if (!struct_order_.empty() || !class_order_.empty()
             || !interface_order_.empty() || !enum_order_.empty()
             || !result_order_.empty() || !collection_order_.empty()) {
@@ -800,6 +849,18 @@ public:
         }
         for (const auto& result : result_order_) {
             output += emit_type_definition(result.type, definition_state);
+        }
+        for (const auto& type : nominal_order_) {
+            if ((type.kind == CValueKind::Struct
+                    || type.kind == CValueKind::Enum)
+                && is_owned_runtime_value(type)) {
+                output += emit_value_lifetime_helpers(type);
+            }
+        }
+        for (const auto& result : result_order_) {
+            if (is_owned_runtime_value(result.type)) {
+                output += emit_value_lifetime_helpers(result.type);
+            }
         }
         for (const auto* declaration : interface_order_) {
             output += emit_interface_definition(*declaration);
@@ -965,9 +1026,13 @@ public:
             output += "int main(void)\n{\n";
             if (main.return_type == void_type) {
                 output += "    " + function_name("main") + "();\n";
+                output += "    if (toro_string_live_allocations != 0) { fprintf(stderr, \"toro runtime error: %llu native string allocation(s) remained live\\n\", (unsigned long long)toro_string_live_allocations); abort(); }\n";
                 output += "    return 0;\n";
             } else if (main.return_type == int_type) {
-                output += "    return (int)" + function_name("main") + "();\n";
+                output += "    const int toro_status = (int)"
+                    + function_name("main") + "();\n";
+                output += "    if (toro_string_live_allocations != 0) { fprintf(stderr, \"toro runtime error: %llu native string allocation(s) remained live\\n\", (unsigned long long)toro_string_live_allocations); abort(); }\n";
+                output += "    return toro_status;\n";
             } else {
                 throw_backend_error(
                     main.declaration->location,
@@ -982,15 +1047,41 @@ public:
 private:
     static bool is_managed_reference(const CValueType& type)
     {
-        return type.kind == CValueKind::Class
+        return type.kind == CValueKind::String
+            || type.kind == CValueKind::Class
             || type.kind == CValueKind::Interface
             || type.kind == CValueKind::List
             || type.kind == CValueKind::Map;
     }
 
-    static bool is_owned_runtime_value(const CValueType& type)
+    bool is_owned_runtime_value(const CValueType& type) const
     {
-        return is_managed_reference(type) || type.kind == CValueKind::Array;
+        if (is_managed_reference(type) || type.kind == CValueKind::Array) {
+            return true;
+        }
+        if (type.kind == CValueKind::Struct) {
+            return std::ranges::any_of(
+                structs_.at(type.nominal_name).fields,
+                [&](const auto& field) {
+                    return is_owned_runtime_value(field.type);
+                });
+        }
+        if (type.kind == CValueKind::Enum) {
+            return std::ranges::any_of(
+                enums_.at(type.nominal_name).variants,
+                [&](const auto& variant) {
+                    return variant.payload_type
+                        && is_owned_runtime_value(*variant.payload_type);
+                });
+        }
+        if (type.kind == CValueKind::Result) {
+            return std::ranges::any_of(
+                type.arguments,
+                [&](const auto& argument) {
+                    return is_owned_runtime_value(argument);
+                });
+        }
+        return false;
     }
 
     static bool contains_class_reference(const CValueType& type)
@@ -1097,11 +1188,19 @@ private:
         if (type.kind == CValueKind::Class) {
             return retain_name(type.nominal_name) + "(" + value + ")";
         }
+        if (type.kind == CValueKind::String) {
+            return "toro_string_retain(" + value + ")";
+        }
         if (type.kind == CValueKind::Interface) {
             return interface_name(type.nominal_name) + "_retain(&" + value + ")";
         }
         if (type.kind == CValueKind::List || type.kind == CValueKind::Map) {
             return collection_name(type) + "_retain(" + value + ")";
+        }
+        if (type.kind == CValueKind::Struct
+            || type.kind == CValueKind::Enum
+            || type.kind == CValueKind::Result) {
+            return "toro_value_" + type_mangle(type) + "_retain(&" + value + ")";
         }
         throw_backend_error(current_location_, "cannot retain a non-reference value");
     }
@@ -1113,6 +1212,9 @@ private:
         if (type.kind == CValueKind::Class) {
             return release_name(type.nominal_name) + "(" + value + ")";
         }
+        if (type.kind == CValueKind::String) {
+            return "toro_string_release(" + value + ")";
+        }
         if (type.kind == CValueKind::Interface) {
             return interface_name(type.nominal_name) + "_release(&" + value + ")";
         }
@@ -1121,6 +1223,11 @@ private:
         }
         if (type.kind == CValueKind::Array) {
             return collection_name(type) + "_destroy(&" + value + ")";
+        }
+        if (type.kind == CValueKind::Struct
+            || type.kind == CValueKind::Enum
+            || type.kind == CValueKind::Result) {
+            return "toro_value_" + type_mangle(type) + "_release(&" + value + ")";
         }
         throw_backend_error(current_location_, "cannot release a non-reference value");
     }
@@ -2544,10 +2651,86 @@ private:
         if (type.kind == CValueKind::Class) {
             return retain_name(type.nominal_name) + "(" + std::string(expression) + ");\n";
         }
+        if (type.kind == CValueKind::String) {
+            return "toro_string_retain(" + std::string(expression) + ");\n";
+        }
         if (type.kind == CValueKind::List || type.kind == CValueKind::Map) {
             return collection_name(type) + "_retain(" + std::string(expression) + ");\n";
         }
+        if ((type.kind == CValueKind::Struct
+                || type.kind == CValueKind::Enum
+                || type.kind == CValueKind::Result)
+            && is_owned_runtime_value(type)) {
+            return "toro_value_" + type_mangle(type) + "_retain(&"
+                + std::string(expression) + ");\n";
+        }
         return {};
+    }
+
+    std::string emit_value_lifetime_helpers(const CValueType& type) const
+    {
+        const std::string prefix = "toro_value_" + type_mangle(type);
+        const std::string c_type = c_type_name(type);
+        std::string retain = "static void " + prefix + "_retain(" + c_type
+            + "* toro_value)\n{\n";
+        std::string release = "static void " + prefix + "_release(" + c_type
+            + "* toro_value)\n{\n";
+        const auto append = [&](const CValueType& member_type,
+                                const std::string& expression) {
+            if (!is_owned_runtime_value(member_type)) return;
+            retain += "    " + retain_call(member_type, expression) + ";\n";
+            release += "    " + release_call(member_type, expression) + ";\n";
+        };
+        if (type.kind == CValueKind::Struct) {
+            for (const auto& field : structs_.at(type.nominal_name).fields) {
+                append(field.type,
+                    "toro_value->" + field_name(field.declaration->name));
+            }
+        } else if (type.kind == CValueKind::Enum) {
+            const auto& info = enums_.at(type.nominal_name);
+            for (const auto& variant : info.variants) {
+                if (!variant.payload_type
+                    || !is_owned_runtime_value(*variant.payload_type)) continue;
+                const std::string condition = "toro_value->toro_tag == "
+                    + enum_tag_name(type.nominal_name,
+                        variant.declaration->name);
+                const std::string payload = "toro_value->toro_payload."
+                    + enum_payload_name(variant.declaration->name);
+                retain += "    if (" + condition + ") { "
+                    + retain_call(*variant.payload_type, payload) + "; }\n";
+                release += "    if (" + condition + ") { "
+                    + release_call(*variant.payload_type, payload) + "; }\n";
+            }
+        } else if (type.kind == CValueKind::Result) {
+            if (is_owned_runtime_value(type.arguments[0])) {
+                retain += "    if (toro_value->toro_tag == " + result_name(type)
+                    + "_tag_ok) { " + retain_call(type.arguments[0],
+                        "toro_value->toro_payload.toro_ok") + "; }\n";
+                release += "    if (toro_value->toro_tag == " + result_name(type)
+                    + "_tag_ok) { " + release_call(type.arguments[0],
+                        "toro_value->toro_payload.toro_ok") + "; }\n";
+            }
+            if (is_owned_runtime_value(type.arguments[1])) {
+                retain += "    if (toro_value->toro_tag == " + result_name(type)
+                    + "_tag_error) { " + retain_call(type.arguments[1],
+                        "toro_value->toro_payload.toro_error") + "; }\n";
+                release += "    if (toro_value->toro_tag == " + result_name(type)
+                    + "_tag_error) { " + release_call(type.arguments[1],
+                        "toro_value->toro_payload.toro_error") + "; }\n";
+            }
+        }
+        retain += "}\n\n";
+        release += "}\n\n";
+        return retain + release;
+    }
+
+    std::string value_lifetime_declarations(const CValueType& type) const
+    {
+        const std::string prefix = "toro_value_" + type_mangle(type);
+        const std::string c_type = c_type_name(type);
+        return "static void " + prefix + "_retain(" + c_type
+            + "* toro_value);\nstatic void " + prefix + "_release(" + c_type
+            + "* toro_value);\n";
     }
 
     std::string collection_element_release(
@@ -2557,8 +2740,18 @@ private:
         if (type.kind == CValueKind::Class) {
             return release_name(type.nominal_name) + "(" + std::string(expression) + ");\n";
         }
+        if (type.kind == CValueKind::String) {
+            return "toro_string_release(" + std::string(expression) + ");\n";
+        }
         if (type.kind == CValueKind::List || type.kind == CValueKind::Map) {
             return collection_name(type) + "_release(" + std::string(expression) + ");\n";
+        }
+        if ((type.kind == CValueKind::Struct
+                || type.kind == CValueKind::Enum
+                || type.kind == CValueKind::Result)
+            && is_owned_runtime_value(type)) {
+            return "toro_value_" + type_mangle(type) + "_release(&"
+                + std::string(expression) + ");\n";
         }
         return {};
     }
@@ -2703,11 +2896,12 @@ private:
         const auto& value = type.arguments[1];
         std::string output = "struct " + name + "\n{\n"
             "    uint64_t toro_ref_count;\n    size_t toro_count;\n    size_t toro_capacity;\n"
-            "    const char** toro_keys;\n    " + c_type_name(value)
+            "    toro_string* toro_keys;\n    " + c_type_name(value)
             + "* toro_values;\n    bool* toro_occupied;\n};\n\n";
-        output += "static uint64_t " + name + "_hash(const char* toro_key)\n{\n"
+        output += "static uint64_t " + name + "_hash(toro_string toro_key)\n{\n"
             "    uint64_t toro_hash = UINT64_C(1469598103934665603);\n"
-            "    while (*toro_key != '\\0') { toro_hash ^= (unsigned char)*toro_key++; toro_hash *= UINT64_C(1099511628211); }\n"
+            "    const unsigned char* toro_byte = (const unsigned char*)toro_key.toro_data;\n"
+            "    while (*toro_byte != '\\0') { toro_hash ^= *toro_byte++; toro_hash *= UINT64_C(1099511628211); }\n"
             "    return toro_hash;\n}\n\n";
         output += "static " + name + "* " + name + "_new(void)\n{\n    "
             + name + "* toro_value = calloc(1, sizeof(*toro_value));\n"
@@ -2727,21 +2921,25 @@ private:
             output += "    for (size_t toro_index = 0; toro_index < toro_value->toro_capacity; ++toro_index)\n    {\n        if (toro_value->toro_occupied[toro_index]) { "
                 + release + "        }\n    }\n";
         }
+        output += "    for (size_t toro_index = 0; toro_index < toro_value->toro_capacity; ++toro_index)\n"
+            "    {\n"
+            "        if (toro_value->toro_occupied[toro_index]) { toro_string_release(toro_value->toro_keys[toro_index]); }\n"
+            "    }\n";
         output += "    free(toro_value->toro_keys);\n    free(toro_value->toro_values);\n    free(toro_value->toro_occupied);\n    free(toro_value);\n}\n\n";
         output += "static size_t " + name + "_slot(" + name
-            + "* toro_value, const char* toro_key)\n{\n    size_t toro_index = (size_t)("
+            + "* toro_value, toro_string toro_key)\n{\n    size_t toro_index = (size_t)("
             + name + "_hash(toro_key) % toro_value->toro_capacity);\n"
-              "    while (toro_value->toro_occupied[toro_index] && strcmp(toro_value->toro_keys[toro_index], toro_key) != 0) { toro_index = (toro_index + 1) % toro_value->toro_capacity; }\n"
+              "    while (toro_value->toro_occupied[toro_index] && strcmp(toro_value->toro_keys[toro_index].toro_data, toro_key.toro_data) != 0) { toro_index = (toro_index + 1) % toro_value->toro_capacity; }\n"
               "    return toro_index;\n}\n\n";
         output += "static void " + name + "_set(" + name
-            + "* toro_value, const char* toro_key, " + c_type_name(value)
+            + "* toro_value, toro_string toro_key, " + c_type_name(value)
             + " toro_element);\n\n";
         output += "static void " + name + "_set_move(" + name
-            + "* toro_value, const char* toro_key, " + c_type_name(value)
+            + "* toro_value, toro_string toro_key, " + c_type_name(value)
             + " toro_element);\n\n";
         output += "static void " + name + "_grow(" + name + "* toro_value)\n{\n"
             "    size_t toro_old_capacity = toro_value->toro_capacity;\n"
-            "    const char** toro_old_keys = toro_value->toro_keys;\n"
+            "    toro_string* toro_old_keys = toro_value->toro_keys;\n"
             "    " + c_type_name(value) + "* toro_old_values = toro_value->toro_values;\n"
             "    bool* toro_old_occupied = toro_value->toro_occupied;\n"
             "    toro_value->toro_capacity *= 2; toro_value->toro_count = 0;\n"
@@ -2755,29 +2953,29 @@ private:
             "        toro_value->toro_occupied[toro_slot] = true; toro_value->toro_keys[toro_slot] = toro_old_keys[toro_index]; toro_value->toro_values[toro_slot] = toro_old_values[toro_index]; ++toro_value->toro_count;\n"
             "    }\n    free(toro_old_keys); free(toro_old_values); free(toro_old_occupied);\n}\n\n";
         output += "static void " + name + "_set(" + name
-            + "* toro_value, const char* toro_key, " + c_type_name(value)
+            + "* toro_value, toro_string toro_key, " + c_type_name(value)
             + " toro_element)\n{\n    if ((toro_value->toro_count + 1) * 10 >= toro_value->toro_capacity * 7) { "
             + name + "_grow(toro_value); }\n    size_t toro_slot = " + name
             + "_slot(toro_value, toro_key);\n";
         output += "    " + collection_element_retain(value, "toro_element");
         output += "    if (toro_value->toro_occupied[toro_slot]) { "
             + collection_element_release(value, "toro_value->toro_values[toro_slot]")
-            + "    } else { toro_value->toro_occupied[toro_slot] = true; toro_value->toro_keys[toro_slot] = toro_key; ++toro_value->toro_count; }\n"
+            + "    } else { toro_value->toro_occupied[toro_slot] = true; toro_string_retain(toro_key); toro_value->toro_keys[toro_slot] = toro_key; ++toro_value->toro_count; }\n"
             "    toro_value->toro_values[toro_slot] = toro_element;\n}\n\n";
         output += "static void " + name + "_set_move(" + name
-            + "* toro_value, const char* toro_key, " + c_type_name(value)
+            + "* toro_value, toro_string toro_key, " + c_type_name(value)
             + " toro_element)\n{\n    if ((toro_value->toro_count + 1) * 10 >= toro_value->toro_capacity * 7) { "
             + name + "_grow(toro_value); }\n    size_t toro_slot = " + name
             + "_slot(toro_value, toro_key);\n"
               "    if (toro_value->toro_occupied[toro_slot]) { "
             + collection_element_release(value, "toro_value->toro_values[toro_slot]")
-            + "    } else { toro_value->toro_occupied[toro_slot] = true; toro_value->toro_keys[toro_slot] = toro_key; ++toro_value->toro_count; }\n"
+            + "    } else { toro_value->toro_occupied[toro_slot] = true; toro_string_retain(toro_key); toro_value->toro_keys[toro_slot] = toro_key; ++toro_value->toro_count; }\n"
               "    toro_value->toro_values[toro_slot] = toro_element;\n}\n\n";
         output += "static bool " + name + "_contains(" + name
-            + "* toro_value, const char* toro_key)\n{\n    size_t toro_slot = "
+            + "* toro_value, toro_string toro_key)\n{\n    size_t toro_slot = "
             + name + "_slot(toro_value, toro_key);\n    return toro_value->toro_occupied[toro_slot];\n}\n\n";
         output += "static " + c_type_name(value) + " " + name
-            + "_get(" + name + "* toro_value, const char* toro_key)\n{\n    size_t toro_slot = "
+            + "_get(" + name + "* toro_value, toro_string toro_key)\n{\n    size_t toro_slot = "
             + name + "_slot(toro_value, toro_key);\n    if (!toro_value->toro_occupied[toro_slot]) { abort(); }\n    return toro_value->toro_values[toro_slot];\n}\n\n";
         output += "static " + name + "* " + name + "_clone(" + name
             + "* toro_source)\n{\n    " + name + "* toro_copy = " + name
@@ -3177,9 +3375,9 @@ private:
                     field_name(field->second->declaration->name));
                 if (field->second->declaration->is_weak) {
                     output += "    toro_weak_clear(&" + access + ");\n";
-                } else if (field->second->type.kind == CValueKind::Class) {
-                    output += "    " + release_name(
-                        field->second->type.nominal_name) + "(" + access + ");\n";
+                } else if (is_owned_runtime_value(field->second->type)) {
+                    output += "    "
+                        + release_call(field->second->type, access) + ";\n";
                 }
             }
             output += "    if (--toro_control->toro_weak_count == 0"
@@ -3559,7 +3757,7 @@ private:
                 + initializer.code + ";\n";
             if (is_owned_runtime_value(type)) {
                 const bool transferred = statement.transfer_source.has_value();
-                if (is_managed_reference(type) && !initializer.owned
+                if (type.kind != CValueKind::Array && !initializer.owned
                     && !initializer.stack_backed
                     && !initializer.arena_backed
                     && !transferred && !statement.borrowed_alias) {
@@ -3644,6 +3842,24 @@ private:
                 }
                 return output;
             }
+            if (is_owned_runtime_value(target.type)) {
+                if (!target.owned_local) {
+                    throw_backend_error(statement.location,
+                        "cannot reassign borrowed owned value '"
+                            + assignment.name + "' in the C backend");
+                }
+                const std::string temporary = "toro_owned_value_"
+                    + std::to_string(temporary_index_++);
+                std::string output = indent_prelude(value.prelude, depth);
+                output += prefix + c_type_name(target.type) + " " + temporary
+                    + " = " + value.code + ";\n";
+                if (!value.owned) {
+                    output += prefix + retain_call(target.type, temporary) + ";\n";
+                }
+                output += prefix + release_call(target.type, target.c_name) + ";\n";
+                output += prefix + target.c_name + " = " + temporary + ";\n";
+                return output;
+            }
             return indent_prelude(value.prelude, depth)
                 + prefix + target.c_name + " = "
                 + value.code + ";\n";
@@ -3663,8 +3879,21 @@ private:
                     "struct field assignment requires an addressable receiver");
             }
             const auto value = emit_expression(*assignment.value, target.type);
-            return indent_prelude(target.prelude + value.prelude, depth)
-                + prefix + target.code + " = " + value.code + ";\n";
+            std::string output = indent_prelude(
+                target.prelude + value.prelude, depth);
+            if (is_owned_runtime_value(target.type)) {
+                const std::string temporary = "toro_field_value_"
+                    + std::to_string(temporary_index_++);
+                output += prefix + c_type_name(target.type) + " " + temporary
+                    + " = " + value.code + ";\n";
+                if (!value.owned) {
+                    output += prefix + retain_call(target.type, temporary) + ";\n";
+                }
+                output += prefix + release_call(target.type, target.code) + ";\n";
+                output += prefix + target.code + " = " + temporary + ";\n";
+                return output;
+            }
+            return output + prefix + target.code + " = " + value.code + ";\n";
         }
         case StmtKind::IndexAssignment:
             return emit_index_assignment(
@@ -3716,6 +3945,19 @@ private:
                     + " = " + (value.owned ? value.code
                         : collection_name(value.type) + "_clone(" + value.code + ")")
                     + ";\n";
+                output += all_scope_cleanup(depth);
+                output += prefix + "return " + temporary + ";\n";
+                return output;
+            }
+            if (is_owned_runtime_value(value.type)) {
+                const std::string temporary = "toro_return_owned_"
+                    + std::to_string(temporary_index_++);
+                std::string output = indent_prelude(value.prelude, depth);
+                output += prefix + c_type_name(value.type) + " " + temporary
+                    + " = " + value.code + ";\n";
+                if (!value.owned && !statement.transfer_source) {
+                    output += prefix + retain_call(value.type, temporary) + ";\n";
+                }
                 output += all_scope_cleanup(depth);
                 output += prefix + "return " + temporary + ";\n";
                 return output;
@@ -3920,6 +4162,15 @@ private:
         output += indent(depth) + "{\n";
         output += indent(depth + 1) + c_type_name(handled.type) + " "
             + temporary + " = " + handled.code + ";\n";
+        if (is_owned_runtime_value(handled.type) && !handled.owned) {
+            output += indent(depth + 1)
+                + retain_call(handled.type, temporary) + ";\n";
+        }
+        const bool tracked_temporary = is_owned_runtime_value(handled.type);
+        if (tracked_temporary) {
+            owned_reference_values_.back().push_back(
+                ValueInfo{handled.type, temporary, false, true});
+        }
         output += indent(depth + 1) + "switch (" + temporary
             + ".toro_tag)\n" + indent(depth + 1) + "{\n";
 
@@ -3977,6 +4228,11 @@ private:
             output += indent(depth + 1) + "}\n";
         }
         output += indent(depth + 1) + "}\n";
+        if (tracked_temporary) {
+            output += indent(depth + 1)
+                + release_call(handled.type, temporary) + ";\n";
+            owned_reference_values_.back().pop_back();
+        }
         output += indent(depth) + "}\n";
         return output;
     }
@@ -4065,7 +4321,9 @@ private:
             return {static_cast<const DecimalExpr&>(expression).value, dec_type};
         case ExprKind::String:
             return {
-                escape_c_string(static_cast<const StringExpr&>(expression).value),
+                "toro_string_literal("
+                    + escape_c_string(static_cast<const StringExpr&>(expression).value)
+                    + ")",
                 string_type,
             };
         case ExprKind::Bool:
@@ -4210,12 +4468,42 @@ private:
                     == TokenType::Equal
                 ? " == 0"
                 : " != 0";
+            std::string prelude = left.prelude + right.prelude;
+            std::string left_code = left.code;
+            std::string right_code = right.code;
+            std::optional<std::string> left_temporary;
+            std::optional<std::string> right_temporary;
+            if (left.owned) {
+                left_temporary = "toro_string_operand_"
+                    + std::to_string(temporary_index_++);
+                prelude += "toro_string " + *left_temporary + " = "
+                    + left.code + ";\n";
+                left_code = *left_temporary;
+            }
+            if (right.owned) {
+                right_temporary = "toro_string_operand_"
+                    + std::to_string(temporary_index_++);
+                prelude += "toro_string " + *right_temporary + " = "
+                    + right.code + ";\n";
+                right_code = *right_temporary;
+            }
+            const std::string result = "toro_string_comparison_"
+                + std::to_string(temporary_index_++);
+            prelude += "bool " + result + " = (strcmp((" + left_code
+                + ").toro_data, (" + right_code + ").toro_data)"
+                + comparison + ");\n";
+            if (left_temporary) {
+                prelude += "toro_string_release(" + *left_temporary + ");\n";
+            }
+            if (right_temporary) {
+                prelude += "toro_string_release(" + *right_temporary + ");\n";
+            }
             return {
-                "(strcmp(" + left.code + ", " + right.code + ")" + comparison + ")",
+                result,
                 bool_type,
                 false,
                 false,
-                left.prelude + right.prelude,
+                std::move(prelude),
             };
         }
 
@@ -4298,6 +4586,7 @@ private:
             }
             if (source.type.kind == CValueKind::String
                 && target.kind == CValueKind::CString) {
+                source.code = "(" + source.code + ").toro_data";
                 source.type = target;
                 return source;
             }
@@ -4383,7 +4672,7 @@ private:
                 ValueInfo{parameter_type, temporary, false, true});
             return temporary;
         }
-        if (is_managed_reference(argument.type) && argument.owned) {
+        if (is_owned_runtime_value(argument.type) && argument.owned) {
             const std::string temporary = std::string(temporary_prefix)
                 + std::to_string(temporary_index_++);
             prelude += c_type_name(argument.type) + " " + temporary
@@ -4532,15 +4821,26 @@ private:
         const auto payload = emit_expression(
             *call.arguments.front().value, payload_type);
         const std::string result = result_name(*expected_type);
+        const std::string temporary = "toro_result_construct_"
+            + std::to_string(temporary_index_++);
+        std::string prelude = payload.prelude;
+        prelude += result + " " + temporary + " = (" + result
+            + "){.toro_tag = " + result
+            + (is_ok ? "_tag_ok, .toro_payload.toro_ok = "
+                     : "_tag_error, .toro_payload.toro_error = ")
+            + payload.code + "};\n";
+        if (is_owned_runtime_value(payload_type) && !payload.owned) {
+            prelude += retain_call(payload_type,
+                temporary + ".toro_payload."
+                    + (is_ok ? "toro_ok" : "toro_error")) + ";\n";
+        }
         return {
-            "(" + result + "){.toro_tag = " + result
-                + (is_ok ? "_tag_ok, .toro_payload.toro_ok = "
-                         : "_tag_error, .toro_payload.toro_error = ")
-                + payload.code + "}",
+            temporary,
             *expected_type,
             false,
             false,
-            payload.prelude,
+            std::move(prelude),
+            true,
         };
     }
 
@@ -4564,19 +4864,45 @@ private:
         std::string prelude = value.prelude;
         prelude += c_type_name(value.type) + " " + temporary + " = "
             + value.code + ";\n";
+        if (!value.owned && is_owned_runtime_value(value.type)) {
+            prelude += retain_call(value.type, temporary) + ";\n";
+        }
         prelude += "if (" + temporary + ".toro_tag == " + source_result
             + "_tag_error) {\n";
+        const std::string propagated = "toro_propagated_error_"
+            + std::to_string(temporary_index_++);
+        prelude += "    " + target_result + " " + propagated + " = ("
+            + target_result + "){.toro_tag = " + target_result
+            + "_tag_error, .toro_payload.toro_error = " + temporary
+            + ".toro_payload.toro_error};\n";
+        if (is_owned_runtime_value(current_return_type_->arguments[1])) {
+            prelude += "    " + retain_call(current_return_type_->arguments[1],
+                propagated + ".toro_payload.toro_error") + ";\n";
+        }
+        if (is_owned_runtime_value(value.type)) {
+            prelude += "    " + release_call(value.type, temporary) + ";\n";
+        }
         prelude += indent_prelude(all_scope_cleanup(0), 1);
-        prelude += "    return (" + target_result + "){.toro_tag = "
-            + target_result + "_tag_error, .toro_payload.toro_error = "
-            + temporary + ".toro_payload.toro_error};\n";
+        prelude += "    return " + propagated + ";\n";
         prelude += "}\n";
+        const CValueType success_type = value.type.arguments[0];
+        const std::string success = "toro_propagated_value_"
+            + std::to_string(temporary_index_++);
+        prelude += c_type_name(success_type) + " " + success + " = "
+            + temporary + ".toro_payload.toro_ok;\n";
+        if (is_owned_runtime_value(success_type)) {
+            prelude += retain_call(success_type, success) + ";\n";
+        }
+        if (is_owned_runtime_value(value.type)) {
+            prelude += release_call(value.type, temporary) + ";\n";
+        }
         return {
-            temporary + ".toro_payload.toro_ok",
-            value.type.arguments[0],
+            success,
+            success_type,
             true,
             false,
             std::move(prelude),
+            is_owned_runtime_value(success_type),
         };
     }
 
@@ -4612,18 +4938,28 @@ private:
                 "enum variant '" + enum_type + "::" + variant_name
                     + "' has an unsupported payload layout");
         }
-        std::string code = "(" + enum_name(enum_type) + "){.toro_tag = "
-            + enum_tag_name(enum_type, variant_name) + ", .toro_payload."
-            + enum_payload_name(variant_name) + " = ";
         const auto payload = emit_expression(
             *call.arguments.front().value, *variant_info.payload_type);
-        code += payload.code + "}";
+        const CValueType type{CValueKind::Enum, enum_type};
+        const std::string temporary = "toro_enum_construct_"
+            + std::to_string(temporary_index_++);
+        std::string prelude = payload.prelude;
+        prelude += enum_name(enum_type) + " " + temporary + " = ("
+            + enum_name(enum_type) + "){.toro_tag = "
+            + enum_tag_name(enum_type, variant_name) + ", .toro_payload."
+            + enum_payload_name(variant_name) + " = " + payload.code + "};\n";
+        if (is_owned_runtime_value(*variant_info.payload_type) && !payload.owned) {
+            prelude += retain_call(*variant_info.payload_type,
+                temporary + ".toro_payload."
+                    + enum_payload_name(variant_name)) + ";\n";
+        }
         return {
-            std::move(code),
-            CValueType{CValueKind::Enum, enum_type},
+            temporary,
+            type,
             false,
             false,
-            payload.prelude,
+            std::move(prelude),
+            is_owned_runtime_value(type),
         };
     }
 
@@ -4702,6 +5038,7 @@ private:
 
         std::string prelude;
         std::string code = "(" + struct_name(name) + "){";
+        std::vector<std::pair<CValueType, bool>> field_ownership;
         if (info.fields.empty()) {
             code += ".toro_empty = 0";
         }
@@ -4716,6 +5053,7 @@ private:
                     *arguments[index]->value, field.type);
                 prelude += value.prelude;
                 code += value.code;
+                field_ownership.emplace_back(field.type, value.owned);
             } else if (field.declaration->default_value) {
                 const auto saved = current_substitutions_;
                 current_substitutions_ = info.substitutions;
@@ -4724,17 +5062,41 @@ private:
                 current_substitutions_ = saved;
                 prelude += value.prelude;
                 code += value.code;
+                field_ownership.emplace_back(field.type, value.owned);
             } else {
                 code += zero_value(field.type, field.declaration->location);
+                field_ownership.emplace_back(field.type, false);
             }
         }
         code += "}";
+        const CValueType type{CValueKind::Struct, name};
+        if (!is_owned_runtime_value(type)) {
+            return {
+                std::move(code),
+                type,
+                false,
+                false,
+                std::move(prelude),
+            };
+        }
+        const std::string temporary = "toro_struct_construct_"
+            + std::to_string(temporary_index_++);
+        prelude += c_type_name(type) + " " + temporary + " = " + code + ";\n";
+        for (std::size_t index = 0; index < info.fields.size(); ++index) {
+            if (is_owned_runtime_value(field_ownership[index].first)
+                && !field_ownership[index].second) {
+                prelude += retain_call(field_ownership[index].first,
+                    temporary + "."
+                        + field_name(info.fields[index].declaration->name)) + ";\n";
+            }
+        }
         return {
-            std::move(code),
-            CValueType{CValueKind::Struct, name},
+            temporary,
+            type,
             false,
             false,
             std::move(prelude),
+            true,
         };
     }
 
@@ -4880,9 +5242,8 @@ private:
                 }
             } else {
                 prelude += access + " = " + value.code + ";\n";
-                if (field.type.kind == CValueKind::Class && !value.owned) {
-                    prelude += retain_name(field.type.nominal_name)
-                        + "(" + access + ");\n";
+                if (is_owned_runtime_value(field.type) && !value.owned) {
+                    prelude += retain_call(field.type, access) + ";\n";
                 }
             }
         }
@@ -5007,9 +5368,8 @@ private:
                 }
             } else {
                 prelude += access + " = " + value.code + ";\n";
-                if (field.type.kind == CValueKind::Class && !value.owned) {
-                    prelude += retain_name(field.type.nominal_name)
-                        + "(" + access + ");\n";
+                if (is_owned_runtime_value(field.type) && !value.owned) {
+                    prelude += retain_call(field.type, access) + ";\n";
                 }
             }
         }
@@ -5046,7 +5406,7 @@ private:
         case CValueKind::Int: return "0";
         case CValueKind::Dec: return "0.0";
         case CValueKind::Bool: return "false";
-        case CValueKind::String: return "\"\"";
+        case CValueKind::String: return "toro_string_literal(\"\")";
         case CValueKind::CInt:
         case CValueKind::CInt64:
         case CValueKind::CDouble:
@@ -5155,6 +5515,26 @@ private:
         const auto subscript = emit_expression(*index.index, index_type);
         const CValueType result_type = object.type.kind == CValueKind::Map
             ? object.type.arguments[1] : object.type.arguments[0];
+        if (object.type.kind == CValueKind::Map && subscript.owned) {
+            const std::string key = "toro_map_key_"
+                + std::to_string(temporary_index_++);
+            const std::string result = "toro_map_value_"
+                + std::to_string(temporary_index_++);
+            std::string prelude = object.prelude + subscript.prelude;
+            prelude += c_type_name(subscript.type) + " " + key + " = "
+                + subscript.code + ";\n";
+            prelude += c_type_name(result_type) + " " + result + " = "
+                + collection_name(object.type) + "_get(" + object.code + ", "
+                + key + ");\n";
+            prelude += release_call(subscript.type, key) + ";\n";
+            return {
+                result,
+                result_type,
+                false,
+                false,
+                std::move(prelude),
+            };
+        }
         return {
             collection_name(object.type) + "_get(" + object.code + ", "
                 + subscript.code + ")",
@@ -5194,6 +5574,15 @@ private:
         std::string output = indent_prelude(
             object.prelude + subscript.prelude + value.prelude, depth);
         std::string value_code = value.code;
+        std::string subscript_code = subscript.code;
+        std::optional<std::string> owned_subscript;
+        if (is_owned_runtime_value(subscript.type) && subscript.owned) {
+            owned_subscript = "toro_index_key_"
+                + std::to_string(temporary_index_++);
+            output += prefix + c_type_name(subscript.type) + " "
+                + *owned_subscript + " = " + subscript.code + ";\n";
+            subscript_code = *owned_subscript;
+        }
         std::optional<std::string> owned_temporary;
         if (is_owned_runtime_value(value.type) && value.owned) {
             owned_temporary = "toro_index_value_"
@@ -5206,13 +5595,17 @@ private:
         output += prefix + collection_name(object.type)
             + (transferred ? "_set_move(" : "_set(")
             + (object.type.kind == CValueKind::Array ? "&" : "")
-            + object.code + ", " + subscript.code + ", " + value_code + ");\n";
+            + object.code + ", " + subscript_code + ", " + value_code + ");\n";
         if (transferred) {
             relinquish_owned_value(
                 *assignment.transfer_source, assignment.location);
         }
         if (owned_temporary) {
             output += prefix + release_call(value.type, *owned_temporary) + ";\n";
+        }
+        if (owned_subscript) {
+            output += prefix + release_call(subscript.type, *owned_subscript)
+                + ";\n";
         }
         return output;
     }
@@ -5304,6 +5697,20 @@ private:
         if (receiver.type.kind == CValueKind::Map && member.member == "contains") {
             const auto key = emit_expression(
                 *call.arguments.front().value, receiver.type.arguments[0]);
+            if (key.owned) {
+                const std::string key_temporary = "toro_map_contains_key_"
+                    + std::to_string(temporary_index_++);
+                const std::string result = "toro_map_contains_result_"
+                    + std::to_string(temporary_index_++);
+                std::string prelude = receiver.prelude + key.prelude;
+                prelude += c_type_name(key.type) + " " + key_temporary + " = "
+                    + key.code + ";\n";
+                prelude += "bool " + result + " = "
+                    + collection_name(receiver.type) + "_contains("
+                    + receiver.code + ", " + key_temporary + ");\n";
+                prelude += release_call(key.type, key_temporary) + ";\n";
+                return {result, bool_type, false, false, std::move(prelude)};
+            }
             return {
                 collection_name(receiver.type) + "_contains(" + receiver.code
                     + ", " + key.code + ")",
@@ -5391,10 +5798,34 @@ private:
                 "struct '" + object.type.nominal_name + "' has no field named '"
                     + member.member + "'");
         }
+        const CValueType field_type = info.fields[field->second].type;
+        if (object.owned) {
+            const std::string object_temporary = "toro_member_owner_"
+                + std::to_string(temporary_index_++);
+            const std::string value_temporary = "toro_member_value_"
+                + std::to_string(temporary_index_++);
+            std::string prelude = object.prelude;
+            prelude += c_type_name(object.type) + " " + object_temporary
+                + " = " + object.code + ";\n";
+            prelude += c_type_name(field_type) + " " + value_temporary + " = ("
+                + object_temporary + ")." + field_name(member.member) + ";\n";
+            if (is_owned_runtime_value(field_type)) {
+                prelude += retain_call(field_type, value_temporary) + ";\n";
+            }
+            prelude += release_call(object.type, object_temporary) + ";\n";
+            return {
+                value_temporary,
+                field_type,
+                false,
+                false,
+                std::move(prelude),
+                is_owned_runtime_value(field_type),
+            };
+        }
         return {
             "(" + object.code + ")" + (object.pointer ? "->" : ".")
                 + field_name(member.member),
-            info.fields[field->second].type,
+            field_type,
             object.addressable,
             false,
             object.prelude,
@@ -5459,6 +5890,18 @@ private:
                 relinquish_owned_value(
                     *assignment.transfer_source, assignment.location);
             }
+            return output;
+        }
+        if (is_owned_runtime_value(field_info.type)) {
+            const std::string temporary = "toro_field_owned_"
+                + std::to_string(temporary_index_++);
+            output += prefix + c_type_name(field_info.type) + " " + temporary
+                + " = " + value.code + ";\n";
+            if (!value.owned) {
+                output += prefix + retain_call(field_info.type, temporary) + ";\n";
+            }
+            output += prefix + release_call(field_info.type, access) + ";\n";
+            output += prefix + access + " = " + temporary + ";\n";
             return output;
         }
         output += prefix + access + " = " + value.code + ";\n";
@@ -5785,7 +6228,7 @@ private:
             };
         case CValueKind::String:
             return {
-                "printf(\"%s\\n\", " + value.code + ")",
+                "printf(\"%s\\n\", (" + value.code + ").toro_data)",
                 void_type,
                 false,
                 false,
@@ -5851,51 +6294,20 @@ private:
         std::string output;
         if (needs_owned_strings) {
             output +=
-                "typedef struct toro_std_owned_string\n"
-                "{\n"
-                "    char* toro_value;\n"
-                "    struct toro_std_owned_string* toro_next;\n"
-                "} toro_std_owned_string;\n\n"
-                "static toro_std_owned_string* toro_std_owned_strings = NULL;\n\n"
-                "static void toro_std_cleanup_strings(void)\n"
-                "{\n"
-                "    while (toro_std_owned_strings != NULL)\n"
-                "    {\n"
-                "        toro_std_owned_string* toro_next = toro_std_owned_strings->toro_next;\n"
-                "        free(toro_std_owned_strings->toro_value);\n"
-                "        free(toro_std_owned_strings);\n"
-                "        toro_std_owned_strings = toro_next;\n"
-                "    }\n"
-                "}\n\n"
-                "static const char* toro_std_adopt_string(char* toro_value)\n"
-                "{\n"
-                "    static bool toro_registered = false;\n"
-                "    if (!toro_registered)\n"
-                "    {\n"
-                "        if (atexit(toro_std_cleanup_strings) != 0) { abort(); }\n"
-                "        toro_registered = true;\n"
-                "    }\n"
-                "    toro_std_owned_string* toro_node = malloc(sizeof(*toro_node));\n"
-                "    if (toro_node == NULL) { free(toro_value); abort(); }\n"
-                "    toro_node->toro_value = toro_value;\n"
-                "    toro_node->toro_next = toro_std_owned_strings;\n"
-                "    toro_std_owned_strings = toro_node;\n"
-                "    return toro_value;\n"
-                "}\n\n"
-                "static const char* toro_std_copy_string(const char* toro_value)\n"
+                "static toro_string toro_std_copy_c_string(const char* toro_value)\n"
                 "{\n"
                 "    size_t toro_size = strlen(toro_value) + 1;\n"
                 "    char* toro_copy = malloc(toro_size);\n"
                 "    if (toro_copy == NULL) { abort(); }\n"
                 "    memcpy(toro_copy, toro_value, toro_size);\n"
-                "    return toro_std_adopt_string(toro_copy);\n"
+                "    return toro_string_adopt(toro_copy);\n"
                 "}\n\n";
         }
         if (uses(RuntimeIntrinsic::FsExists)) {
             output +=
-                "static bool toro_std_fs_exists(const char* toro_path)\n"
+                "static bool toro_std_fs_exists(toro_string toro_path)\n"
                 "{\n"
-                "    FILE* toro_file = fopen(toro_path, \"rb\");\n"
+                "    FILE* toro_file = fopen(toro_path.toro_data, \"rb\");\n"
                 "    if (toro_file == NULL) { return false; }\n"
                 "    fclose(toro_file);\n"
                 "    return true;\n"
@@ -5903,69 +6315,69 @@ private:
         }
         if (uses(RuntimeIntrinsic::FsReadText)) {
             output += "static " + string_result_name
-                + " toro_std_fs_read_text(const char* toro_path)\n{\n"
-                  "    FILE* toro_file = fopen(toro_path, \"rb\");\n"
+                + " toro_std_fs_read_text(toro_string toro_path)\n{\n"
+                  "    FILE* toro_file = fopen(toro_path.toro_data, \"rb\");\n"
                   "    if (toro_file == NULL)\n    {\n"
                   "        return (" + string_result_name + "){.toro_tag = "
                 + string_result_name
-                + "_tag_error, .toro_payload.toro_error = toro_std_copy_string(strerror(errno))};\n"
+                + "_tag_error, .toro_payload.toro_error = toro_std_copy_c_string(strerror(errno))};\n"
                   "    }\n"
                   "    if (fseek(toro_file, 0, SEEK_END) != 0) { fclose(toro_file); return ("
                 + string_result_name + "){.toro_tag = " + string_result_name
-                + "_tag_error, .toro_payload.toro_error = toro_std_copy_string(\"could not seek file\")}; }\n"
+                + "_tag_error, .toro_payload.toro_error = toro_std_copy_c_string(\"could not seek file\")}; }\n"
                   "    long toro_length = ftell(toro_file);\n"
                   "    if (toro_length < 0 || fseek(toro_file, 0, SEEK_SET) != 0) { fclose(toro_file); return ("
                 + string_result_name + "){.toro_tag = " + string_result_name
-                + "_tag_error, .toro_payload.toro_error = toro_std_copy_string(\"could not measure file\")}; }\n"
+                + "_tag_error, .toro_payload.toro_error = toro_std_copy_c_string(\"could not measure file\")}; }\n"
                   "    char* toro_contents = malloc((size_t)toro_length + 1);\n"
                   "    if (toro_contents == NULL) { fclose(toro_file); abort(); }\n"
                   "    size_t toro_read = fread(toro_contents, 1, (size_t)toro_length, toro_file);\n"
                   "    if (toro_read != (size_t)toro_length || fclose(toro_file) != 0) { free(toro_contents); return ("
                 + string_result_name + "){.toro_tag = " + string_result_name
-                + "_tag_error, .toro_payload.toro_error = toro_std_copy_string(\"could not read file\")}; }\n"
+                + "_tag_error, .toro_payload.toro_error = toro_std_copy_c_string(\"could not read file\")}; }\n"
                   "    toro_contents[toro_read] = '\\0';\n"
                   "    return (" + string_result_name + "){.toro_tag = "
                 + string_result_name
-                + "_tag_ok, .toro_payload.toro_ok = toro_std_adopt_string(toro_contents)};\n"
+                + "_tag_ok, .toro_payload.toro_ok = toro_string_adopt(toro_contents)};\n"
                   "}\n\n";
         }
         if (uses(RuntimeIntrinsic::FsWriteText)) {
             output += "static " + bool_result_name
-                + " toro_std_fs_write_text(const char* toro_path, const char* toro_contents)\n{\n"
-                  "    FILE* toro_file = fopen(toro_path, \"wb\");\n"
+                + " toro_std_fs_write_text(toro_string toro_path, toro_string toro_contents)\n{\n"
+                  "    FILE* toro_file = fopen(toro_path.toro_data, \"wb\");\n"
                   "    if (toro_file == NULL) { return (" + bool_result_name
                 + "){.toro_tag = " + bool_result_name
-                + "_tag_error, .toro_payload.toro_error = toro_std_copy_string(strerror(errno))}; }\n"
-                  "    size_t toro_length = strlen(toro_contents);\n"
-                  "    bool toro_ok = fwrite(toro_contents, 1, toro_length, toro_file) == toro_length;\n"
+                + "_tag_error, .toro_payload.toro_error = toro_std_copy_c_string(strerror(errno))}; }\n"
+                  "    size_t toro_length = strlen(toro_contents.toro_data);\n"
+                  "    bool toro_ok = fwrite(toro_contents.toro_data, 1, toro_length, toro_file) == toro_length;\n"
                   "    if (fclose(toro_file) != 0) { toro_ok = false; }\n"
                   "    if (!toro_ok) { return (" + bool_result_name
                 + "){.toro_tag = " + bool_result_name
-                + "_tag_error, .toro_payload.toro_error = toro_std_copy_string(\"could not write file\")}; }\n"
+                + "_tag_error, .toro_payload.toro_error = toro_std_copy_c_string(\"could not write file\")}; }\n"
                   "    return (" + bool_result_name + "){.toro_tag = "
                 + bool_result_name + "_tag_ok, .toro_payload.toro_ok = true};\n"
                   "}\n\n";
         }
         if (uses(RuntimeIntrinsic::FsRemoveFile)) {
             output += "static " + bool_result_name
-                + " toro_std_fs_remove_file(const char* toro_path)\n{\n"
-                  "    if (remove(toro_path) != 0) { return (" + bool_result_name
+                + " toro_std_fs_remove_file(toro_string toro_path)\n{\n"
+                  "    if (remove(toro_path.toro_data) != 0) { return (" + bool_result_name
                 + "){.toro_tag = " + bool_result_name
-                + "_tag_error, .toro_payload.toro_error = toro_std_copy_string(strerror(errno))}; }\n"
+                + "_tag_error, .toro_payload.toro_error = toro_std_copy_c_string(strerror(errno))}; }\n"
                   "    return (" + bool_result_name + "){.toro_tag = "
                 + bool_result_name + "_tag_ok, .toro_payload.toro_ok = true};\n"
                   "}\n\n";
         }
         if (uses(RuntimeIntrinsic::EnvGet)) {
             output += "static " + string_result_name
-                + " toro_std_env_get(const char* toro_name)\n{\n"
-                  "    const char* toro_value = getenv(toro_name);\n"
+                + " toro_std_env_get(toro_string toro_name)\n{\n"
+                  "    const char* toro_value = getenv(toro_name.toro_data);\n"
                   "    if (toro_value == NULL) { return (" + string_result_name
                 + "){.toro_tag = " + string_result_name
-                + "_tag_error, .toro_payload.toro_error = \"environment variable is not set\"}; }\n"
+                + "_tag_error, .toro_payload.toro_error = toro_string_literal(\"environment variable is not set\")}; }\n"
                   "    return (" + string_result_name + "){.toro_tag = "
                 + string_result_name
-                + "_tag_ok, .toro_payload.toro_ok = toro_std_copy_string(toro_value)};\n"
+                + "_tag_ok, .toro_payload.toro_ok = toro_std_copy_c_string(toro_value)};\n"
                   "}\n\n";
         }
         if (uses(RuntimeIntrinsic::TimeWallMillis)) {
@@ -5979,50 +6391,66 @@ private:
         }
         if (uses(RuntimeIntrinsic::StringConcat)) {
             output +=
-                "static const char* toro_std_string_concat(const char* toro_left, const char* toro_right)\n"
+                "static toro_string toro_std_string_concat(toro_string toro_left, toro_string toro_right)\n"
                 "{\n"
-                "    size_t toro_left_size = strlen(toro_left);\n"
-                "    size_t toro_right_size = strlen(toro_right);\n"
+                "    size_t toro_left_size = strlen(toro_left.toro_data);\n"
+                "    size_t toro_right_size = strlen(toro_right.toro_data);\n"
                 "    char* toro_result = malloc(toro_left_size + toro_right_size + 1);\n"
                 "    if (toro_result == NULL) { abort(); }\n"
-                "    memcpy(toro_result, toro_left, toro_left_size);\n"
-                "    memcpy(toro_result + toro_left_size, toro_right, toro_right_size + 1);\n"
-                "    return toro_std_adopt_string(toro_result);\n"
+                "    memcpy(toro_result, toro_left.toro_data, toro_left_size);\n"
+                "    memcpy(toro_result + toro_left_size, toro_right.toro_data, toro_right_size + 1);\n"
+                "    return toro_string_adopt(toro_result);\n"
                 "}\n\n";
+        }
+        if (uses(RuntimeIntrinsic::StringByteAt)) {
+            const CValueType int_result{
+                CValueKind::Result, {}, {int_type, string_type}};
+            const std::string int_result_name = result_name(int_result);
+            output += "static " + int_result_name
+                + " toro_std_string_byte_at(toro_string toro_value, int64_t toro_index)\n{\n"
+                  "    size_t toro_size = strlen(toro_value.toro_data);\n"
+                  "    if (toro_index < 0 || (uint64_t)toro_index >= toro_size)\n"
+                  "    { return (" + int_result_name + "){.toro_tag = "
+                + int_result_name
+                + "_tag_error, .toro_payload.toro_error = toro_string_literal(\"string index is out of bounds\")}; }\n"
+                  "    return (" + int_result_name + "){.toro_tag = "
+                + int_result_name
+                + "_tag_ok, .toro_payload.toro_ok = (int64_t)(unsigned char)toro_value.toro_data[toro_index]};\n"
+                  "}\n\n";
         }
         if (uses(RuntimeIntrinsic::StringStartsWith)) {
             output +=
-                "static bool toro_std_string_starts_with(const char* toro_value, const char* toro_prefix)\n"
+                "static bool toro_std_string_starts_with(toro_string toro_value, toro_string toro_prefix)\n"
                 "{\n"
-                "    size_t toro_size = strlen(toro_prefix);\n"
-                "    return strncmp(toro_value, toro_prefix, toro_size) == 0;\n"
+                "    size_t toro_size = strlen(toro_prefix.toro_data);\n"
+                "    return strncmp(toro_value.toro_data, toro_prefix.toro_data, toro_size) == 0;\n"
                 "}\n\n";
         }
         if (uses(RuntimeIntrinsic::StringEndsWith)) {
             output +=
-                "static bool toro_std_string_ends_with(const char* toro_value, const char* toro_suffix)\n"
+                "static bool toro_std_string_ends_with(toro_string toro_value, toro_string toro_suffix)\n"
                 "{\n"
-                "    size_t toro_value_size = strlen(toro_value);\n"
-                "    size_t toro_suffix_size = strlen(toro_suffix);\n"
+                "    size_t toro_value_size = strlen(toro_value.toro_data);\n"
+                "    size_t toro_suffix_size = strlen(toro_suffix.toro_data);\n"
                 "    return toro_suffix_size <= toro_value_size\n"
-                "        && strcmp(toro_value + toro_value_size - toro_suffix_size, toro_suffix) == 0;\n"
+                "        && strcmp(toro_value.toro_data + toro_value_size - toro_suffix_size, toro_suffix.toro_data) == 0;\n"
                 "}\n\n";
         }
         if (uses(RuntimeIntrinsic::StringSubstring)) {
             output += "static " + string_result_name
-                + " toro_std_string_substring(const char* toro_value, int64_t toro_start, int64_t toro_count)\n{\n"
-                  "    size_t toro_size = strlen(toro_value);\n"
+                + " toro_std_string_substring(toro_string toro_value, int64_t toro_start, int64_t toro_count)\n{\n"
+                  "    size_t toro_size = strlen(toro_value.toro_data);\n"
                   "    if (toro_start < 0 || toro_count < 0 || (uint64_t)toro_start > toro_size || (uint64_t)toro_count > toro_size - (size_t)toro_start)\n"
                   "    { return (" + string_result_name + "){.toro_tag = "
                 + string_result_name
-                + "_tag_error, .toro_payload.toro_error = \"substring range is out of bounds\"}; }\n"
+                + "_tag_error, .toro_payload.toro_error = toro_string_literal(\"substring range is out of bounds\")}; }\n"
                   "    char* toro_result = malloc((size_t)toro_count + 1);\n"
                   "    if (toro_result == NULL) { abort(); }\n"
-                  "    memcpy(toro_result, toro_value + toro_start, (size_t)toro_count);\n"
+                  "    memcpy(toro_result, toro_value.toro_data + toro_start, (size_t)toro_count);\n"
                   "    toro_result[toro_count] = '\\0';\n"
                   "    return (" + string_result_name + "){.toro_tag = "
                 + string_result_name
-                + "_tag_ok, .toro_payload.toro_ok = toro_std_adopt_string(toro_result)};\n"
+                + "_tag_ok, .toro_payload.toro_ok = toro_string_adopt(toro_result)};\n"
                   "}\n\n";
         }
         return output;
@@ -6059,7 +6487,7 @@ private:
         std::string code;
         switch (*intrinsic) {
         case RuntimeIntrinsic::IoWriteLine:
-            code = "printf(\"%s\\n\", " + argument(0) + ")";
+            code = "printf(\"%s\\n\", (" + argument(0) + ").toro_data)";
             result = void_type;
             break;
         case RuntimeIntrinsic::FsExists:
@@ -6076,7 +6504,7 @@ private:
             code = "toro_std_fs_remove_file(" + argument(0) + ")";
             break;
         case RuntimeIntrinsic::EnvHas:
-            code = "(getenv(" + argument(0) + ") != NULL)";
+            code = "(getenv((" + argument(0) + ").toro_data) != NULL)";
             break;
         case RuntimeIntrinsic::EnvGet:
             code = "toro_std_env_get(" + argument(0) + ")";
@@ -6089,15 +6517,19 @@ private:
             code = "toro_std_time_wall_millis()";
             break;
         case RuntimeIntrinsic::StringLength:
-            code = "((int64_t)strlen(" + argument(0) + "))";
+            code = "((int64_t)strlen((" + argument(0) + ").toro_data))";
+            break;
+        case RuntimeIntrinsic::StringByteAt:
+            code = "toro_std_string_byte_at(" + argument(0) + ", "
+                + argument(1) + ")";
             break;
         case RuntimeIntrinsic::StringConcat:
             code = "toro_std_string_concat(" + argument(0) + ", "
                 + argument(1) + ")";
             break;
         case RuntimeIntrinsic::StringContains:
-            code = "(strstr(" + argument(0) + ", " + argument(1)
-                + ") != NULL)";
+            code = "(strstr((" + argument(0) + ").toro_data, ("
+                + argument(1) + ").toro_data) != NULL)";
             break;
         case RuntimeIntrinsic::StringStartsWith:
             code = "toro_std_string_starts_with(" + argument(0) + ", "
@@ -6112,7 +6544,14 @@ private:
                 + argument(1) + ", " + argument(2) + ")";
             break;
         }
-        return {std::move(code), result, false, false, std::move(prelude)};
+        return {
+            std::move(code),
+            result,
+            false,
+            false,
+            std::move(prelude),
+            is_owned_runtime_value(result),
+        };
     }
 
     void push_scope()

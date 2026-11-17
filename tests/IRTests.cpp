@@ -274,6 +274,15 @@ void test_performance_contract_marker()
         "performance marker unexpectedly changed generated C");
 }
 
+void test_string_lifetime_category()
+{
+    auto ir = lower_detached(
+        "function identity(value: string) -> string { return value }\n"
+        "function main() { text := identity(\"Toro\") }\n");
+    const auto dump = toro::dump_ir(ir);
+    expect_contains(dump, "[managed-string]", "managed string IR category");
+}
+
 } // namespace
 
 int main()
@@ -288,6 +297,7 @@ int main()
         test_imported_result_payload_identity();
         test_backend_uses_detached_ir_only();
         test_performance_contract_marker();
+        test_string_lifetime_category();
     } catch (const std::exception& error) {
         std::cerr << "IR test failure: " << error.what() << '\n';
         return 1;

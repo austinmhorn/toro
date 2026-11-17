@@ -61,6 +61,10 @@ public function length(value: string) -> int {
     return __toro_string_length(value)
 }
 
+public function byte_at(value: string, index: int) -> Result<int, string> {
+    return __toro_string_byte_at(value, index)
+}
+
 public function concat(left: string, right: string) -> string {
     return __toro_string_concat(left, right)
 }
@@ -102,6 +106,7 @@ constexpr std::array intrinsics{
     std::pair{"__toro_process_exit", RuntimeIntrinsic::ProcessExit},
     std::pair{"__toro_time_wall_millis", RuntimeIntrinsic::TimeWallMillis},
     std::pair{"__toro_string_length", RuntimeIntrinsic::StringLength},
+    std::pair{"__toro_string_byte_at", RuntimeIntrinsic::StringByteAt},
     std::pair{"__toro_string_concat", RuntimeIntrinsic::StringConcat},
     std::pair{"__toro_string_contains", RuntimeIntrinsic::StringContains},
     std::pair{"__toro_string_starts_with", RuntimeIntrinsic::StringStartsWith},

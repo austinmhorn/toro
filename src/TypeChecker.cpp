@@ -1241,6 +1241,9 @@ Type TypeChecker::check_call(
             const Type bool_result{
                 TypeKind::Unknown, false, false, "Result",
                 {bool_type, string_type}};
+            const Type int_result{
+                TypeKind::Unknown, false, false, "Result",
+                {int_type, string_type}};
             switch (*intrinsic) {
             case RuntimeIntrinsic::IoWriteLine:
                 parameters = {string_type};
@@ -1279,6 +1282,10 @@ Type TypeChecker::check_call(
             case RuntimeIntrinsic::StringLength:
                 parameters = {string_type};
                 result = int_type;
+                break;
+            case RuntimeIntrinsic::StringByteAt:
+                parameters = {string_type, int_type};
+                result = int_result;
                 break;
             case RuntimeIntrinsic::StringConcat:
                 parameters = {string_type, string_type};

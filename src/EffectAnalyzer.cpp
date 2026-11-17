@@ -96,7 +96,8 @@ bool is_callable(const IRDeclaration& declaration)
 
 bool is_shared_reference(const IRType& type)
 {
-    if (type.category == IRValueCategory::ManagedReference
+    if (type.category == IRValueCategory::ManagedString
+        || type.category == IRValueCategory::ManagedReference
         || type.category == IRValueCategory::InterfaceValue) {
         return true;
     }
@@ -347,6 +348,7 @@ private:
             add_operation_effect(node, IREffect::Allocate, operation);
             return;
         case RuntimeIntrinsic::StringLength:
+        case RuntimeIntrinsic::StringByteAt:
         case RuntimeIntrinsic::StringContains:
         case RuntimeIntrinsic::StringStartsWith:
         case RuntimeIntrinsic::StringEndsWith:

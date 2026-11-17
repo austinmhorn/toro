@@ -12,6 +12,7 @@ std::string_view category_name(IRValueCategory category)
 {
     switch (category) {
     case IRValueCategory::Primitive: return "primitive";
+    case IRValueCategory::ManagedString: return "managed-string";
     case IRValueCategory::Value: return "value";
     case IRValueCategory::ManagedReference: return "managed-ref";
     case IRValueCategory::InterfaceValue: return "interface";

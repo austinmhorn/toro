@@ -498,7 +498,7 @@ Typical mappings:
 int     -> int64_t
 dec     -> double
 bool    -> bool
-string  -> const char*
+string  -> toro_string (immutable data plus optional ownership control)
 ```
 
 The backend lowers supported expressions, variables, functions, calls, control flow, and primitive printing.
@@ -508,11 +508,11 @@ The backend lowers supported expressions, variables, functions, calls, control f
 Generated C helpers implement the current filesystem, environment, time, and
 string services only when their associated intrinsic is reachable. Concrete
 `Result<string, string>` and `Result<bool, string>` values reuse the existing
-tagged-union lowering. Native-produced immutable strings are registered in a
-small process-lifetime allocation list and released with `atexit`, preventing
-dangling pointers while keeping ownership mechanics out of general string
-expressions. This representation is intentionally isolated and may be replaced
-when Toro gains a unified owned-string runtime.
+tagged-union lowering. A `toro_string` carries immutable data plus an optional
+reference-counted control block. Literals and arbitrary FFI `c_string` values
+remain borrowed; compiler-known allocating helpers return owned values that are
+retained and released through IR-directed value lifetime paths. No process-wide
+`atexit` allocation registry is used.
 
 Standard-library module identities and helper names are deterministic; no
 absolute compiler, standard-library, or project path enters generated symbols.
@@ -677,11 +677,12 @@ the backing object, while `.clone()` allocates independent storage. List
 contents, and List `clear` releases logical managed elements and resets count
 without freeing reusable capacity.
 
-Element helpers isolate retain/release behavior for class references and nested
-shared collections. Array/List access uses generated checked get/set helpers,
-and Array/List `for ... in` lowers to indexed traversal. Strings remain immutable
-`const char*` values; this is sufficient for the current literal-oriented string
-semantics and string-keyed maps, so no owned string runtime is introduced.
+Element helpers isolate retain/release behavior for class references, managed
+strings, recursive aggregates, and nested shared collections. Array/List access
+uses generated checked get/set helpers, and Array/List `for ... in` lowers to
+indexed traversal. Strings remain immutable values; compiler-known
+native-produced strings use the same reclaimable lifetime model through
+collection elements and map keys.
 
 ### Backend hardening baseline
 
@@ -991,10 +992,13 @@ all five class-backed AST construction sites are stored in Lists and therefore
 remain Heap under the current conservative `collection-storage` escape rule.
 The backend performs no independent placement reasoning, and the milestone did
 not broaden arena or collection semantics. The same application exposed that
-the native-string bridge's process-lifetime storage and allocating
-single-character substring/concat path are unsuitable for long-running parser
-workloads. Those are recorded application pressures, not architectural changes
-authorized by A3. See `applications/parser_tool/REPORT.md`.
+the then-current native-string bridge's process-lifetime storage and allocating
+single-character substring/concat path were unsuitable for long-running parser
+workloads. The authorized follow-up added IR-visible managed strings,
+reclaimable compiler-known native values, and nonallocating UTF-8 byte
+traversal. It did not alter foreign `c_string` ownership or arena placement.
+See `applications/parser_tool/REPORT.md` and
+`applications/parser_tool/STRING_OPTIMIZATION_REPORT.md`.
 
 Later phases may explore, when evidence justifies them:
 

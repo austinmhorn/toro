@@ -1,15 +1,15 @@
 import strings
 import parser_tool.model
 
-public performance function is_digit(value: string) -> bool {
-    return value == "0" or value == "1" or value == "2" or value == "3" or value == "4" or value == "5" or value == "6" or value == "7" or value == "8" or value == "9"
+public performance function is_digit(value: int) -> bool {
+    return value >= 48 and value <= 57
 }
 
-public performance function is_identifier_start(value: string) -> bool {
-    return value == "_" or value == "a" or value == "b" or value == "c" or value == "d" or value == "e" or value == "f" or value == "g" or value == "h" or value == "i" or value == "j" or value == "k" or value == "l" or value == "m" or value == "n" or value == "o" or value == "p" or value == "q" or value == "r" or value == "s" or value == "t" or value == "u" or value == "v" or value == "w" or value == "x" or value == "y" or value == "z" or value == "A" or value == "B" or value == "C" or value == "D" or value == "E" or value == "F" or value == "G" or value == "H" or value == "I" or value == "J" or value == "K" or value == "L" or value == "M" or value == "N" or value == "O" or value == "P" or value == "Q" or value == "R" or value == "S" or value == "T" or value == "U" or value == "V" or value == "W" or value == "X" or value == "Y" or value == "Z"
+public performance function is_identifier_start(value: int) -> bool {
+    return value == 95 or value >= 65 and value <= 90 or value >= 97 and value <= 122
 }
 
-public performance function is_identifier_continue(value: string) -> bool {
+public performance function is_identifier_continue(value: int) -> bool {
     return is_identifier_start(value) or is_digit(value)
 }
 
@@ -23,10 +23,6 @@ function token_kind(identifier: string) -> TokenKind {
     return TokenKind::identifier
 }
 
-function character(source: string, index: int) -> Result<string, string> {
-    return substring(source, index, 1)
-}
-
 public function tokenize(source: string, tokens: List<Token>) -> Result<bool, string> {
     tokens.reserve(length(source))
     index := 0
@@ -34,43 +30,43 @@ public function tokenize(source: string, tokens: List<Token>) -> Result<bool, st
     column := 1
     count := length(source)
     while index < count {
-        current := character(source, index)?
-        if current == " " {
+        current := byte_at(source, index)?
+        if current == 10 {
+            index = index + 1
+            line = line + 1
+            column = 1
+        } else if current == 9 or current == 13 or current == 32 {
             index = index + 1
             column = column + 1
         } else if is_identifier_start(current) {
             start := index
             start_column := column
-            lexeme := ""
-            while index < count and is_identifier_continue(character(source, index)?) {
-                lexeme = concat(lexeme, character(source, index)?)
+            while index < count and is_identifier_continue(byte_at(source, index)?) {
                 index = index + 1
                 column = column + 1
             }
+            lexeme := substring(source, start, index - start)?
             tokens.add(Token(kind: token_kind(lexeme), lexeme: lexeme, line: line, column: start_column))
         } else if is_digit(current) {
+            start := index
             start_column := column
-            lexeme := ""
-            while index < count and is_digit(character(source, index)?) {
-                lexeme = concat(lexeme, character(source, index)?)
+            while index < count and is_digit(byte_at(source, index)?) {
                 index = index + 1
                 column = column + 1
             }
+            lexeme := substring(source, start, index - start)?
             tokens.add(Token(kind: TokenKind::integer, lexeme: lexeme, line: line, column: start_column))
-        } else if current == "[" {
+        } else if current == 91 {
             start_column := column
             index = index + 1
             column = column + 1
-            lexeme := ""
+            start := index
             terminated := false
             while index < count and terminated == false {
-                next := character(source, index)?
-                if next == "]" {
+                next := byte_at(source, index)?
+                if next == 93 {
                     terminated = true
-                    index = index + 1
-                    column = column + 1
                 } else {
-                    lexeme = concat(lexeme, next)
                     index = index + 1
                     column = column + 1
                 }
@@ -78,20 +74,23 @@ public function tokenize(source: string, tokens: List<Token>) -> Result<bool, st
             if terminated == false {
                 return error("unterminated string literal")
             }
+            lexeme := substring(source, start, index - start)?
+            index = index + 1
+            column = column + 1
             tokens.add(Token(kind: TokenKind::text, lexeme: lexeme, line: line, column: start_column))
-        } else if current == "{" {
-            tokens.add(Token(kind: TokenKind::left_brace, lexeme: current, line: line, column: column))
+        } else if current == 123 {
+            tokens.add(Token(kind: TokenKind::left_brace, lexeme: "{", line: line, column: column))
             index = index + 1
             column = column + 1
-        } else if current == "}" {
-            tokens.add(Token(kind: TokenKind::right_brace, lexeme: current, line: line, column: column))
+        } else if current == 125 {
+            tokens.add(Token(kind: TokenKind::right_brace, lexeme: "}", line: line, column: column))
             index = index + 1
             column = column + 1
-        } else if current == ":" {
-            tokens.add(Token(kind: TokenKind::colon, lexeme: current, line: line, column: column))
+        } else if current == 58 {
+            tokens.add(Token(kind: TokenKind::colon, lexeme: ":", line: line, column: column))
             index = index + 1
             column = column + 1
-        } else if current == "-" and index + 1 < count and character(source, index + 1)? == ">" {
+        } else if current == 45 and index + 1 < count and byte_at(source, index + 1)? == 62 {
             tokens.add(Token(kind: TokenKind::arrow, lexeme: "->", line: line, column: column))
             index = index + 2
             column = column + 2
@@ -104,46 +103,15 @@ public function tokenize(source: string, tokens: List<Token>) -> Result<bool, st
     return ok(true)
 }
 
-function digit_value(value: string) -> int {
-    if value == "1" {
-        return 1
-    }
-    if value == "2" {
-        return 2
-    }
-    if value == "3" {
-        return 3
-    }
-    if value == "4" {
-        return 4
-    }
-    if value == "5" {
-        return 5
-    }
-    if value == "6" {
-        return 6
-    }
-    if value == "7" {
-        return 7
-    }
-    if value == "8" {
-        return 8
-    }
-    if value == "9" {
-        return 9
-    }
-    return 0
-}
-
 public function parse_integer(value: string) -> Result<int, string> {
     result := 0
     index := 0
     while index < length(value) {
-        current := character(value, index)?
+        current := byte_at(value, index)?
         if is_digit(current) == false {
             return error("invalid integer")
         }
-        result = result * 10 + digit_value(current)
+        result = result * 10 + current - 48
         index = index + 1
     }
     return ok(result)

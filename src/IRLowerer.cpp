@@ -94,7 +94,6 @@ private:
         switch (type.kind) {
         case TypeKind::Int:
         case TypeKind::Dec:
-        case TypeKind::String:
         case TypeKind::Bool:
         case TypeKind::CInt:
         case TypeKind::CInt64:
@@ -104,6 +103,8 @@ private:
         case TypeKind::Null:
         case TypeKind::Void:
             return IRValueCategory::Primitive;
+        case TypeKind::String:
+            return IRValueCategory::ManagedString;
         case TypeKind::Unknown:
             break;
         }

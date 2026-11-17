@@ -306,6 +306,11 @@ void test_standard_library_and_foreign_metadata()
         "string concat should allocate");
     expect(has_effect(concat, toro::IREffect::NativeCall),
         "string concat should cross the runtime boundary");
+    const auto& byte_at = summary(stdlib, "__7_byte_at(string,int)");
+    expect(has_effect(byte_at, toro::IREffect::NativeCall),
+        "string byte access should cross the runtime boundary");
+    expect(!has_effect(byte_at, toro::IREffect::Allocate),
+        "string byte access should remain nonallocating");
     const auto& read = summary(stdlib, "__9_read_text(string)");
     expect(has_effect(read, toro::IREffect::Block)
             && has_effect(read, toro::IREffect::FilesystemIO),

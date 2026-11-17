@@ -13,7 +13,8 @@ namespace {
 
 bool is_shared_reference(const IRType& type)
 {
-    if (type.category == IRValueCategory::ManagedReference
+    if (type.category == IRValueCategory::ManagedString
+        || type.category == IRValueCategory::ManagedReference
         || type.category == IRValueCategory::InterfaceValue) {
         return true;
     }

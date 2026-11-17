@@ -1,5 +1,10 @@
 # Application Milestone A3 report
 
+> This report preserves the original A3 baseline and findings. The authorized
+> follow-up implemented UTF-8 byte scanning and reclaimable compiler-known
+> native strings; its post-change measurements are in
+> `STRING_OPTIMIZATION_REPORT.md`.
+
 ## 1. Executive summary
 
 Application Milestone A3 adds a multi-module parser/analyzer application under
@@ -167,7 +172,7 @@ contracts. The allocating tokenizer and parser are intentionally ordinary
 functions. `toro ir --performance` therefore validates useful leaf helpers
 without distorting the architecture to make the whole parser contract-safe.
 
-## 14. String ergonomics
+## 14. String ergonomics at the A3 baseline
 
 - Character iteration is absent, forcing allocating one-character
   `substring` calls: **architectural blocker** for a serious long-running
@@ -195,7 +200,7 @@ unsupported backend shape, so the AST uses parallel lists and index ranges:
 **significant ergonomic issue**. Also, storing class nodes in a list makes them
 escape arena selection. Map iteration was not needed.
 
-## 16. Standard-library gaps
+## 16. Standard-library gaps at the A3 baseline
 
 `fs.read_text`, `io.write_line`, `strings.length/substring/concat`, and wall
 time are sufficient for a bundled project. Missing character/code-point
@@ -246,7 +251,8 @@ not a dominant region at this scale.
 instrumented repeated workload. A two-second sample observed about 621 MB
 physical footprint while tokenization was active. The evidence is consistent
 with allocation-heavy substring/concat and current process-lifetime retention
-of native-returned strings, not with leaked AST nodes. Because all five AST
+of the then-current native-returned strings, not with leaked AST nodes. Because
+all five AST
 sites are Heap, arena cleanup does not reduce that path's allocator/ARC work.
 
 ## 21. Scaling/repeated-run findings
@@ -254,9 +260,10 @@ sites are Heap, arena cleanup does not reduce that path's allocator/ARC work.
 Small and stress inputs, a repeated small parse in the normal executable, and
 4,000 repeated stress-stage iterations all completed with stable checksums.
 Logical AST cleanup is correct and leak checking is clean. Memory is not
-practically bounded at a low high-water mark for repeated tokenization because
-temporary native strings survive until process shutdown; this is the primary
-scaling limit. The normal finite fixture run remains small and deterministic.
+practically bounded at a low high-water mark for repeated tokenization because,
+at the A3 baseline, temporary native strings survived until process shutdown;
+this was the primary scaling limit. The normal finite fixture run remained
+small and deterministic.
 
 ## 22. Concurrency candidates
 
@@ -288,12 +295,24 @@ cross an execution boundary, so A3 adds no evidence for local/shared ARC.
 
 ## 24. Roadmap implications
 
-The highest-priority implication is string/runtime work before concurrency:
-nonallocating character/code-point iteration plus reclaimable ownership for
-temporary native strings would address the measured dominant cost and memory
-high-water behavior. Standard number parsing and source-location-friendly
+The highest-priority A3 implication was string/runtime work before concurrency:
+nonallocating byte traversal plus reclaimable ownership for temporary native
+strings. The authorized follow-up in section 25 completed that work. Standard
+number parsing and source-location-friendly
 character handling follow. Collection-valued class fields and collection-aware
 arena escape/storage reasoning remain important application pressure, but A3
 does not authorize either expansion. Phase 12.2 and local/shared ARC should
 remain deferred until a representative multi-file workload demonstrates a
 material parallel benefit.
+
+## 25. Authorized string follow-up
+
+The follow-up resolved the two highest-priority string findings without
+changing source ownership semantics. `strings.byte_at` now supports
+nonallocating UTF-8 byte classification, compiler-known native-produced strings
+are reclaimed by value lifetime, and the tokenizer materializes only completed
+token lexemes. Median tokenization fell from 2,148 ms to 809 ms. Instrumented
+peak footprint fell from approximately 1.0 GB to 4,018 KB with zero leaked
+bytes. Arena placement remains 0 Stack / 0 Arena / 5 Heap, and Phase 12.2
+remains **Defer**. See `STRING_OPTIMIZATION_REPORT.md` for full methodology and
+remaining limitations.

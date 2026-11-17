@@ -45,7 +45,8 @@ bool is_callable(const IRDeclaration& declaration)
 
 bool is_reference(const IRType& type)
 {
-    return type.category == IRValueCategory::ManagedReference
+    return type.category == IRValueCategory::ManagedString
+        || type.category == IRValueCategory::ManagedReference
         || type.category == IRValueCategory::InterfaceValue;
 }
 

@@ -16,6 +16,7 @@ namespace toro {
 
 enum class IRValueCategory {
     Primitive,
+    ManagedString,
     Value,
     ManagedReference,
     InterfaceValue,

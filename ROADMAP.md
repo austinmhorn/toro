@@ -124,8 +124,9 @@ Completed behavior:
 - shared hash-backed `Map<string, V>` storage with insert/update, lookup,
   presence tests, count/length, and independent `.clone()` storage;
 - deterministic concrete C11 collection specializations and reusable helpers;
-- retained immutable `const char*` strings because current operations do not
-  require an owned string representation.
+- initially retained immutable `const char*` strings; the later parser-tool
+  string milestone introduced reclaimable compiler-owned native strings while
+  preserving immutable value semantics and borrowed FFI `c_string` values.
 
 Map iteration and additional key hashing/equality definitions remain deferred
 until their source-level semantics are specified.
@@ -253,8 +254,8 @@ Completed behavior:
 - console output, text-file existence/read/write/removal, environment lookup,
   process exit, wall/elapsed milliseconds, and foundational string operations;
 - `Result`-based filesystem, environment, and substring failures;
-- process-lifetime immutable storage for native-produced strings, with cleanup
-  at process shutdown;
+- reclaimable reference-counted storage for compiler-known native-produced
+  strings, distinct from borrowed foreign `c_string` values;
 - strict-C11, deterministic-emission, project-mode, and native integration
   coverage.
 
@@ -1154,6 +1155,17 @@ The A3 Phase 12.2 recommendation is **Defer**. Independent-file processing is
 the only credible future task boundary, but this application supplies neither
 the workload nor the benefit evidence required to reopen concurrency design.
 See `applications/parser_tool/REPORT.md`.
+
+The authorized A3 string follow-up is also complete. It added nonallocating
+UTF-8 byte traversal through `strings.byte_at`, migrated the tokenizer away
+from one-character substring/concat scanning, and added reclaimable ownership
+for compiler-known native strings through typed IR and generated runtime
+lifetime operations. The 4,000-iteration median tokenization time fell from
+2,148 ms to 809 ms; `leaks --atExit` measured a 4,018 KB peak and zero leaked
+bytes, replacing the prior approximately 1.0 GB shutdown-retained peak. The new
+dominant tokenizer cost is repeated length discovery in bounds-checked byte
+access. Arena evidence is unchanged and Phase 12.2 remains **Defer**. See
+`applications/parser_tool/STRING_OPTIMIZATION_REPORT.md`.
 
 Before 1.0, build representative real applications in target domains.
 

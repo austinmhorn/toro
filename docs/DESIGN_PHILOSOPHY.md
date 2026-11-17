@@ -187,10 +187,12 @@ different domain. A parse-unit `arena {}` reads naturally, yet collection-backed
 AST nodes conservatively remain on the heap; the application did not weaken
 escape proof to manufacture arena wins. Its measured dominant problem was
 instead string scanning: allocating one-character substrings and concatenation,
-combined with process-lifetime native-returned string storage. The appropriate
-next pressure is better character/string runtime behavior, not new ownership
-syntax or speculative concurrency. Independent-file parsing remains only a
-future candidate, so Phase 12.2 stays deferred.
+combined with process-lifetime native-returned string storage. The focused
+follow-up answered that evidence with UTF-8 byte traversal and reclaimable
+compiler-known native strings, without exposing ownership syntax or changing
+foreign-string ownership. It materially reduced time and high-water memory;
+repeated length discovery is now the dominant scanner cost. Independent-file
+parsing remains only a future candidate, so Phase 12.2 stays deferred.
 
 ### References
 

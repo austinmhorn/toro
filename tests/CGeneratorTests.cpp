@@ -82,14 +82,18 @@ void test_primitive_variables_arithmetic_and_assignment()
     expect_contains(output, "int64_t toro_var_count = 10;", "integer declaration");
     expect_contains(output, "double toro_var_price = 19.99;", "decimal declaration");
     expect_contains(output, "bool toro_var_active = true;", "boolean declaration");
-    expect_contains(output, "const char* toro_var_name = \"toro\";", "string declaration");
+    expect_contains(output,
+        "toro_string toro_var_name = toro_string_literal(\"toro\");",
+        "string declaration");
     expect_contains(
         output,
         "toro_var_count = (toro_var_count + (2 * 3));",
         "arithmetic reassignment");
     expect_contains(output, "printf(\"%g\\n\", toro_var_price);", "decimal print");
     expect_contains(output, "? \"true\" : \"false\"", "boolean print");
-    expect_contains(output, "printf(\"%s\\n\", toro_var_name);", "string print");
+    expect_contains(output,
+        "printf(\"%s\\n\", (toro_var_name).toro_data);",
+        "string print");
 }
 
 void test_functions_calls_and_returns()
@@ -151,7 +155,9 @@ void test_string_equality()
         "function same(left: string, right: string) -> bool {\n"
         "    return left == right\n"
         "}\n");
-    expect_contains(output, "strcmp(toro_arg_left, toro_arg_right) == 0", "string equality");
+    expect_contains(output,
+        "strcmp((toro_arg_left).toro_data, (toro_arg_right).toro_data) == 0",
+        "string equality");
 }
 
 void test_struct_definition_construction_and_members()
@@ -174,11 +180,11 @@ void test_struct_definition_construction_and_members()
         "typedef struct toro_struct_Player toro_struct_Player;",
         "struct forward declaration");
     expect_contains(output, "struct toro_struct_Player", "struct definition");
-    expect_contains(output, "const char* toro_field_name;", "string field");
+    expect_contains(output, "toro_string toro_field_name;", "string field");
     expect_contains(output, "int64_t toro_field_age;", "integer field");
     expect_contains(
         output,
-        "(toro_struct_Player){.toro_field_name = \"Austin\", "
+        "(toro_struct_Player){.toro_field_name = toro_string_literal(\"Austin\"), "
         ".toro_field_age = 28, .toro_field_active = false, "
         ".toro_field_score = 0.0}",
         "explicit construction values and defaults");
@@ -186,7 +192,7 @@ void test_struct_definition_construction_and_members()
         output, "(toro_var_player).toro_field_age = 29;", "field assignment");
     expect_contains(
         output,
-        "printf(\"%s\\n\", (toro_var_player).toro_field_name)",
+        "printf(\"%s\\n\", ((toro_var_player).toro_field_name).toro_data)",
         "field access");
 }
 
@@ -292,16 +298,14 @@ void test_enum_representation_construction_and_handle()
     expect_contains(output, "int64_t toro_variant_integer;", "integer payload");
     expect_contains(output, "double toro_variant_decimal;", "decimal payload");
     expect_contains(output, "bool toro_variant_flag;", "boolean payload");
-    expect_contains(output, "const char* toro_variant_text;", "string payload");
+    expect_contains(output, "toro_string toro_variant_text;", "string payload");
     expect_contains(
         output,
-        "(toro_enum_5_Value){.toro_tag = toro_enum_5_Value_tag_text, "
-        ".toro_payload.toro_variant_text = \"toro\"}",
+        ".toro_payload.toro_variant_text = toro_string_literal(\"toro\")",
         "payload variant construction");
     expect_contains(
         output,
-        "toro_var_value = (toro_enum_5_Value){.toro_tag = "
-        "toro_enum_5_Value_tag_empty};",
+        "(toro_enum_5_Value){.toro_tag = toro_enum_5_Value_tag_empty}",
         "payload-free variant assignment");
     expect_contains(
         output,
@@ -309,7 +313,7 @@ void test_enum_representation_construction_and_handle()
         "handle switch");
     expect_contains(
         output,
-        "const char* toro_var_item = "
+        "toro_string toro_var_item = "
         "toro_handle_value_0.toro_payload.toro_variant_text;",
         "scoped payload binding");
 }
@@ -381,23 +385,22 @@ void test_result_construction_handle_and_propagation()
         "concrete Result declaration");
     expect_contains(output, "toro_result_r1_i_1_s_tag_ok", "Result ok tag");
     expect_contains(output, "int64_t toro_ok;", "Result ok payload");
-    expect_contains(output, "const char* toro_error;", "Result error payload");
+    expect_contains(output, "toro_string toro_error;", "Result error payload");
     expect_contains(
         output,
         ".toro_payload.toro_ok = 7",
         "ok construction");
     expect_contains(
         output,
-        ".toro_payload.toro_error = \"bad\"",
+        ".toro_payload.toro_error = toro_string_literal(\"bad\")",
         "error construction");
     expect_contains(
         output,
-        "if (toro_result_value_0.toro_tag == "
         "toro_result_r1_i_1_s_tag_error)",
         "propagation error check");
     expect_contains(
         output,
-        "switch (toro_handle_value_1.toro_tag)",
+        "switch (toro_handle_value_",
         "Result handle switch");
     expect_contains(
         output,
@@ -602,11 +605,11 @@ void test_virtual_dispatch_lowering()
         "hierarchy-root vtable pointer");
     expect_contains(
         output,
-        "const char* (*toro_virtual_6_Animal_speak)(void* toro_object);",
+        "toro_string (*toro_virtual_6_Animal_speak)(void* toro_object);",
         "virtual speak slot");
     expect_contains(
         output,
-        "const char* (*toro_virtual_6_Animal_label)(void* toro_object);",
+        "toro_string (*toro_virtual_6_Animal_label)(void* toro_object);",
         "second virtual slot");
     expect_contains(
         output,

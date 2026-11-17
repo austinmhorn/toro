@@ -17,6 +17,7 @@ enum class RuntimeIntrinsic {
     ProcessExit,
     TimeWallMillis,
     StringLength,
+    StringByteAt,
     StringConcat,
     StringContains,
     StringStartsWith,

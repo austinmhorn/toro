@@ -169,6 +169,12 @@ void test_native_standard_library()
         "        return value\n"
         "    }\n"
         "}\n"
+        "function validate_bytes() -> Result<bool, string> {\n"
+        "    ascii := \"A9 \t!\"\n"
+        "    if byte_at(ascii, 0)? != 65 or byte_at(ascii, 1)? != 57 or byte_at(ascii, 2)? != 32 or byte_at(ascii, 3)? != 9 or byte_at(ascii, 4)? != 33 { return ok(false) }\n"
+        "    utf8 := \"é\"\n"
+        "    return ok(byte_at(utf8, 0)? == 195 and byte_at(utf8, 1)? == 169)\n"
+        "}\n"
         "function main() -> int {\n"
         "    path := \"" + data_path + "\"\n"
         "    wrote := false\n"
@@ -183,6 +189,28 @@ void test_native_standard_library()
         "        error(problem) { write_line(problem) }\n"
         "    }\n"
         "    if length(text) != 4 or contains(text, \"or\") == false { return 2 }\n"
+        "    first := -1\n"
+        "    middle := -1\n"
+        "    final := -1\n"
+        "    handle byte_at(text, 0) {\n        ok(value) { first = value }\n        error(problem) { write_line(problem) }\n    }\n"
+        "    handle byte_at(text, 1) {\n        ok(value) { middle = value }\n        error(problem) { write_line(problem) }\n    }\n"
+        "    handle byte_at(text, 3) {\n        ok(value) { final = value }\n        error(problem) { write_line(problem) }\n    }\n"
+        "    if first != 84 or middle != 111 or final != 111 { return 9 }\n"
+        "    boundary_failed := false\n"
+        "    handle byte_at(\"\", 0) {\n        ok(value) { first = value }\n        error(problem) { boundary_failed = length(problem) > 0 }\n    }\n"
+        "    if boundary_failed == false { return 10 }\n"
+        "    boundary_failed = false\n"
+        "    handle byte_at(text, 4) {\n        ok(value) { first = value }\n        error(problem) { boundary_failed = length(problem) > 0 }\n    }\n"
+        "    if boundary_failed == false { return 11 }\n"
+        "    boundary_failed = false\n"
+        "    handle byte_at(text, -1) {\n        ok(value) { first = value }\n        error(problem) { boundary_failed = length(problem) > 0 }\n    }\n"
+        "    if boundary_failed == false { return 12 }\n"
+        "    boundary_failed = false\n"
+        "    handle byte_at(text, 99) {\n        ok(value) { first = value }\n        error(problem) { boundary_failed = length(problem) > 0 }\n    }\n"
+        "    if boundary_failed == false { return 13 }\n"
+        "    bytes_valid := false\n"
+        "    handle validate_bytes() {\n        ok(value) { bytes_valid = value }\n        error(problem) { write_line(problem) }\n    }\n"
+        "    if bytes_valid == false { return 14 }\n"
         "    if starts_with(text, \"To\") == false or ends_with(text, \"ro\") == false { return 3 }\n"
         "    piece := \"\"\n"
         "    handle substring(text, 1, 2) {\n"
@@ -217,10 +245,65 @@ void test_native_standard_library()
     auto program = load_and_check(tree.path("main.toro"), tree.path(""));
     const std::string generated = toro::CGenerator().generate(program);
     const auto [status, output] = capture_run(generated);
-    expect(status == 0, "standard-library native program failed");
+    expect(status == 0,
+        "standard-library native program failed with status " + std::to_string(status));
     expect(output == "hello Toro\n", "standard-library console output was incorrect");
     expect(!std::filesystem::exists(data_path),
         "standard-library test did not remove its temporary file");
+}
+
+void test_reclaimable_string_lifetimes()
+{
+    TestTree tree;
+    tree.write("main.toro",
+        "import strings\n"
+        "enum TextValue {\n    text(string)\n    empty\n}\n"
+        "struct TextBox { value: string }\n"
+        "class TextHolder {\n    public value: string\n}\n"
+        "function make(value: string) -> string { return concat(value, \"!\") }\n"
+        "function forward(value: string) -> string { return value }\n"
+        "function branch(value: string, direct: bool) -> string {\n"
+        "    if direct { return value }\n"
+        "    return concat(value, \"?\")\n"
+        "}\n"
+        "function main() -> int {\n"
+        "    values := List<string>()\n"
+        "    array := Array<string>(\"seed\")\n"
+        "    mapped := Map<string, string>()\n"
+        "    holder := TextHolder()\n"
+        "    value := \"seed\"\n"
+        "    index := 0\n"
+        "    while index < 20000 {\n"
+        "        value = forward(make(\"x\"))\n"
+        "        alias := value\n"
+        "        boxed := TextBox(value: alias)\n"
+        "        holder.value = boxed.value\n"
+        "        array[0] = holder.value\n"
+        "        mapped[concat(\"k\", \"ey\")] = array[0]\n"
+        "        if mapped.contains(concat(\"k\", \"ey\")) == false { return 6 }\n"
+        "        if index < 10000 {\n"
+        "            if branch(mapped[concat(\"k\", \"ey\")], true) != \"x!\" { return 4 }\n"
+        "        } else {\n"
+        "            if branch(mapped[concat(\"k\", \"ey\")], false) != \"x!?\" { return 5 }\n"
+        "        }\n"
+        "        values.add(value)\n"
+        "        if values.count == 64 { values.clear() }\n"
+        "        wrapped := TextValue::text(value)\n"
+        "        handle wrapped {\n            text(item) { if item != \"x!\" { return 1 } }\n            empty {}\n        }\n"
+        "        handle substring(value, 0, 1) {\n            ok(piece) { if piece != \"x\" { return 2 } }\n            error(problem) { return 3 }\n        }\n"
+        "        index = index + 1\n"
+        "    }\n"
+        "    return 0\n"
+        "}\n");
+    auto program = load_and_check(tree.path("main.toro"), tree.path(""));
+    const std::string generated = toro::CGenerator().generate(program);
+    expect(generated.find("atexit") == std::string::npos,
+        "native Toro strings still used process-lifetime cleanup");
+    expect(generated.find("toro_string_retain") != std::string::npos
+            && generated.find("toro_string_release") != std::string::npos,
+        "generated C omitted reclaimable string lifetime operations");
+    expect(toro::NativeCompiler().run(generated) == 0,
+        "repeated reclaimable string lifetime program failed");
 }
 
 void test_intrinsics_are_not_source_api()
@@ -257,6 +340,7 @@ int main()
     try {
         test_resolution_precedence_and_determinism();
         test_native_standard_library();
+        test_reclaimable_string_lifetimes();
         test_intrinsics_are_not_source_api();
         test_process_exit_status();
     } catch (const std::exception& error) {

@@ -45,11 +45,14 @@ It is a multi-module source-language tokenizer, parser, class-backed AST,
 symbol/reference analyzer, and deterministic reporter with small, stress, and
 invalid fixtures. Its A3 evidence confirms that lexical `arena {}` is natural
 for a parse-unit lifetime, but all five AST allocation sites currently remain
-Heap because collection insertion is conservatively escaping. Profiling found
-tokenization dominated by allocation-heavy substring/concatenation work and
-identified nonallocating character iteration plus reclaimable temporary-string
-ownership as higher-priority needs than concurrency. The full evidence is in
-`applications/parser_tool/REPORT.md`; Phase 12.2 remains deferred.
+Heap because collection insertion is conservatively escaping. Its follow-up
+string milestone replaced allocating one-character traversal with UTF-8 byte
+scanning and made compiler-known native strings reclaimable during execution.
+Median 4,000-iteration tokenization fell from 2,148 ms to 809 ms and the
+instrumented peak fell from roughly 1.0 GB to about 4.0 MB with zero leaks. The
+baseline and follow-up evidence are in `applications/parser_tool/REPORT.md` and
+`applications/parser_tool/STRING_OPTIMIZATION_REPORT.md`; Phase 12.2 remains
+deferred.
 
 The first compiler implementation is written in C++23.
 It currently loads and tokenizes `.toro` source files and can parse expressions,
@@ -547,8 +550,10 @@ compiler-provided identities, so generated output is independent of installation
 and project paths. The initial surface includes `write_line`, text-file
 `exists`/`read_text`/`write_text`/`remove_file`, environment `has`/`get`,
 process `exit`, wall/elapsed millisecond time, and string length,
-concatenation, search, prefix/suffix, and checked substring operations. See
-`LANGUAGE.md` for complete signatures and failure behavior.
+UTF-8 byte access, concatenation, search, prefix/suffix, and checked substring
+operations. Compiler-known allocating string helpers return reclaimable values;
+arbitrary FFI `c_string` values remain borrowed. See `LANGUAGE.md` for complete
+signatures and failure behavior.
 
 `run` forwards program output and returns its exit status. Its temporary C source
 and executable are removed after the program finishes or compilation fails.

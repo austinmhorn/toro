@@ -197,6 +197,7 @@ time:
 
 strings:
     length(value: string) -> int
+    byte_at(value: string, index: int) -> Result<int, string>
     concat(left: string, right: string) -> string
     contains(value: string, fragment: string) -> bool
     starts_with(value: string, prefix: string) -> bool
@@ -209,10 +210,13 @@ diagnostic. `exists` reports whether a file can be opened; directory traversal
 and directory-specific queries are not part of this first surface.
 `wall_millis` is Unix-epoch wall-clock time in milliseconds;
 `elapsed_millis(start)` subtracts that reading for basic elapsed measurement.
-Neither is a monotonic-duration source. Strings returned by the native
-standard-library boundary are immutable and kept valid until process shutdown.
-This is an isolated correctness-first representation pending a unified
-owned-string runtime.
+Neither is a monotonic-duration source. `byte_at` returns an unsigned UTF-8
+encoding byte as `int`; it does not return a Unicode code point or grapheme
+cluster. Invalid indexes return `error` with a static diagnostic string.
+Strings remain immutable values. Compiler-known native producers return
+reclaimable Toro-owned values, while arbitrary FFI `c_string` values remain
+borrowed and externally owned. These lifetime details require no source-level
+ownership syntax.
 Input streams, argument-vector access, monotonic clocks/durations, directory
 operations, networking, regular expressions, and structured serialization
 remain deferred. Public C interoperability is defined separately below.
