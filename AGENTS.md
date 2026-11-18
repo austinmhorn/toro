@@ -123,9 +123,11 @@ Long term:
 
 - Values remain values and should not use ARC.
 - Class/reference semantics remain stable even if the compiler changes storage strategy.
-- Immutable Toro strings may carry compiler-internal reclaimable ownership when
-  produced by compiler-known native helpers. Literals and arbitrary FFI
-  `c_string` values remain borrowed; never infer ownership of foreign strings.
+- Immutable Toro string values carry their UTF-8 byte length with their data
+  pointer and optional compiler-internal reclaimable ownership. Compiler-known
+  producers preserve known lengths without rescanning. Literals and arbitrary
+  FFI `c_string` values remain borrowed; never infer ownership of foreign
+  strings.
 - The compiler should infer moves, borrows, escape behavior, and stack allocation where safe.
 - ARC is a semantic fallback for shared reference lifetime, not the identity of the language.
 - Ownership/escape/borrow analysis belongs behind the toro IR layer, not as

@@ -50,8 +50,11 @@ string milestone replaced allocating one-character traversal with UTF-8 byte
 scanning and made compiler-known native strings reclaimable during execution.
 Median 4,000-iteration tokenization fell from 2,148 ms to 809 ms and the
 instrumented peak fell from roughly 1.0 GB to about 4.0 MB with zero leaks. The
-baseline and follow-up evidence are in `applications/parser_tool/REPORT.md` and
-`applications/parser_tool/STRING_OPTIMIZATION_REPORT.md`; Phase 12.2 remains
+next measured follow-up added cached UTF-8 byte lengths: median tokenization
+fell again to 220 ms, with a 4,674 KB instrumented peak and zero leaks. The
+baseline and follow-up evidence are in `applications/parser_tool/REPORT.md`,
+`applications/parser_tool/STRING_OPTIMIZATION_REPORT.md`, and
+`applications/parser_tool/STRING_LENGTH_REPORT.md`; Phase 12.2 remains
 deferred.
 
 The first compiler implementation is written in C++23.
@@ -552,8 +555,9 @@ and project paths. The initial surface includes `write_line`, text-file
 process `exit`, wall/elapsed millisecond time, and string length,
 UTF-8 byte access, concatenation, search, prefix/suffix, and checked substring
 operations. Compiler-known allocating string helpers return reclaimable values;
-arbitrary FFI `c_string` values remain borrowed. See `LANGUAGE.md` for complete
-signatures and failure behavior.
+all Toro strings carry cached UTF-8 byte length, making `length` and bounds
+checks for `byte_at` O(1). Arbitrary FFI `c_string` values remain borrowed. See
+`LANGUAGE.md` for complete signatures and failure behavior.
 
 `run` forwards program output and returns its exit status. Its temporary C source
 and executable are removed after the program finishes or compilation fails.

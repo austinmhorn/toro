@@ -3,7 +3,8 @@
 > This report preserves the original A3 baseline and findings. The authorized
 > follow-up implemented UTF-8 byte scanning and reclaimable compiler-known
 > native strings; its post-change measurements are in
-> `STRING_OPTIMIZATION_REPORT.md`.
+> `STRING_OPTIMIZATION_REPORT.md`. The subsequent length-aware representation
+> and final measurements are in `STRING_LENGTH_REPORT.md`.
 
 ## 1. Executive summary
 
@@ -316,3 +317,14 @@ peak footprint fell from approximately 1.0 GB to 4,018 KB with zero leaked
 bytes. Arena placement remains 0 Stack / 0 Arena / 5 Heap, and Phase 12.2
 remains **Defer**. See `STRING_OPTIMIZATION_REPORT.md` for full methodology and
 remaining limitations.
+
+## 26. Length-aware string follow-up
+
+The next evidence-driven follow-up added cached UTF-8 byte length to the
+internal immutable string descriptor. `strings.length` and `strings.byte_at`
+now obtain length in O(1), while literals and compiler-known producers preserve
+lengths already known during construction. Median 4,000-iteration tokenization
+fell from 809 ms to 220 ms; parse/analyze measured 123 ms, for a 343 ms staged
+total. Leak checking reported a 4,674 KB peak and zero leaked bytes. Arena
+placement remains 0 Stack / 0 Arena / 5 Heap, and Phase 12.2 remains **Defer**.
+See `STRING_LENGTH_REPORT.md`.

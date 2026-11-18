@@ -180,3 +180,11 @@ does not rediscover string length on every access. Numeric parsing, source
 escapes, Unicode-level APIs, collection-valued Result ownership, and broader
 collection/arena reasoning remain separate future work. No next milestone is
 authorized by this report.
+
+## 25. Length-aware follow-up
+
+The measured follow-up is complete. Toro string values now carry cached UTF-8
+byte length, and `byte_at` no longer calls `strlen` for each indexed access.
+Median 4,000-iteration tokenization fell from 809 ms to 220 ms, with a 4,674 KB
+instrumented peak and zero leaks. See `STRING_LENGTH_REPORT.md` for the complete
+representation, timing, CPU-sample, and roadmap evidence.

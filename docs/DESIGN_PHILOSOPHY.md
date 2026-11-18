@@ -191,8 +191,10 @@ combined with process-lifetime native-returned string storage. The focused
 follow-up answered that evidence with UTF-8 byte traversal and reclaimable
 compiler-known native strings, without exposing ownership syntax or changing
 foreign-string ownership. It materially reduced time and high-water memory;
-repeated length discovery is now the dominant scanner cost. Independent-file
-parsing remains only a future candidate, so Phase 12.2 stays deferred.
+the measured follow-up then stored immutable UTF-8 byte length with each string
+value, eliminating the newly dominant repeated `strlen` cost without a source
+language redesign. Independent-file parsing remains only a future candidate,
+so Phase 12.2 stays deferred.
 
 ### References
 

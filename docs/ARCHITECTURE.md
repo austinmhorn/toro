@@ -684,6 +684,16 @@ indexed traversal. Strings remain immutable values; compiler-known
 native-produced strings use the same reclaimable lifetime model through
 collection elements and map keys.
 
+Generated `toro_string` values carry a data pointer, cached UTF-8 byte length,
+and optional ownership control block. Literal lengths are emitted at compile
+time, and compiler-known producers record lengths already established while
+constructing their output. Retain/release copies the descriptor unchanged.
+Length-sensitive helpers, string equality, and string-key hashing consume that
+metadata; only the conservative external-C copy boundary uses `strlen` to
+discover an otherwise unavailable length. This is a C-backend ABI detail; typed
+IR continues to describe borrowed versus managed strings without encoding the
+raw descriptor layout.
+
 ### Backend hardening baseline
 
 Backend discovery and emission use explicit insertion-order registries for
@@ -996,9 +1006,13 @@ the then-current native-string bridge's process-lifetime storage and allocating
 single-character substring/concat path were unsuitable for long-running parser
 workloads. The authorized follow-up added IR-visible managed strings,
 reclaimable compiler-known native values, and nonallocating UTF-8 byte
-traversal. It did not alter foreign `c_string` ownership or arena placement.
+traversal. A second evidence-driven follow-up cached UTF-8 byte length in every
+Toro string descriptor, eliminating repeated `strlen` from `byte_at` and
+`length` while preserving the same ownership and effect facts. It did not alter
+foreign `c_string` ownership or arena placement.
 See `applications/parser_tool/REPORT.md` and
-`applications/parser_tool/STRING_OPTIMIZATION_REPORT.md`.
+`applications/parser_tool/STRING_OPTIMIZATION_REPORT.md`, with final timing and
+runtime evidence in `applications/parser_tool/STRING_LENGTH_REPORT.md`.
 
 Later phases may explore, when evidence justifies them:
 

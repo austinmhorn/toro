@@ -83,7 +83,7 @@ void test_primitive_variables_arithmetic_and_assignment()
     expect_contains(output, "double toro_var_price = 19.99;", "decimal declaration");
     expect_contains(output, "bool toro_var_active = true;", "boolean declaration");
     expect_contains(output,
-        "toro_string toro_var_name = toro_string_literal(\"toro\");",
+        "toro_string toro_var_name = toro_string_literal(\"toro\", 4);",
         "string declaration");
     expect_contains(
         output,
@@ -156,7 +156,7 @@ void test_string_equality()
         "    return left == right\n"
         "}\n");
     expect_contains(output,
-        "strcmp((toro_arg_left).toro_data, (toro_arg_right).toro_data) == 0",
+        "(toro_arg_left).toro_length == (toro_arg_right).toro_length && memcmp(",
         "string equality");
 }
 
@@ -184,7 +184,7 @@ void test_struct_definition_construction_and_members()
     expect_contains(output, "int64_t toro_field_age;", "integer field");
     expect_contains(
         output,
-        "(toro_struct_Player){.toro_field_name = toro_string_literal(\"Austin\"), "
+        "(toro_struct_Player){.toro_field_name = toro_string_literal(\"Austin\", 6), "
         ".toro_field_age = 28, .toro_field_active = false, "
         ".toro_field_score = 0.0}",
         "explicit construction values and defaults");
@@ -301,7 +301,7 @@ void test_enum_representation_construction_and_handle()
     expect_contains(output, "toro_string toro_variant_text;", "string payload");
     expect_contains(
         output,
-        ".toro_payload.toro_variant_text = toro_string_literal(\"toro\")",
+        ".toro_payload.toro_variant_text = toro_string_literal(\"toro\", 4)",
         "payload variant construction");
     expect_contains(
         output,
@@ -392,7 +392,7 @@ void test_result_construction_handle_and_propagation()
         "ok construction");
     expect_contains(
         output,
-        ".toro_payload.toro_error = toro_string_literal(\"bad\")",
+        ".toro_payload.toro_error = toro_string_literal(\"bad\", 3)",
         "error construction");
     expect_contains(
         output,

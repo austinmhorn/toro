@@ -213,10 +213,13 @@ and directory-specific queries are not part of this first surface.
 Neither is a monotonic-duration source. `byte_at` returns an unsigned UTF-8
 encoding byte as `int`; it does not return a Unicode code point or grapheme
 cluster. Invalid indexes return `error` with a static diagnostic string.
-Strings remain immutable values. Compiler-known native producers return
-reclaimable Toro-owned values, while arbitrary FFI `c_string` values remain
-borrowed and externally owned. These lifetime details require no source-level
-ownership syntax.
+`length` and `byte_at` use the string value's cached UTF-8 byte length, so both
+operations are constant-time with respect to string size. Strings remain
+immutable values. Compiler-known native producers return reclaimable Toro-owned
+values, while arbitrary FFI `c_string` values remain borrowed and externally
+owned. These representation and lifetime details require no source-level
+ownership syntax. Strings remain NUL-terminated at the native boundary; this
+milestone does not add embedded-NUL source semantics.
 Input streams, argument-vector access, monotonic clocks/durations, directory
 operations, networking, regular expressions, and structured serialization
 remain deferred. Public C interoperability is defined separately below.
@@ -287,11 +290,12 @@ by arbitrary C code.
 
 `c_string` is a borrowed, immutable, non-owning view. C code must not mutate or
 free it. The view remains valid only as long as its source Toro string; the
-current immutable-string backend keeps produced strings alive for process
-lifetime, so no temporary dangling pointer crosses this boundary. A C function
-declared as returning `c_string` promises a non-null pointer whose lifetime is
-managed by the C API. Toro does not free it. FFI ABI types are not nullable in
-this milestone, and a declaration using `c_string?` is rejected.
+compiler keeps the source value alive for the operation or scope represented by
+the generated call. A C function declared as returning `c_string` promises a
+non-null pointer whose lifetime is managed by the C API. Toro does not adopt or
+free it, and reverse conversion to `string` remains unavailable. FFI ABI types
+are not nullable in this milestone, and a declaration using `c_string?` is
+rejected.
 
 Project builds may request ordinary linker libraries with a structured manifest
 entry:
@@ -759,7 +763,7 @@ Primitive types map directly to C:
 int     -> int64_t
 dec     -> double
 bool    -> bool
-string  -> const char*
+string  -> internal immutable descriptor (data, byte length, optional ownership)
 ```
 
 Generated names are deterministically prefixed to avoid collisions with C
@@ -786,9 +790,12 @@ Arrays own fixed contiguous storage and deep-copy that storage on value copies.
 Lists and maps use non-atomic reference-counted backing objects; ordinary copies
 retain the backing object and `clone()` allocates a separate one. Array/List
 indexing and indexed assignment are bounds checked. Map lookup of a missing key
-terminates through the runtime error path. The current immutable `const char*`
-string lowering remains sufficient because Toro does not yet produce dynamically
-owned strings; this milestone does not change string equality or printing.
+terminates through the runtime error path. String lowering uses an immutable
+descriptor carrying the NUL-terminated data pointer, UTF-8 byte length, and
+optional ownership control block. Literals carry compile-time lengths;
+compiler-known producers preserve their known output lengths; arbitrary FFI
+`c_string` values remain borrowed. Equality first checks byte length and then
+compares bytes.
 Nested `List`/`Map` instances and class-reference elements are supported. Nested
 `Array` elements and interface-valued elements remain explicit backend
 limitations. Collection-valued struct/class fields are also deferred because

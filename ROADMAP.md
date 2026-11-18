@@ -126,7 +126,10 @@ Completed behavior:
 - deterministic concrete C11 collection specializations and reusable helpers;
 - initially retained immutable `const char*` strings; the later parser-tool
   string milestone introduced reclaimable compiler-owned native strings while
-  preserving immutable value semantics and borrowed FFI `c_string` values.
+  preserving immutable value semantics and borrowed FFI `c_string` values;
+- the length-aware follow-up added cached UTF-8 byte lengths to string values,
+  O(1) `length`/`byte_at` bounds checks, and length-aware equality, hashing,
+  substring, concatenation, and search without changing source syntax.
 
 Map iteration and additional key hashing/equality definitions remain deferred
 until their source-level semantics are specified.
@@ -256,13 +259,15 @@ Completed behavior:
 - `Result`-based filesystem, environment, and substring failures;
 - reclaimable reference-counted storage for compiler-known native-produced
   strings, distinct from borrowed foreign `c_string` values;
+- cached UTF-8 byte lengths across borrowed and owned Toro string values, with
+  known producer lengths preserved instead of rediscovered by scans;
 - strict-C11, deterministic-emission, project-mode, and native integration
   coverage.
 
 Console input, argument vectors, monotonic duration APIs, directory operations,
-networking, regular expressions, structured serialization, richer owned-string
-runtime semantics remain deferred. Public C interoperability is provided by the
-narrow Phase 7.6 ABI boundary below.
+networking, regular expressions, structured serialization, Unicode scalar or
+grapheme iteration, and embedded-NUL string semantics remain deferred. Public C
+interoperability is provided by the narrow Phase 7.6 ABI boundary below.
 
 ## 7.5 Testing and formatting — completed
 
@@ -1141,8 +1146,8 @@ Completed as an application and evidence milestone:
 - found that all five AST allocation sites remain Heap because `List` storage
   is conservatively escaping, despite their bounded parse-unit arena region;
 - measured tokenization at approximately 95.8% of the staged profile, with
-  substring/concatenation allocation and current process-lifetime native
-  string retention as the dominant CPU and memory pressure;
+  substring/concatenation allocation and the then-current process-lifetime
+  native string retention as the dominant CPU and memory pressure;
 - found zero leaks, but a high repeated-tokenization memory watermark, making
   nonallocating character iteration and reclaimable temporary strings the
   highest-priority application finding;
@@ -1166,6 +1171,15 @@ bytes, replacing the prior approximately 1.0 GB shutdown-retained peak. The new
 dominant tokenizer cost is repeated length discovery in bounds-checked byte
 access. Arena evidence is unchanged and Phase 12.2 remains **Defer**. See
 `applications/parser_tool/STRING_OPTIMIZATION_REPORT.md`.
+
+The subsequent length-aware string follow-up is complete. The generated string
+descriptor now carries cached UTF-8 byte length, so `strings.length`,
+`strings.byte_at`, equality, string-key hashing, substring, concatenation, and
+search avoid redundant scans. Median tokenization fell again to 220 ms, with a
+123 ms parse/analyze median and 343 ms staged total. CPU sampling found no
+`strlen` frames; `leaks --atExit` measured a 4,674 KB peak and zero leaks.
+Arena evidence remains 0 Stack / 0 Arena / 5 Heap and Phase 12.2 remains
+**Defer**. See `applications/parser_tool/STRING_LENGTH_REPORT.md`.
 
 Before 1.0, build representative real applications in target domains.
 
